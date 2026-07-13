@@ -10,9 +10,11 @@ from modules.finance.repository.fiscal_repository import FiscalRepository
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.service.audit_service import AuditService
+from modules.inventory.adapters.procurement_adapter import ProcurementIssueAdapter
 from modules.procurement.domain.enums import ProcEntityType, ReturnStatus
 from modules.procurement.domain.exceptions import InvalidDocumentState, SegregationOfDutiesError
 from modules.procurement.models.return_doc import ProcReturnHeader
+from modules.procurement.repository.grn_repository import GrnRepository
 from modules.procurement.repository.invoice_repository import InvoiceRepository
 from modules.procurement.repository.order_repository import OrderRepository
 from modules.procurement.repository.return_repository import ReturnRepository
@@ -28,11 +30,13 @@ class ReturnService:
         self._repo = ReturnRepository(db)
         self._invoices = InvoiceRepository(db)
         self._orders = OrderRepository(db)
+        self._grns = GrnRepository(db)
         self._fiscal = FiscalRepository(db)
         self._scope = ProcurementScopeValidator(db)
         self._engine = ReturnEngine()
         self._numbers = DocumentNumberService(db)
         self._governance = ProcurementGovernanceService(db)
+        self._inventory = ProcurementIssueAdapter(db)
         self._audit = AuditService(db)
 
     def list_returns(self, ctx: TenantContext, company_id: UUID | None = None):
@@ -184,4 +188,13 @@ class ReturnService:
                     self._engine.apply_return_to_order_line(
                         order_line, Decimal(str(line.quantity))
                     )
+        warehouse_id = None
+        if header.grn_header_id:
+            grn = self._grns.get_grn(ctx, header.grn_header_id)
+            if grn is not None:
+                warehouse_id = grn.warehouse_reference
+        if warehouse_id is not None:
+            self._inventory.issue_purchase_return(
+                ctx, return_id=return_id, warehouse_id=warehouse_id
+            )
         return self._repo.update_return(ctx, return_id, status=ReturnStatus.RECEIVED.value)

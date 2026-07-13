@@ -10,6 +10,7 @@ from modules.finance.repository.fiscal_repository import FiscalRepository
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.service.audit_service import AuditService
+from modules.inventory.adapters.sales_adapter import SalesInventoryAdapter
 from modules.sales.domain.enums import ReturnStatus, SalesEntityType
 from modules.sales.domain.exceptions import InvalidDocumentState, SegregationOfDutiesError
 from modules.sales.models.return_doc import SalesReturnHeader
@@ -33,6 +34,7 @@ class ReturnService:
         self._engine = ReturnEngine()
         self._numbers = DocumentNumberService(db)
         self._governance = SalesGovernanceService(db)
+        self._inventory = SalesInventoryAdapter(db)
         self._audit = AuditService(db)
 
     def list_returns(self, ctx: TenantContext, company_id: UUID | None = None):
@@ -177,7 +179,7 @@ class ReturnService:
             on_approved=on_approved,
         )
 
-    def receive(self, ctx: TenantContext, return_id: UUID):
+    def receive(self, ctx: TenantContext, return_id: UUID, *, warehouse_id: UUID | None = None):
         header = self.get_return(ctx, return_id)
         if header.status != ReturnStatus.APPROVED.value:
             raise InvalidDocumentState("Only approved returns can be received")
@@ -189,4 +191,6 @@ class ReturnService:
                     self._engine.apply_return_to_order_line(
                         order_line, Decimal(str(line.quantity))
                     )
+        if warehouse_id is not None:
+            self._inventory.receive_return(ctx, return_id, warehouse_id)
         return self._repo.update_return(ctx, return_id, status=ReturnStatus.RECEIVED.value)

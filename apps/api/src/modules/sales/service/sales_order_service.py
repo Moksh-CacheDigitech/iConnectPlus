@@ -10,6 +10,7 @@ from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.service.audit_service import AuditService
 from modules.foundation.service.rbac_service import RBACService
+from modules.inventory.adapters.sales_adapter import SalesInventoryAdapter
 from modules.sales.domain.enums import OrderStatus, SalesEntityType
 from modules.sales.domain.exceptions import InvalidDocumentState
 from modules.sales.domain.value_objects import LineTotals
@@ -34,6 +35,7 @@ class SalesOrderService:
         self._numbers = DocumentNumberService(db)
         self._governance = SalesGovernanceService(db)
         self._rbac = RBACService(db)
+        self._inventory = SalesInventoryAdapter(db)
         self._audit = AuditService(db)
 
     def list_orders(self, ctx: TenantContext, company_id: UUID | None = None):
@@ -140,7 +142,14 @@ class SalesOrderService:
             workflow_instance_id=instance.id,
         )
 
-    def confirm(self, ctx: TenantContext, order_id: UUID, *, credit_override: bool = False):
+    def confirm(
+        self,
+        ctx: TenantContext,
+        order_id: UUID,
+        *,
+        credit_override: bool = False,
+        warehouse_id: UUID | None = None,
+    ):
         order = self.get_order(ctx, order_id)
         self._engine.validate_confirmable(order)
         if credit_override and not self._rbac.has_permission(
@@ -156,11 +165,16 @@ class SalesOrderService:
                 additional_amount=Decimal(str(order.total_amount)),
                 raise_on_fail=not credit_override,
             )
+        reservation_status = None
+        if warehouse_id is not None:
+            self._inventory.reserve_order(ctx, order_id, warehouse_id)
+            reservation_status = "reserved"
         updated = self._repo.update_order(
             ctx,
             order_id,
             status=OrderStatus.CONFIRMED.value,
             workflow_status=WorkflowStatus.APPROVED.value,
+            reservation_status=reservation_status,
         )
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,
@@ -179,7 +193,14 @@ class SalesOrderService:
             OrderStatus.CANCELLED.value,
         }:
             raise InvalidDocumentState("Order cannot be cancelled in its current state")
-        return self._repo.update_order(ctx, order_id, status=OrderStatus.CANCELLED.value)
+        if order.reservation_status == "reserved":
+            self._inventory.release_order(ctx, order_id)
+        return self._repo.update_order(
+            ctx,
+            order_id,
+            status=OrderStatus.CANCELLED.value,
+            reservation_status="released",
+        )
 
     def delete(self, ctx: TenantContext, order_id: UUID) -> None:
         order = self.get_order(ctx, order_id)

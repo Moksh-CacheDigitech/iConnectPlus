@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.service.audit_service import AuditService
+from modules.inventory.adapters.sales_adapter import SalesInventoryAdapter
 from modules.sales.domain.enums import DeliveryStatus, SalesEntityType
 from modules.sales.models.delivery import SalesDeliveryHeader
 from modules.sales.repository.delivery_repository import DeliveryRepository
@@ -26,6 +27,7 @@ class DeliveryService:
         self._scope = SalesScopeValidator(db)
         self._engine = DeliveryEngine()
         self._numbers = DocumentNumberService(db)
+        self._inventory = SalesInventoryAdapter(db)
         self._audit = AuditService(db)
 
     def list_deliveries(self, ctx: TenantContext, company_id: UUID | None = None):
@@ -130,6 +132,8 @@ class DeliveryService:
             raise NotFoundException("Sales order not found")
         order_lines_by_id = {ln.id: ln for ln in order.lines}
         self._engine.confirm_delivery(delivery, order, order_lines_by_id)
+        if delivery.warehouse_reference is not None:
+            self._inventory.issue_delivery(ctx, delivery_id)
         delivery.shipped_at = datetime.now(timezone.utc)
         delivery.shipped_by = ctx.user_id
         self._db.flush()

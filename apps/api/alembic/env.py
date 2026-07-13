@@ -17,6 +17,7 @@ import modules.master_data.models  # noqa: F401 — register ORM metadata
 import modules.organization.models  # noqa: F401 — register ORM metadata
 import modules.procurement.models  # noqa: F401 — register ORM metadata
 import modules.sales.models  # noqa: F401 — register ORM metadata
+import modules.inventory.models  # noqa: F401 — register ORM metadata
 
 config = context.config
 

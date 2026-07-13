@@ -8,19 +8,20 @@ from sqlalchemy.orm import Session
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.service.audit_service import AuditService
+from modules.inventory.adapters.procurement_adapter import ProcurementInventoryAdapter
 from modules.procurement.domain.enums import GrnStatus, ProcEntityType
 from modules.procurement.models.grn import ProcGrnHeader
 from modules.procurement.repository.grn_repository import GrnRepository
 from modules.procurement.repository.order_repository import OrderRepository
 from modules.procurement.service.document_number_service import DocumentNumberService
 from modules.procurement.service.engines.grn_engine import GrnEngine
-from modules.procurement.service.inventory.stub_adapter import NoOpInventoryAdapter
+from modules.procurement.service.inventory.port import InventoryReceiptPort
 from modules.procurement.service.procurement_scope_validator import ProcurementScopeValidator
 
 
 class GrnService:
     def __init__(
-        self, db: Session, *, inventory_adapter: NoOpInventoryAdapter | None = None
+        self, db: Session, *, inventory_adapter: InventoryReceiptPort | None = None
     ) -> None:
         self._db = db
         self._repo = GrnRepository(db)
@@ -28,7 +29,7 @@ class GrnService:
         self._scope = ProcurementScopeValidator(db)
         self._engine = GrnEngine()
         self._numbers = DocumentNumberService(db)
-        self._inventory = inventory_adapter or NoOpInventoryAdapter()
+        self._inventory = inventory_adapter or ProcurementInventoryAdapter(db)
         self._audit = AuditService(db)
 
     def list_grns(self, ctx: TenantContext, company_id: UUID | None = None):

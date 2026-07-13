@@ -64,6 +64,7 @@ module = [
     "modules.finance.*",
     "modules.sales.*",
     "modules.procurement.*",
+    "modules.inventory.*",
     "security.jwt",
     "security.password",
     "security.rbac",
@@ -76,7 +77,16 @@ disable_error_code = ["type-arg", "no-untyped-call", "no-untyped-def", "misc", "
 [[tool.mypy.overrides]]
 module = ["tests.*"]
 disallow_untyped_defs = false
-disable_error_code = ["type-arg"]
+warn_return_any = false
+disable_error_code = [
+    "type-arg",
+    "no-untyped-call",
+    "no-untyped-def",
+    "arg-type",
+    "list-item",
+    "misc",
+    "attr-defined",
+]
 
 [[tool.mypy.overrides]]
 module = ["celery.*", "jwt.*", "bcrypt.*", "pyotp.*", "redis.*"]
