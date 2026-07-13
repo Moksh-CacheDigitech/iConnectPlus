@@ -1,0 +1,77 @@
+"""Notification router."""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from database.session import get_db
+from modules.foundation.dependencies import require_permission
+from modules.foundation.domain.value_objects import TenantContext
+from modules.foundation.schemas import NotificationSendRequest, NotificationTemplateCreateRequest
+from modules.foundation.service.notification_service import NotificationService
+from shared.schemas import APIResponse
+
+router = APIRouter(prefix="/notifications", tags=["Notifications"])
+
+
+@router.get("/templates", response_model=APIResponse[list])
+def list_templates(
+    ctx: Annotated[TenantContext, Depends(require_permission("foundation.notification:read"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[list]:
+    templates = NotificationService(db).list_templates(ctx.tenant_id)
+    return APIResponse(message="Templates retrieved", data=[t.__dict__ for t in templates])
+
+
+@router.post("/templates", response_model=APIResponse[dict])
+def create_template(
+    body: NotificationTemplateCreateRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("foundation.notification:create"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[dict]:
+    template = NotificationService(db).create_template(
+        tenant_id=ctx.tenant_id,
+        template_code=body.template_code,
+        template_name=body.template_name,
+        channel=body.channel,
+        body_template=body.body_template,
+        subject_template=body.subject_template,
+        created_by=ctx.user_id,
+    )
+    db.commit()
+    return APIResponse(message="Template created", data=template.__dict__)
+
+
+@router.get("/events", response_model=APIResponse[list])
+def list_events(
+    ctx: Annotated[TenantContext, Depends(require_permission("foundation.notification:read"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[list]:
+    events = NotificationService(db).list_events(ctx.tenant_id)
+    return APIResponse(
+        message="Events retrieved",
+        data=[{"id": str(e.id), "status": e.status, "event_type": e.event_type} for e in events],
+    )
+
+
+@router.post("/send", response_model=APIResponse[dict])
+def send_notification(
+    body: NotificationSendRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("foundation.notification:create"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[dict]:
+    event = NotificationService(db).send(
+        tenant_id=ctx.tenant_id,
+        template_id=body.template_id,
+        event_type=body.event_type,
+        recipient_user_id=body.recipient_user_id,
+        recipient_address=body.recipient_address,
+        payload_json=body.payload_json,
+        created_by=ctx.user_id,
+    )
+    db.commit()
+    return APIResponse(
+        message="Notification queued",
+        data={"id": str(event.id), "status": event.status},
+    )

@@ -1,0 +1,54 @@
+# =============================================================================
+# Enterprise ERP Platform — Environment Configuration
+# Copy to .env and adjust values for local development.
+# =============================================================================
+
+# Application
+APP_NAME=Enterprise ERP API
+APP_VERSION=0.1.0
+ENVIRONMENT=development
+DEBUG=true
+LOG_LEVEL=INFO
+
+# API
+API_HOST=0.0.0.0
+API_PORT=8000
+CORS_ORIGINS=http://localhost:3000
+
+# Database (PostgreSQL)
+POSTGRES_USER=erp
+POSTGRES_PASSWORD=erp_dev_password
+POSTGRES_DB=erp
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+DATABASE_URL=postgresql+psycopg://erp:erp_dev_password@localhost:5432/erp
+
+# Redis
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_URL=redis://localhost:6379/0
+
+# Celery
+CELERY_BROKER_URL=amqp://erp:erp_dev_password@localhost:5672//
+CELERY_RESULT_BACKEND=redis://localhost:6379/1
+
+# RabbitMQ
+RABBITMQ_USER=erp
+RABBITMQ_PASSWORD=erp_dev_password
+RABBITMQ_HOST=localhost
+RABBITMQ_PORT=5672
+
+# MinIO (S3-compatible)
+MINIO_ROOT_USER=erp_minio
+MINIO_ROOT_PASSWORD=erp_minio_password
+MINIO_ENDPOINT=localhost:9000
+MINIO_BUCKET=erp-documents
+
+# OpenSearch
+OPENSEARCH_HOST=localhost
+OPENSEARCH_PORT=9200
+OPENSEARCH_URL=http://localhost:9200
+
+# Frontend
+NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+NEXT_PUBLIC_APP_NAME=Enterprise ERP

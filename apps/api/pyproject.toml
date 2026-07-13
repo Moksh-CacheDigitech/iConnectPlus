@@ -1,0 +1,88 @@
+[project]
+name = "erp-api"
+version = "0.1.0"
+description = "Enterprise ERP Platform API"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0,<1.0",
+    "uvicorn[standard]>=0.32.0,<1.0",
+    "sqlalchemy>=2.0.36,<3.0",
+    "alembic>=1.14.0,<2.0",
+    "pydantic>=2.10.0,<3.0",
+    "pydantic-settings>=2.6.0,<3.0",
+    "psycopg[binary]>=3.2.0,<4.0",
+    "celery>=5.4.0,<6.0",
+    "redis>=5.2.0,<6.0",
+    "python-json-logger>=3.2.0,<4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0,<9.0",
+    "pytest-asyncio>=0.24.0,<1.0",
+    "httpx>=0.28.0,<1.0",
+    "ruff>=0.9.0,<1.0",
+    "mypy>=1.13.0,<2.0",
+]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/modules/foundation/domain/enums.py" = ["UP042"]
+"src/modules/organization/domain/enums.py" = ["UP042"]
+"src/modules/master_data/domain/enums.py" = ["UP042"]
+"src/modules/finance/domain/enums.py" = ["UP042"]
+"src/modules/finance/**" = ["E501", "SIM102"]
+"src/tests/**" = ["SIM117"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+mypy_path = "src"
+explicit_package_bases = true
+packages = ["core", "database", "middleware", "security", "modules", "shared", "workers"]
+
+[[tool.mypy.overrides]]
+module = [
+    "modules.foundation.*",
+    "modules.organization.*",
+    "modules.master_data.*",
+    "modules.finance.*",
+    "modules.sales.*",
+    "security.jwt",
+    "security.password",
+    "security.rbac",
+    "core.redis",
+]
+disallow_untyped_defs = false
+warn_return_any = false
+disable_error_code = ["type-arg", "no-untyped-call", "no-untyped-def", "misc", "attr-defined"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disable_error_code = ["type-arg"]
+
+[[tool.mypy.overrides]]
+module = ["celery.*", "jwt.*", "bcrypt.*", "pyotp.*", "redis.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["src/tests"]
+pythonpath = ["src"]

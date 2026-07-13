@@ -1,0 +1,91 @@
+---
+description: Enterprise ERP architecture baseline — locked stack, patterns, and governance
+alwaysApply: true
+---
+
+# Enterprise ERP Platform — Architecture Rules
+
+This is an **Enterprise ERP Platform**. Architecture Baseline **v1.1** is locked.
+
+## Documentation Hierarchy (Read Before Code)
+
+Before generating any code, follow these sources in order:
+
+1. `docs/01_BRD`
+2. `docs/02_FRD`
+3. `docs/03_SDD`
+4. `docs/04_DBS`
+5. `docs/05_ARCHITECTURE_LOCK`
+
+**Never violate** `docs/05_ARCHITECTURE_LOCK/ERP_Architecture_Lock_Report_v1.1.md`.
+
+## Locked Technology Stack
+
+### Frontend
+
+- Next.js 16+
+- TypeScript
+- Tailwind
+- ShadCN UI
+
+### Backend
+
+- Python 3.13+
+- FastAPI
+- SQLAlchemy 2.0
+- Alembic
+- Pydantic v2
+- Celery
+
+### Database
+
+- PostgreSQL
+
+## Architecture Pattern
+
+- **Clean Architecture**
+- **Domain Driven Design (DDD)**
+- **Modular Monolith**
+
+## Mandatory Backend Flow
+
+```text
+Router
+  ↓
+Service
+  ↓
+Repository
+  ↓
+Database
+```
+
+- Routers are thin — delegate to services (DG-02).
+- SQLAlchemy models live in the infrastructure layer only (PY-03).
+- Domain layer must remain independent of ORM and framework details.
+- Pydantic v2 schemas are separate from ORM models.
+
+## Database Rules (DBS v1.1)
+
+- Follow DBS naming and table standards.
+- Use **UUID** primary keys.
+- Use **audit columns** (`created_at`, `created_by`, `updated_at`, `updated_by`, `version`).
+- Use **tenant isolation** (`tenant_id`, `company_id`, `branch_id` on transactional tables).
+- Use **soft delete** — no physical DELETE on business tables.
+- Use **Alembic migrations only** for schema changes (PY-04).
+
+## Forbidden
+
+- NestJS
+- Prisma
+- MongoDB as primary database
+- Business logic inside routers
+- Direct database access from UI
+- Direct SQL inside API handlers
+- Cross-module database access
+- Bypassing Workflow, Notification, or Audit engines
+
+## Module Development Order
+
+Foundation → Organization → Master Data → Authentication / RBAC / Workflow / Notification / Audit → Business Modules.
+
+Do not start business modules until platform foundation dependencies are in place.
