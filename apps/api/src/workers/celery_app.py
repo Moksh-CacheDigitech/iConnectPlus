@@ -23,7 +23,7 @@ celery_app.conf.update(
 
 # Domain task modules registered in Sprint 1.
 celery_app.autodiscover_tasks(
-    ["workers", "modules.foundation", "modules.finance", "modules.sales"],
+    ["workers", "modules.foundation", "modules.finance", "modules.sales", "modules.procurement"],
     related_name="tasks",
     force=True,
 )

@@ -63,6 +63,7 @@ module = [
     "modules.master_data.*",
     "modules.finance.*",
     "modules.sales.*",
+    "modules.procurement.*",
     "security.jwt",
     "security.password",
     "security.rbac",
