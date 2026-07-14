@@ -35,6 +35,7 @@ celery_app.autodiscover_tasks(
         "modules.crm",
         "modules.hr",
         "modules.payroll",
+        "modules.recruitment",
     ],
     related_name="tasks",
     force=True,
