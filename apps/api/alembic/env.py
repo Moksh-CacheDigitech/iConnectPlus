@@ -24,6 +24,7 @@ import modules.crm.models  # noqa: F401 — register ORM metadata
 import modules.hr.models  # noqa: F401 — register ORM metadata
 import modules.payroll.models  # noqa: F401 — register ORM metadata
 import modules.recruitment.models  # noqa: F401 — register ORM metadata
+import modules.project.models  # noqa: F401 — register ORM metadata
 
 config = context.config
 

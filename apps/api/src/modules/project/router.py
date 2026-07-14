@@ -1,0 +1,48 @@
+"""Project module router aggregation."""
+
+from fastapi import APIRouter
+
+from modules.project.routers import (
+    change_requests_router,
+    project_budgets_router,
+    project_comments_router,
+    project_costs_router,
+    project_documents_router,
+    project_issues_router,
+    project_milestones_router,
+    project_notifications_router,
+    project_phases_router,
+    project_risks_router,
+    project_status_history_router,
+    project_tasks_router,
+    projects_router,
+    reports_router,
+    resource_allocations_router,
+    resource_plans_router,
+    task_assignments_router,
+    task_dependencies_router,
+    timesheet_entries_router,
+    timesheets_router,
+)
+
+project_router = APIRouter(prefix="/projects")
+project_router.include_router(projects_router)
+project_router.include_router(project_phases_router)
+project_router.include_router(project_milestones_router)
+project_router.include_router(project_tasks_router)
+project_router.include_router(task_dependencies_router)
+project_router.include_router(task_assignments_router)
+project_router.include_router(timesheets_router)
+project_router.include_router(timesheet_entries_router)
+project_router.include_router(resource_plans_router)
+project_router.include_router(resource_allocations_router)
+project_router.include_router(project_budgets_router)
+project_router.include_router(project_costs_router)
+project_router.include_router(project_issues_router)
+project_router.include_router(project_risks_router)
+project_router.include_router(change_requests_router)
+project_router.include_router(project_documents_router)
+project_router.include_router(project_comments_router)
+project_router.include_router(project_status_history_router)
+project_router.include_router(project_notifications_router)
+project_router.include_router(reports_router)
