@@ -1,0 +1,527 @@
+"""Generate Sprint 12 Payroll module artifacts. Run from apps/api: python scripts/_gen_payroll_module.py"""
+from __future__ import annotations
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+PAY = SRC / "modules" / "payroll"
+ALEMBIC = ROOT / "alembic" / "versions"
+TESTS = SRC / "tests"
+SHARED = SRC / "shared"
+
+FILES_WRITTEN: list[Path] = []
+
+
+def w(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not content.endswith("\n"):
+        content += "\n"
+    path.write_text(content, encoding="utf-8")
+    FILES_WRITTEN.append(path)
+    print("wrote", path.relative_to(ROOT))
+
+
+def patch_file(path: Path, old: str, new: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    if new.strip() in text:
+        print("skip (already)", path.relative_to(ROOT))
+        return
+    if old not in text:
+        raise SystemExit(f"patch failed in {path}: marker not found")
+    path.write_text(text.replace(old, new), encoding="utf-8")
+    print("patched", path.relative_to(ROOT))
+
+
+# ---------------------------------------------------------------------------
+# Table registry: (module, ORM class, repo name, branch_scoped)
+# ---------------------------------------------------------------------------
+
+TABLES: list[tuple[str, str, str, bool]] = [
+    ("payroll_period", "PayPayrollPeriod", "PayrollPeriod", False),
+    ("salary_structure", "PaySalaryStructure", "SalaryStructure", False),
+    ("salary_component", "PaySalaryComponent", "SalaryComponent", False),
+    ("salary_structure_line", "PaySalaryStructureLine", "SalaryStructureLine", False),
+    ("employee_salary", "PayEmployeeSalary", "EmployeeSalary", True),
+    ("employee_salary_component", "PayEmployeeSalaryComponent", "EmployeeSalaryComponent", True),
+    ("earning_type", "PayEarningType", "EarningType", False),
+    ("deduction_type", "PayDeductionType", "DeductionType", False),
+    ("payroll_run", "PayPayrollRun", "PayrollRun", True),
+    ("payroll_run_line", "PayPayrollRunLine", "PayrollRunLine", True),
+    ("payslip", "PayPayslip", "Payslip", True),
+    ("tax_configuration", "PayTaxConfiguration", "TaxConfiguration", False),
+    ("statutory_contribution", "PayStatutoryContribution", "StatutoryContribution", False),
+    ("bonus", "PayBonus", "Bonus", True),
+    ("reimbursement", "PayReimbursement", "Reimbursement", True),
+    ("loan", "PayLoan", "Loan", True),
+    ("loan_installment", "PayLoanInstallment", "LoanInstallment", True),
+    ("payroll_adjustment", "PayPayrollAdjustment", "PayrollAdjustment", True),
+    ("payroll_posting", "PayPayrollPosting", "PayrollPosting", True),
+    ("payroll_summary", "PayPayrollSummary", "PayrollSummary", False),
+]
+
+CLASS_MAP = {t[0]: t[1] for t in TABLES}
+
+MIGRATIONS: list[tuple[str, str | list[str], str]] = [
+    ("0179_create_payroll_schema", "schema", "0178_seed_hr_workflows"),
+    ("0180_pay_payroll_period", "payroll_period", "0179_create_payroll_schema"),
+    ("0181_pay_earn_deduct_types", ["earning_type", "deduction_type"], "0180_pay_payroll_period"),
+    ("0182_pay_salary_component", "salary_component", "0181_pay_earn_deduct_types"),
+    ("0183_pay_salary_structure", "salary_structure", "0182_pay_salary_component"),
+    ("0184_pay_sal_struct_line", "salary_structure_line", "0183_pay_salary_structure"),
+    ("0185_pay_employee_salary", "employee_salary", "0184_pay_sal_struct_line"),
+    ("0186_pay_emp_salary_comp", "employee_salary_component", "0185_pay_employee_salary"),
+    ("0187_pay_tax_configuration", "tax_configuration", "0186_pay_emp_salary_comp"),
+    ("0188_pay_statutory_contrib", "statutory_contribution", "0187_pay_tax_configuration"),
+    ("0189_pay_payroll_run", "payroll_run", "0188_pay_statutory_contrib"),
+    ("0190_pay_payroll_run_line", "payroll_run_line", "0189_pay_payroll_run"),
+    ("0191_pay_payslip", "payslip", "0190_pay_payroll_run_line"),
+    ("0192_pay_bonus", "bonus", "0191_pay_payslip"),
+    ("0193_pay_reimbursement", "reimbursement", "0192_pay_bonus"),
+    ("0194_pay_loan", "loan", "0193_pay_reimbursement"),
+    ("0195_pay_loan_installment", "loan_installment", "0194_pay_loan"),
+    ("0196_pay_payroll_adjustment", "payroll_adjustment", "0195_pay_loan_installment"),
+    ("0197_pay_payroll_posting", "payroll_posting", "0196_pay_payroll_adjustment"),
+    ("0198_pay_payroll_summary", "payroll_summary", "0197_pay_payroll_posting"),
+    ("0199_seed_payroll_permissions", "seed_perms", "0198_pay_payroll_summary"),
+    ("0200_seed_payroll_workflows", "seed_wf", "0199_seed_payroll_permissions"),
+]
+
+
+def gen_scaffold() -> None:
+    w(PAY / "__init__.py", '"""Payroll Management module — Sprint 12."""\n')
+    w(PAY / "domain" / "__init__.py", '"""Payroll domain layer."""\n')
+    w(PAY / "adapters" / "__init__.py", '"""Payroll cross-module adapters."""\n')
+    w(PAY / "service" / "__init__.py", '"""Payroll services — populated after generation."""\n')
+    w(PAY / "service" / "engines" / "__init__.py", '"""Payroll engines — populated after generation."""\n')
+    w(PAY / "repository" / "__init__.py", '"""Payroll repositories."""\n')
+    w(PAY / "models" / "__init__.py", '"""Payroll models — populated after generation."""\n')
+
+    w(
+        PAY / "models" / "mixins.py",
+        '''
+"""Payroll ORM mixin bundles per ERD_12."""
+
+from database.mixins import (
+    AuditMixin,
+    BranchMixin,
+    CompanyMixin,
+    SoftDeleteMixin,
+    TenantMixin,
+    VersionMixin,
+)
+
+PayMasterMixin = (
+    AuditMixin,
+    TenantMixin,
+    CompanyMixin,
+    SoftDeleteMixin,
+    VersionMixin,
+)
+
+PayTransactionMixin = (
+    AuditMixin,
+    TenantMixin,
+    CompanyMixin,
+    BranchMixin,
+    SoftDeleteMixin,
+    VersionMixin,
+)
+
+PayDetailMixin = (
+    AuditMixin,
+    TenantMixin,
+    CompanyMixin,
+    SoftDeleteMixin,
+    VersionMixin,
+)
+''',
+    )
+
+
+def gen_domain() -> None:
+    w(
+        PAY / "domain" / "enums.py",
+        '''
+"""Payroll domain enums per ERD_12 §11."""
+
+from enum import Enum
+
+
+class ActiveInactive(str, Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+
+
+class PayrollPeriodStatus(str, Enum):
+    OPEN = "open"
+    PROCESSING = "processing"
+    APPROVED = "approved"
+    CLOSED = "closed"
+    CANCELLED = "cancelled"
+
+
+class SalaryStructureStatus(str, Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+
+
+class TaxConfigurationStatus(str, Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class EmployeeSalaryStatus(str, Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    ENDED = "ended"
+    CANCELLED = "cancelled"
+
+
+class PayrollRunStatus(str, Enum):
+    DRAFT = "draft"
+    CALCULATED = "calculated"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    POSTED = "posted"
+    PAID = "paid"
+    CANCELLED = "cancelled"
+
+
+class RunLineStatus(str, Enum):
+    CALCULATED = "calculated"
+    ADJUSTED = "adjusted"
+    LOCKED = "locked"
+    CANCELLED = "cancelled"
+
+
+class PayslipStatus(str, Enum):
+    GENERATED = "generated"
+    ISSUED = "issued"
+    VOID = "void"
+
+
+class DeliveryStatus(str, Enum):
+    PENDING = "pending"
+    EMAILED = "emailed"
+    VIEWED = "viewed"
+    FAILED = "failed"
+
+
+class PaymentStatus(str, Enum):
+    UNPAID = "unpaid"
+    PROCESSING = "processing"
+    PAID = "paid"
+    FAILED = "failed"
+
+
+class BonusStatus(str, Enum):
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    PAID = "paid"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+
+class ReimbursementStatus(str, Enum):
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    MANAGER_APPROVED = "manager_approved"
+    FINANCE_APPROVED = "finance_approved"
+    PAID = "paid"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+
+class LoanStatus(str, Enum):
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    ACTIVE = "active"
+    CLOSED = "closed"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+
+class LoanInstallmentStatus(str, Enum):
+    SCHEDULED = "scheduled"
+    RECOVERED = "recovered"
+    WAIVED = "waived"
+    OVERDUE = "overdue"
+    CANCELLED = "cancelled"
+
+
+class AdjustmentStatus(str, Enum):
+    DRAFT = "draft"
+    APPLIED = "applied"
+    CANCELLED = "cancelled"
+
+
+class PostingStatus(str, Enum):
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    POSTED = "posted"
+    FAILED = "failed"
+    REVERSED = "reversed"
+
+
+class SummaryStatus(str, Enum):
+    DRAFT = "draft"
+    FINALIZED = "finalized"
+
+
+class PayEntityType(str, Enum):
+    PAYROLL_RUN = "payroll_run"
+    PAYSLIP = "payslip"
+    EMPLOYEE_SALARY = "employee_salary"
+    BONUS = "bonus"
+    REIMBURSEMENT = "reimbursement"
+    LOAN = "loan"
+    PAYROLL_ADJUSTMENT = "payroll_adjustment"
+    PAYROLL_POSTING = "payroll_posting"
+
+
+CODE_PREFIXES: dict[PayEntityType, tuple[str, int]] = {
+    PayEntityType.PAYROLL_RUN: ("PRUN-", 6),
+    PayEntityType.PAYSLIP: ("PS-", 6),
+    PayEntityType.EMPLOYEE_SALARY: ("ESAL-", 6),
+    PayEntityType.BONUS: ("BON-", 6),
+    PayEntityType.REIMBURSEMENT: ("REIM-", 6),
+    PayEntityType.LOAN: ("LOAN-", 6),
+    PayEntityType.PAYROLL_ADJUSTMENT: ("PADJ-", 6),
+    PayEntityType.PAYROLL_POSTING: ("PPOST-", 6),
+}
+''',
+    )
+
+    exceptions = [
+        "PayrollPeriod",
+        "SalaryStructure",
+        "SalaryComponent",
+        "SalaryStructureLine",
+        "EmployeeSalary",
+        "EmployeeSalaryComponent",
+        "EarningType",
+        "DeductionType",
+        "PayrollRun",
+        "PayrollRunLine",
+        "Payslip",
+        "TaxConfiguration",
+        "StatutoryContribution",
+        "Bonus",
+        "Reimbursement",
+        "Loan",
+        "LoanInstallment",
+        "PayrollAdjustment",
+        "PayrollPosting",
+        "PayrollSummary",
+    ]
+    exc_lines = [
+        f'''
+class Invalid{name}State(ConflictException):
+    def __init__(self, message: str = "Invalid {name.replace("Payroll", "payroll ").lower()} state") -> None:
+        super().__init__(message)
+'''
+        for name in exceptions
+    ]
+    w(
+        PAY / "domain" / "exceptions.py",
+        '"""Payroll domain exceptions."""\n\nfrom core.exceptions import ConflictException\n'
+        + "".join(exc_lines),
+    )
+
+    w(
+        PAY / "domain" / "value_objects.py",
+        '''
+"""Payroll value objects."""
+
+from dataclasses import dataclass
+from decimal import Decimal
+
+
+@dataclass(frozen=True)
+class MoneyAmount:
+    value: Decimal
+    currency_code: str
+
+    def __post_init__(self) -> None:
+        if self.value < 0:
+            raise ValueError("Money amount cannot be negative")
+        if not self.currency_code:
+            raise ValueError("Currency code required")
+
+
+@dataclass(frozen=True)
+class PaidDays:
+    value: Decimal
+
+    def __post_init__(self) -> None:
+        if self.value < 0:
+            raise ValueError("Paid days cannot be negative")
+''',
+    )
+
+    agg_lines = "\n".join(
+        f'    {t[2].upper().replace(" ", "_")} = "pay_{t[0]}"' for t in TABLES
+    )
+    w(
+        PAY / "domain" / "entities.py",
+        f'''"""Payroll domain entity markers (aggregates map 1:1 to ORM headers)."""
+
+from enum import Enum
+
+
+class PayAggregate(str, Enum):
+{agg_lines}
+''',
+    )
+
+
+MODELS: dict[str, str] = {}
+
+MODELS["payroll_period"] = r'''"""Payroll period ORM."""
+
+from datetime import date
+from uuid import UUID, uuid4
+
+from sqlalchemy import CheckConstraint, Date, ForeignKey, SmallInteger, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from database.base import Base
+from modules.payroll.models.mixins import PayMasterMixin
+
+
+class PayPayrollPeriod(Base, *PayMasterMixin):
+    __tablename__ = "pay_payroll_period"
+    __table_args__ = (
+        UniqueConstraint("company_id", "period_code", name="uk_pay_period_company_code"),
+        CheckConstraint(
+            "status IN ('open','processing','approved','closed','cancelled')",
+            name="ck_pay_period_status",
+        ),
+        {"schema": "payroll"},
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    branch_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("organization.org_branch.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    period_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    period_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    payroll_year: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    payroll_month: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    payment_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="open", index=True)
+'''
+
+MODELS["earning_type"] = r'''"""Payroll earning type catalog ORM."""
+
+from uuid import UUID, uuid4
+
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from database.base import Base
+from modules.payroll.models.mixins import PayMasterMixin
+
+
+class PayEarningType(Base, *PayMasterMixin):
+    __tablename__ = "pay_earning_type"
+    __table_args__ = (
+        UniqueConstraint("company_id", "earning_type_code", name="uk_pay_earn_type_code"),
+        CheckConstraint("status IN ('active','inactive')", name="ck_pay_earn_type_status"),
+        {"schema": "payroll"},
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    branch_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("organization.org_branch.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    earning_type_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    earning_type_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_recurring: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="active", index=True)
+'''
+
+MODELS["deduction_type"] = r'''"""Payroll deduction type catalog ORM."""
+
+from uuid import UUID, uuid4
+
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from database.base import Base
+from modules.payroll.models.mixins import PayMasterMixin
+
+
+class PayDeductionType(Base, *PayMasterMixin):
+    __tablename__ = "pay_deduction_type"
+    __table_args__ = (
+        UniqueConstraint("company_id", "deduction_type_code", name="uk_pay_ded_type_code"),
+        CheckConstraint("status IN ('active','inactive')", name="ck_pay_ded_type_status"),
+        {"schema": "payroll"},
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    branch_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("organization.org_branch.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    deduction_type_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    deduction_type_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_statutory: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="active", index=True)
+'''
+
+MODELS["salary_structure"] = r'''"""Salary structure catalog ORM."""
+
+from datetime import date
+from uuid import UUID, uuid4
+
+from sqlalchemy import CheckConstraint, Date, ForeignKey, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from database.base import Base
+from modules.payroll.models.mixins import PayMasterMixin
+
+
+class PaySalaryStructure(Base, *PayMasterMixin):
+    __tablename__ = "pay_salary_structure"
+    __table_args__ = (
+        UniqueConstraint("company_id", "structure_code", name="uk_pay_struct_company_code"),
+        CheckConstraint("status IN ('draft','active','inactive')", name="ck_pay_struct_status"),
+        {"schema": "payroll"},
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    branch_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("organization.org_branch.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    structure_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    structure_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    currency_code: Mapped[str] = mapped_column(String(10), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="draft", index=True)
+'''
+

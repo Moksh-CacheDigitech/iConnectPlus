@@ -10,6 +10,7 @@ from modules.inventory.router import inventory_router
 from modules.manufacturing.router import manufacturing_router
 from modules.master_data.router import master_data_router
 from modules.organization.router import organization_router
+from modules.payroll.router import payroll_router
 from modules.procurement.router import procurement_router
 from modules.quality.router import quality_router
 from modules.sales.router import sales_router
@@ -28,3 +29,4 @@ api_v1_router.include_router(manufacturing_router)
 api_v1_router.include_router(quality_router)
 api_v1_router.include_router(crm_router)
 api_v1_router.include_router(hr_router)
+api_v1_router.include_router(payroll_router)
