@@ -1,0 +1,39 @@
+"""HR employee profile ORM — extends master_employee (C-01)."""
+
+from datetime import date
+from uuid import UUID, uuid4
+
+from sqlalchemy import CheckConstraint, Date, ForeignKey, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from database.base import Base
+from modules.hr.models.mixins import HrTransactionMixin
+
+
+class HrEmployeeProfile(Base, *HrTransactionMixin):
+    __tablename__ = "hr_employee_profile"
+    __table_args__ = (
+        UniqueConstraint("employee_id", name="uk_hr_profile_employee"),
+        CheckConstraint("status IN ('active','inactive')", name="ck_hr_profile_status"),
+        {"schema": "hr"},
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    employee_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("master.master_employee.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    gender: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    marital_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    nationality: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    blood_group: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    emergency_contact_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    emergency_contact_mobile: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    permanent_address_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    current_address_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="active", index=True)
