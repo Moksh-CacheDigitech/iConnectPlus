@@ -30,6 +30,7 @@ celery_app.autodiscover_tasks(
         "modules.sales",
         "modules.procurement",
         "modules.inventory",
+        "modules.manufacturing",
     ],
     related_name="tasks",
     force=True,

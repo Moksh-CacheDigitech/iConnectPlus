@@ -47,7 +47,9 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 "src/modules/master_data/domain/enums.py" = ["UP042"]
 "src/modules/finance/domain/enums.py" = ["UP042"]
 "src/modules/finance/**" = ["E501", "SIM102"]
-"src/tests/**" = ["SIM117"]
+"src/modules/manufacturing/**" = ["E501", "SIM102"]
+"src/modules/manufacturing/domain/enums.py" = ["UP042"]
+"src/tests/**" = ["SIM117", "E501"]
 
 [tool.mypy]
 python_version = "3.10"
@@ -65,6 +67,7 @@ module = [
     "modules.sales.*",
     "modules.procurement.*",
     "modules.inventory.*",
+    "modules.manufacturing.*",
     "security.jwt",
     "security.password",
     "security.rbac",

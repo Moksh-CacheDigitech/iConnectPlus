@@ -166,7 +166,11 @@ class ValuationEngine:
 
 class ReceiptEngine:
     def movement_type_for(self, source_document_type: str) -> str:
-        if source_document_type in {"sales_return", "purchase_return_receive"}:
+        if source_document_type in {
+            "sales_return",
+            "purchase_return_receive",
+            "material_return",
+        }:
             return MovementType.RETURN_IN.value
         if source_document_type == "transfer":
             return MovementType.TRANSFER_IN.value
