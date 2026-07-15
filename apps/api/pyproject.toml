@@ -61,6 +61,8 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 "src/modules/recruitment/domain/enums.py" = ["UP042"]
 "src/modules/project/**" = ["E501", "SIM102"]
 "src/modules/project/domain/enums.py" = ["UP042"]
+"src/modules/asset/**" = ["E501", "SIM102"]
+"src/modules/asset/domain/enums.py" = ["UP042"]
 "src/tests/**" = ["SIM117", "E501"]
 
 [tool.mypy]
@@ -86,6 +88,7 @@ module = [
     "modules.payroll.*",
     "modules.recruitment.*",
     "modules.project.*",
+    "modules.asset.*",
     "security.jwt",
     "security.password",
     "security.rbac",
