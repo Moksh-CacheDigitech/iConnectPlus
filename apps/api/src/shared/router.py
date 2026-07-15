@@ -17,6 +17,7 @@ from modules.project.router import project_router
 from modules.quality.router import quality_router
 from modules.recruitment.router import recruitment_router
 from modules.sales.router import sales_router
+from modules.service.router import service_router
 from shared.health import router as health_router
 
 api_v1_router = APIRouter()
@@ -36,3 +37,4 @@ api_v1_router.include_router(payroll_router)
 api_v1_router.include_router(recruitment_router)
 api_v1_router.include_router(project_router)
 api_v1_router.include_router(asset_router)
+api_v1_router.include_router(service_router)
