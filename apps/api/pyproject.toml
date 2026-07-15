@@ -73,6 +73,8 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 "src/modules/grc/domain/enums.py" = ["UP042"]
 "src/modules/analytics/**" = ["E501", "SIM102"]
 "src/modules/analytics/domain/enums.py" = ["UP042"]
+"src/modules/integration/**" = ["E501", "SIM102"]
+"src/modules/integration/domain/enums.py" = ["UP042"]
 "src/tests/**" = ["SIM117", "E501"]
 
 [tool.mypy]
@@ -104,6 +106,7 @@ module = [
     "modules.document.*",
     "modules.grc.*",
     "modules.analytics.*",
+    "modules.integration.*",
     "security.jwt",
     "security.password",
     "security.rbac",
