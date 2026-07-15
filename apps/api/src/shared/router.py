@@ -6,6 +6,7 @@ from modules.analytics.router import analytics_router
 from modules.asset.router import asset_router
 from modules.crm.router import crm_router
 from modules.document.router import document_router
+from modules.ecommerce.router import ecommerce_router
 from modules.finance.router import finance_router
 from modules.foundation.router import foundation_router
 from modules.grc.router import grc_router
@@ -48,3 +49,4 @@ api_v1_router.include_router(document_router)
 api_v1_router.include_router(grc_router)
 api_v1_router.include_router(analytics_router)
 api_v1_router.include_router(integration_router)
+api_v1_router.include_router(ecommerce_router)
