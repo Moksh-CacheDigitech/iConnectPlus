@@ -24,7 +24,6 @@ import {
   advanceSiteInstallation,
   getProject,
   getSiteInstallationByProject,
-  notifySiteStageNoAnswers,
   updateSiteInstallationByProject,
 } from "@/services/projects-portal-service";
 import {
@@ -32,18 +31,10 @@ import {
   stageOwnerBannerSection,
 } from "@/components/projects/site-stage-assignments";
 import {
-  collectNewNoAnswers,
   isProgressCompleteForAdvance,
   stageClosingSections,
 } from "@/components/projects/site-stage-attachment";
 import { useSiteStageFormReadOnlyMeta } from "@/components/projects/site-stage-form-read-only-context";
-
-const ONSITE_NO_FIELDS = [
-  { name: "mo_request", label: "MO Request" },
-  { name: "im_material", label: "IM Material" },
-  { name: "power_on_material", label: "Power-on Material" },
-  { name: "material_handover_done", label: "Material Handover (WH → Site)" },
-] as const;
 
 const EMPTY: FormValues = {
   ...INTAKE_SUMMARY_EMPTY,
@@ -172,22 +163,6 @@ export function SiteOnsiteFormPage({ projectId }: { projectId: string }) {
         onsite_attachment_name: orNull(v.onsite_attachment_name),
         onsite_remarks: orNull(v.onsite_remarks),
       });
-
-      const noAnswers = collectNewNoAnswers(
-        v,
-        loadedValuesRef.current,
-        rackOnly
-          ? ONSITE_NO_FIELDS.filter((f) => f.name !== "power_on_material")
-          : [...ONSITE_NO_FIELDS],
-      );
-      if (noAnswers.length > 0) {
-        await notifySiteStageNoAnswers(projectId, {
-          stage: "onsite",
-          items: noAnswers,
-        }).catch(() => {
-          // Notification failure is non-blocking.
-        });
-      }
       loadedValuesRef.current = v;
 
       if (isProgressCompleteForAdvance(v.onsite_progress_status)) {
@@ -221,7 +196,6 @@ export function SiteOnsiteFormPage({ projectId }: { projectId: string }) {
             name: "mo_request",
             label: "MO Request",
             type: "yesno",
-            hint: "Material order raised (MO → Warehouse → Site).",
             clearFieldsOnChange: ["mo_request_date"],
           },
           {
