@@ -24,6 +24,8 @@ import {
   CRM_TABLE_HEAD_CELL,
   CRM_TABLE_HEAD_ROW,
 } from "@/components/crm/crm-ui";
+import { CompanyGstRegistrationsPanel } from "@/components/crm/sales/company-gst-registrations-panel";
+import { CustomerExpenseLedgerPanel } from "@/components/crm/sales/customer-expense-ledger-panel";
 import { FollowupFormDialog } from "@/components/crm/sales/followup-form-dialog";
 import { MeetingFormDialog } from "@/components/crm/sales/meeting-form-dialog";
 import { MeetingsDataTable } from "@/components/crm/sales/meetings-data-table";
@@ -36,6 +38,7 @@ import {
 } from "@/components/crm/sales/company-overview-deal-panels";
 import { FinanceField } from "@/components/finance/journals/finance-form-field";
 import { FinanceStatusBadge } from "@/components/finance/finance-status-badge";
+import { listCompanyGst } from "@/services/crm-deal-controls-service";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
@@ -128,10 +131,12 @@ function CompanyProfileReadOnly({
   company,
   employeeName,
   marketingEventName,
+  headOfficeGstin,
 }: {
   company: Company;
   employeeName: (id: string | null) => string;
   marketingEventName?: string;
+  headOfficeGstin?: string | null;
 }) {
   const normalizedSource = normalizeCompanyLeadSource(company.source);
   const knownSource = (COMPANY_LEAD_SOURCES as readonly string[]).includes(normalizedSource);
@@ -146,6 +151,7 @@ function CompanyProfileReadOnly({
             <CompanyReadOnlyField label="Account Manager Owner" value={employeeName(company.account_owner_id)} />
             <CompanyReadOnlyField label="Company Name *" value={textOrDash(company.customer_name)} />
             <CompanyReadOnlyField label="Company ID" value={textOrDash(company.account_number)} />
+            <CompanyReadOnlyField label="GST Number" value={textOrDash(headOfficeGstin)} />
             <CompanyReadOnlyField label="Account Type *" value={textOrDash(company.account_type)} />
             <CompanyReadOnlyField label="Industry *" value={textOrDash(company.industry)} />
             <CompanyReadOnlyField label="Other Industries" value={textOrDash(company.other_industries)} />
@@ -203,6 +209,7 @@ function CompanyProfileReadOnly({
 
 export function CompanyDetailPage({ companyAccountId }: { companyAccountId: string }) {
   const [company, setCompany] = useState<Company | null>(null);
+  const [headOfficeGstin, setHeadOfficeGstin] = useState<string | null>(null);
   const [leads, setLeads] = useState<SalesLead[]>([]);
   const [meetings, setMeetings] = useState<CrmMeeting[]>([]);
   const [followups, setFollowups] = useState<CrmFollowup[]>([]);
@@ -236,6 +243,7 @@ export function CompanyDetailPage({ companyAccountId }: { companyAccountId: stri
         contactRows,
         oemAttachments,
         poAttachments,
+        gstRows,
       ] = await Promise.all([
         getCompany(companyAccountId),
         listSalesLeads(companyAccountId).catch(() => [] as SalesLead[]),
@@ -249,11 +257,15 @@ export function CompanyDetailPage({ companyAccountId }: { companyAccountId: stri
         listContacts(companyAccountId).catch(() => [] as Contact[]),
         listAttachmentsByCategory("oem_quote").catch(() => []),
         listAttachmentsByCategory("customer_po").catch(() => []),
+        listCompanyGst(companyAccountId).catch(() => []),
       ]);
       const scopedOpportunities = opportunityRows.filter(
         (row) => row.company_account_id === companyAccountId,
       );
       setCompany(companyRow);
+      setHeadOfficeGstin(
+        (gstRows.find((row) => row.is_head_office) ?? gstRows[0])?.gstin ?? null,
+      );
       setLeads(allLeads);
       setEmployees(employeeOptions);
       setMarketingEvents(marketingEventOptions);
@@ -269,7 +281,7 @@ export function CompanyDetailPage({ companyAccountId }: { companyAccountId: stri
           oemAttachments,
           scopedOpportunities,
           "oem_quote_attached",
-          "OEM Quote",
+          "Vendor Quote",
         ),
       );
       setPurchaseOrderRows(
@@ -282,6 +294,7 @@ export function CompanyDetailPage({ companyAccountId }: { companyAccountId: stri
       );
     } catch (err) {
       setCompany(null);
+      setHeadOfficeGstin(null);
       setError(err instanceof ApiClientError ? err.message : "Failed to load company");
     } finally {
       setLoading(false);
@@ -314,7 +327,12 @@ export function CompanyDetailPage({ companyAccountId }: { companyAccountId: stri
             marketingEventName={
               marketingEvents.find((event) => event.id === company.marketing_event_id)?.label
             }
+            headOfficeGstin={headOfficeGstin}
           />
+
+          <CompanyGstRegistrationsPanel companyAccountId={company.id} />
+
+          <CustomerExpenseLedgerPanel companyAccountId={company.id} ovfs={ovfs} />
 
           <div id="company-meetings">
             <CrmListPanel>

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
+  Boxes,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
@@ -25,6 +26,7 @@ import {
   ShieldCheck,
   ShoppingCart,
   Target,
+  TrendingDown,
   Truck,
   UserCog,
   UserPlus,
@@ -60,10 +62,12 @@ export const CRM_NAV: readonly CrmNavItem[] = [
   { title: "Company", href: "/crm/companies", icon: Building2 },
   { title: "Leads", href: "/crm/leads", icon: UserPlus },
   { title: "Opportunities", href: "/crm/opportunities", icon: Target },
-  { title: "OEM Quote", href: "/crm/oem-quotes", icon: FileSpreadsheet },
+  { title: "Vendor Quote", href: "/crm/oem-quotes", icon: FileSpreadsheet },
   { title: "Quotes", href: "/crm/quotes", icon: FileText },
   { title: "Purchase Order", href: "/crm/purchase-orders", icon: ShoppingCart },
   { title: "OVF", href: "/crm/ovf", icon: Receipt },
+  { title: "Sales Performance", href: "/crm/sales-performance", icon: TrendingDown },
+  { title: "Stock & Aging", href: "/procurement/inventory-aging", icon: Boxes },
   { title: "Contacts", href: "/crm/contacts", icon: Users },
   { title: "Products", href: "/crm/products", icon: Package },
   { title: "Meetings", href: "/crm/meetings", icon: CalendarDays },

@@ -111,7 +111,7 @@ _ACTION_MILESTONE: dict[str, str] = {
     "approve_sow": "SOW Attached",
     "deal_reg": "Deal Registration Submitted",
     "oem_received": "OEM Quotation Received",
-    "attach_oem_quote": "OEM Quote Attached",
+    "attach_oem_quote": "Vendor Quote Attached",
     "create_quote": "Quote Created",
     "send_for_approval": "Quote Sent for Approval",  # quote/ovf disambiguated by entity
     "approve_internally": "Quote Approved",
@@ -147,7 +147,7 @@ _TO_STATE_MILESTONE: dict[str, dict[str, str]] = {
         "deal_reg": "Deal Registration",
         "oem_pending": "Deal Registration Submitted",
         "oem_attached": "OEM Quotation Received",
-        "quote_ready": "OEM Quote Attached",
+        "quote_ready": "Vendor Quote Attached",
         "quote_in_progress": "Quote Created",
         "po_pending": "Quote Accepted",
         "po_approval": "Customer PO Sent for Approval",
@@ -749,7 +749,7 @@ class OpportunityTimelineService:
             "won",
         }:
             add_milestone(
-                "OEM Quote Attached",
+                "Vendor Quote Attached",
                 occurred_at=hist_time("attach_oem_quote")
                 or hist_to_state("quote_ready")
                 or bump(opp.updated_at, 6),

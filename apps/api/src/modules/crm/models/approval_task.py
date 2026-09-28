@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, SmallInteger, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +22,10 @@ class CrmApprovalTask(Base, *CrmDetailMixin):
         CheckConstraint(
             "status IN ('pending','approved','rejected','cancelled')",
             name="ck_crm_approval_task_status",
+        ),
+        CheckConstraint(
+            "response IS NULL OR response IN ('can_submit','cannot_submit')",
+            name="ck_crm_approval_task_response",
         ),
         {"schema": "crm"},
     )
@@ -44,3 +48,12 @@ class CrmApprovalTask(Base, *CrmDetailMixin):
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notification_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     action: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    # BOQ/SOW SLA: assignee must say whether they can submit by
+    # ``response_due_at``; the document itself is due by ``due_at``.
+    response_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    response: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    response_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    escalation_level: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default="0")

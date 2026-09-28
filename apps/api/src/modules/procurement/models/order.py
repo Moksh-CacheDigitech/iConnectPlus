@@ -36,6 +36,12 @@ class ProcOrderHeader(Base, *ProcTransactionMixin):
             "negotiation_status IN ('not_required','pending','approved','rejected')",
             name="ck_proc_oh_negotiation_status",
         ),
+        CheckConstraint(
+            "delivery_milestone IS NULL OR delivery_milestone IN ("
+            "'order_placed','ready_at_factory','dispatched_from_factory','received_in_india',"
+            "'received_at_warehouse','dispatched_to_site','reached_site','installed')",
+            name="ck_proc_oh_delivery_milestone",
+        ),
         {"schema": "procurement"},
     )
 
@@ -141,6 +147,11 @@ class ProcOrderHeader(Base, *ProcTransactionMixin):
         DateTime(timezone=True), nullable=True
     )
     etd_customer_notified_for: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Shipment tracking: AWB / docket, the current milestone and its dated trail.
+    awb_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    delivery_milestone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    delivery_milestone_history: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    actual_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     lines: Mapped[list["ProcOrderLine"]] = relationship(
         back_populates="order_header",

@@ -12,12 +12,21 @@ ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_ROOT_USER_ACTION=ignore
 
-COPY requirements-prod.txt .
+COPY requirements-prod.txt requirements-ocr.txt ./
 COPY wheels ./wheels
+
+# Scanned-document OCR (RapidOCR + onnxruntime, ~90 MB) is opt-in because it is
+# not in the offline wheelhouse: --build-arg INSTALL_OCR=1 pulls it from PyPI.
+ARG INSTALL_OCR=0
 
 RUN python -m pip install --no-cache-dir --no-index --find-links=/app/wheels \
       -r requirements-prod.txt \
-    && rm -rf /app/wheels
+    && rm -rf /app/wheels \
+    && if [ "$INSTALL_OCR" = "1" ]; then \
+         python -m pip install --no-cache-dir -r requirements-ocr.txt \
+         && python -m pip uninstall -y opencv-python \
+         && python -m pip install --no-cache-dir opencv-python-headless; \
+       fi
 
 COPY alembic.ini .
 COPY alembic ./alembic

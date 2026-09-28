@@ -63,7 +63,7 @@ export const COMPANY_WORKSPACE_NAV: readonly NavItem[] = [
     opportunityOnly: true,
     quickCreate: "attachment",
   },
-  { title: "OEM Quote", segment: "oem-quotes" },
+  { title: "Vendor Quote", segment: "oem-quotes" },
   { title: "Quotes", segment: "quotes" },
   { title: "Purchase Order", segment: "purchase-orders" },
   { title: "OVF", segment: "ovf" },

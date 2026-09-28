@@ -15,8 +15,12 @@ from modules.procurement.routers import (
     scm_router,
     vendor_quotations_router,
 )
+from modules.procurement.routers.inventory_ownership import inventory_ownership_router
+from modules.procurement.routers.service_projects import service_projects_router
 
 procurement_router = APIRouter(prefix="/procurement")
+procurement_router.include_router(inventory_ownership_router)
+procurement_router.include_router(service_projects_router)
 procurement_router.include_router(scm_router)
 procurement_router.include_router(requisitions_router)
 procurement_router.include_router(rfqs_router)

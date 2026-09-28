@@ -7,7 +7,9 @@ from modules.crm.models.call_log import CrmCallLog
 from modules.crm.models.campaign import CrmCampaign
 from modules.crm.models.campaign_member import CrmCampaignMember
 from modules.crm.models.company import CrmCompany
+from modules.crm.models.company_gst import CrmCompanyGst
 from modules.crm.models.contact import CrmContact
+from modules.crm.models.customer_expense import CrmCustomerExpense
 from modules.crm.models.customer_feedback import CrmCustomerFeedback
 from modules.crm.models.customer_satisfaction import CrmCustomerSatisfaction
 from modules.crm.models.email_log import CrmEmailLog
@@ -23,7 +25,7 @@ from modules.crm.models.oem import CrmOem
 from modules.crm.models.selling_entity import CrmSellingEntity
 from modules.crm.models.opportunity import CrmOpportunity
 from modules.crm.models.opportunity_stage import CrmOpportunityStage
-from modules.crm.models.ovf import CrmOvf, CrmOvfLine
+from modules.crm.models.ovf import CrmOvf, CrmOvfExpense, CrmOvfLine, CrmOvfPayment
 from modules.crm.models.pipeline import CrmPipeline
 from modules.crm.models.product import CrmProduct
 from modules.crm.models.quote import CrmQuote, CrmQuoteLine
@@ -40,7 +42,9 @@ __all__ = [
     "CrmCampaign",
     "CrmCampaignMember",
     "CrmCompany",
+    "CrmCompanyGst",
     "CrmContact",
+    "CrmCustomerExpense",
     "CrmCustomerFeedback",
     "CrmCustomerSatisfaction",
     "CrmEmailLog",
@@ -57,7 +61,9 @@ __all__ = [
     "CrmOpportunity",
     "CrmOpportunityStage",
     "CrmOvf",
+    "CrmOvfExpense",
     "CrmOvfLine",
+    "CrmOvfPayment",
     "CrmPipeline",
     "CrmProduct",
     "CrmQuote",

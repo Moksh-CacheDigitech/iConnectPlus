@@ -580,7 +580,7 @@ class OpportunityBlueprintService:
                 raise ConflictException(
                     "Attach a BOQ or SOW before Deal Registration"
                 )
-            reg_no = (payload.get("deal_reg_number") or "").strip()
+            reg_no = (payload.get("deal_reg_number") or "").strip() or (opp.deal_reg_number or "").strip()
             if not reg_no:
                 from modules.crm.domain.enums import CrmEntityType
                 from modules.crm.service.document_number_service import DocumentNumberService
@@ -615,9 +615,19 @@ class OpportunityBlueprintService:
         elif action == "attach_po":
             self._attach(ctx, opp, payload, category="customer_po")
             updates["customer_po_attached"] = True
+            # A new PO file must be read and accepted again before it goes to Finance.
+            updates["sales_terms_accepted"] = False
         elif action == "send_po_approval":
             if not opp.customer_po_attached:
                 raise ConflictException("Attach the customer PO before requesting approval")
+            if payload.get("terms_accepted") is not True:
+                raise ConflictException(
+                    "Confirm \"I have checked and verified all terms & conditions of the customer PO\" "
+                    "before sending it to Finance"
+                )
+            updates["sales_terms_accepted"] = True
+            updates["sales_terms_accepted_at"] = utcnow()
+            updates["sales_terms_accepted_by"] = ctx.user_id
             chain = {
                 stage: [str(uid) for uid in _po_stage_user_ids(payload, stage)]
                 for stage, _team, _stage_action in PO_VALIDATION_STAGES

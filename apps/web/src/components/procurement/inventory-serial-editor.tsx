@@ -90,7 +90,7 @@ export function InventorySerialEditor({
       placeholder="Add serial…"
       aria-label={`Serial for ${row.product_name ?? "product"}`}
       className={cn(
-        "h-8 font-mono text-xs",
+        "h-8 w-full min-w-0 font-mono text-xs",
         isMissingSerial(row.serial_number) && !value && "border-amber-300/80 bg-amber-50/50",
       )}
       onChange={(e) => setValue(e.target.value)}

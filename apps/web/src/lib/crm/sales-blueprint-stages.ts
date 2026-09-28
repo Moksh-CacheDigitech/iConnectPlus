@@ -104,7 +104,7 @@ function resolveOpportunityBlueprintState(
     case "oem_attached":
       return "OEM Quotation Received";
     case "quote_ready":
-      return "OEM Quote Attached";
+      return "Vendor Quote Attached";
     case "quote_in_progress":
       return "Quote Created";
     case "po_pending":

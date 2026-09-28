@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, ForbiddenException, NotFoundException
 from modules.crm.domain.enums import CrmEntityType
+from modules.crm.domain.quote_terms import DEFAULT_GENERAL_TERMS
 from modules.crm.models import CrmOpportunity, CrmQuote, CrmQuoteLine
 from modules.crm.repository.company_repository import CompanyRepository
 from modules.crm.repository.contact_repository import ContactRepository
@@ -62,9 +63,17 @@ class QuoteService:
         self._audit = AuditService(db)
 
     # -- reads -----------------------------------------------------------
-    def peek_next_quote_no(self, ctx: TenantContext, company_id: UUID | None = None) -> str:
+    def peek_next_quote_no(
+        self, ctx: TenantContext, company_id: UUID | None = None, opportunity_id: UUID | None = None
+    ) -> str:
         cid = self._scope.resolve_company_id(ctx, company_id)
-        return self._numbers.generate(CrmEntityType.QUOTE, cid, CrmQuote, "quote_no")
+        deal_number = None
+        if opportunity_id is not None:
+            opp = self._get_opportunity(ctx, opportunity_id)
+            cid, deal_number = opp.company_id, opp.deal_reg_number
+        return self._numbers.generate_for_deal(
+            CrmEntityType.QUOTE, cid, CrmQuote, "quote_no", deal_number=deal_number, tag="Q"
+        )
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None, opportunity_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -379,10 +388,19 @@ class QuoteService:
             )
         )
 
-        code = self._numbers.generate(CrmEntityType.QUOTE, opp.company_id, CrmQuote, "quote_no")
+        code = self._numbers.generate_for_deal(
+            CrmEntityType.QUOTE,
+            opp.company_id,
+            CrmQuote,
+            "quote_no",
+            deal_number=getattr(opp, "deal_reg_number", None),
+            tag="Q",
+        )
         fields.setdefault("valid_until", None)
         fields.setdefault("quote_stage", "draft")
         fields.setdefault("approval_status", "not_required")
+        if not (fields.get("terms") or "").strip():
+            fields["terms"] = DEFAULT_GENERAL_TERMS
         row = self._repo.create(
             ctx,
             company_id=opp.company_id,
@@ -421,6 +439,8 @@ class QuoteService:
             raise NotFoundException("Quote line not found")
         quote = self.get(ctx, line.quote_id)
         sales_blueprint_engine.assert_not_locked(quote)
+        if "qty" in fields and fields["qty"] is not None:
+            self._assert_qty_within_balance(ctx, line, Decimal(str(fields["qty"])))
         updated = self._lines.update(ctx, line_id, **fields)
         self._recompute(ctx, line.quote_id)
         return updated
@@ -431,8 +451,176 @@ class QuoteService:
             raise NotFoundException("Quote line not found")
         quote = self.get(ctx, line.quote_id)
         sales_blueprint_engine.assert_not_locked(quote)
+        if self._child_lines(ctx, line.id):
+            raise ConflictException(
+                f"{line.product_name} is split into other quotes - remove those splits first"
+            )
         self._lines.delete(ctx, line_id)
         self._recompute(ctx, line.quote_id)
+
+    # -- split one vendor-backed quote into several customer quotes -------
+    def _child_lines(self, ctx: TenantContext, source_line_id: UUID) -> list[CrmQuoteLine]:
+        from sqlalchemy import select
+
+        stmt = (
+            select(CrmQuoteLine)
+            .join(CrmQuote, CrmQuote.id == CrmQuoteLine.quote_id)
+            .where(
+                CrmQuoteLine.tenant_id == ctx.tenant_id,
+                CrmQuoteLine.source_line_id == source_line_id,
+                CrmQuoteLine.is_deleted.is_(False),
+                CrmQuote.is_deleted.is_(False),
+                CrmQuote.quote_stage != "lost",
+            )
+        )
+        return list(self._db.scalars(stmt).all())
+
+    def _allocated_qty(self, ctx: TenantContext, source_line_id: UUID, *, exclude_line_id: UUID | None = None) -> Decimal:
+        return sum(
+            (Decimal(str(ln.qty)) for ln in self._child_lines(ctx, source_line_id) if ln.id != exclude_line_id),
+            Decimal("0"),
+        )
+
+    def _assert_qty_within_balance(self, ctx: TenantContext, line: CrmQuoteLine, new_qty: Decimal) -> None:
+        if line.source_line_id is not None:
+            parent = self._lines.get(ctx, line.source_line_id)
+            if parent is not None:
+                others = self._allocated_qty(ctx, parent.id, exclude_line_id=line.id)
+                balance = Decimal(str(parent.qty)) - others
+                if new_qty - balance > Decimal("0.0001"):
+                    raise ConflictException(
+                        f"Only {balance.normalize():f} of {parent.product_name} is left on the source quote"
+                    )
+        allocated = self._allocated_qty(ctx, line.id)
+        if allocated - new_qty > Decimal("0.0001"):
+            raise ConflictException(
+                f"{allocated.normalize():f} of {line.product_name} is already split into other quotes"
+            )
+
+    def split_balance(self, ctx: TenantContext, quote_id: UUID) -> list[dict[str, Any]]:
+        """Per line: quoted quantity, quantity split into child quotes, and what is left."""
+        self.get(ctx, quote_id)
+        rows = []
+        for line in self._lines.list_for_quote(ctx, quote_id):
+            allocated = self._allocated_qty(ctx, line.id)
+            rows.append(
+                {
+                    "line_id": line.id,
+                    "line_no": line.line_no,
+                    "product_name": line.product_name,
+                    "qty": Decimal(str(line.qty)),
+                    "allocated_qty": allocated,
+                    "balance_qty": Decimal(str(line.qty)) - allocated,
+                }
+            )
+        return rows
+
+    def split_quote(self, ctx: TenantContext, quote_id: UUID, *, splits: list[dict[str, Any]]) -> list[CrmQuote]:
+        """Break one quote into N customer quotes (entities / locations / GSTINs).
+
+        Quantities are drawn down from the source quote so 100 licences can
+        never be quoted as 3 x 100 - unlike a clone, which copies them.
+        """
+        source = self.get(ctx, quote_id)
+        if source.quote_stage == "lost":
+            raise ConflictException("A lost quote cannot be split")
+        if source.parent_quote_id is not None:
+            raise ConflictException("Split the original quote, not a quote that was already split from it")
+        if len(splits) < 2:
+            raise ConflictException("Choose at least two quotes to split into")
+        opp = self._get_opportunity(ctx, source.opportunity_id)
+        sales_blueprint_engine.assert_not_locked(opp)
+
+        source_lines = {ln.id: ln for ln in self._lines.list_for_quote(ctx, quote_id)}
+        requested: dict[UUID, Decimal] = {}
+        for split in splits:
+            if not split.get("lines"):
+                raise ConflictException("Every split quote needs at least one line with a quantity")
+            for alloc in split["lines"]:
+                line_id = alloc["source_line_id"]
+                if line_id not in source_lines:
+                    raise ConflictException("Split lines must come from the source quote")
+                qty = Decimal(str(alloc["qty"]))
+                if qty <= 0:
+                    raise ConflictException("Split quantities must be greater than zero")
+                requested[line_id] = requested.get(line_id, Decimal("0")) + qty
+        for line_id, qty in requested.items():
+            line = source_lines[line_id]
+            balance = Decimal(str(line.qty)) - self._allocated_qty(ctx, line_id)
+            if qty - balance > Decimal("0.0001"):
+                raise ConflictException(
+                    f"{line.product_name}: splitting {qty.normalize():f} but only "
+                    f"{balance.normalize():f} of {Decimal(str(line.qty)).normalize():f} is left"
+                )
+
+        copy_fields = (
+            "subject", "project_title", "account_name", "service_type", "owner_name", "valid_until",
+            "entity_name", "entity_email", "entity_address", "entity_gst", "entity_contact",
+            "amc_warranty", "amc_start_date", "amc_end_date",
+            "billing_street", "billing_city", "billing_state", "billing_zip", "billing_country",
+            "shipping_street", "shipping_city", "shipping_state", "shipping_zip", "shipping_country",
+            "terms", "description",
+        )
+        created: list[CrmQuote] = []
+        for index, split in enumerate(splits, start=1):
+            fields = {key: getattr(source, key) for key in copy_fields}
+            fields["contact_id"] = split.get("contact_id") or source.contact_id
+            for key in ("entity_name", "entity_gst", "entity_address", "shipping_street",
+                        "shipping_city", "shipping_state", "shipping_zip"):
+                if split.get(key):
+                    fields[key] = split[key]
+            code = self._numbers.generate_for_deal(
+                CrmEntityType.QUOTE,
+                source.company_id,
+                CrmQuote,
+                "quote_no",
+                deal_number=opp.deal_reg_number,
+                tag="Q",
+            )
+            child = self._repo.create(
+                ctx,
+                company_id=source.company_id,
+                branch_id=source.branch_id,
+                opportunity_id=source.opportunity_id,
+                company_account_id=source.company_account_id,
+                quote_no=code,
+                quote_stage="draft",
+                approval_status="not_required",
+                freight=Decimal("0"),
+                parent_quote_id=source.id,
+                **fields,
+            )
+            for line_no, alloc in enumerate(split["lines"], start=1):
+                parent_line = source_lines[alloc["source_line_id"]]
+                self._lines.create(
+                    ctx,
+                    company_id=source.company_id,
+                    branch_id=source.branch_id,
+                    quote_id=child.id,
+                    line_no=line_no,
+                    product_id=parent_line.product_id,
+                    product_name=parent_line.product_name,
+                    hsn_sac=parent_line.hsn_sac,
+                    description=parent_line.description,
+                    line_type=parent_line.line_type,
+                    qty=Decimal(str(alloc["qty"])),
+                    unit_cost=parent_line.unit_cost,
+                    unit_sell=parent_line.unit_sell,
+                    gst_pct=parent_line.gst_pct,
+                    source_line_id=parent_line.id,
+                )
+            self._recompute(ctx, child.id)
+            self._log(ctx, child, "draft", "draft", "split_from_quote", f"Split {index}/{len(splits)} of {source.quote_no}")
+            created.append(self.get(ctx, child.id))
+        self._log(
+            ctx,
+            source,
+            source.quote_stage,
+            source.quote_stage,
+            "split_into_quotes",
+            ", ".join(q.quote_no for q in created),
+        )
+        return created
 
     def _recompute(self, ctx: TenantContext, quote_id: UUID) -> CrmQuote:
         quote = self.get(ctx, quote_id)

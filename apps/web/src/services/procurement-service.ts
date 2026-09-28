@@ -535,6 +535,9 @@ export type ProcOrder = {
   negotiation_status?: "not_required" | "pending" | "approved" | "rejected";
   negotiation_decided_by_name?: string | null;
   expected_delivery_date?: string | null;
+  awb_number?: string | null;
+  delivery_milestone?: string | null;
+  actual_delivery_date?: string | null;
   etd_confirmed_at?: string | null;
   customer_ack_sent_at?: string | null;
   etd_reminder_last_sent_at?: string | null;
@@ -1007,6 +1010,8 @@ export type ProcurementInventoryRow = {
   description?: string | null;
   stock_unit_id?: string | null;
   import_line_id?: string | null;
+  /** ISO date (YYYY-MM-DD) when warranty ends; null if not set. */
+  warranty_valid_till?: string | null;
 };
 
 export async function createPoFromInventory(payload: {
@@ -1100,6 +1105,7 @@ export async function importProcurementInventory(
     serial_number: string;
     description?: string | null;
     order_id?: string | null;
+    warranty_valid_till?: string | null;
   }>,
 ): Promise<{ imported: number }> {
   const body = {
@@ -1108,6 +1114,7 @@ export async function importProcurementInventory(
       serial_number: line.serial_number,
       description: line.description?.trim() || null,
       order_id: line.order_id || null,
+      warranty_valid_till: line.warranty_valid_till?.trim() || null,
     })),
   };
   const res = await apiClient<{ imported: number }>(`${SCM_API}/inventory/import`, {
@@ -1768,12 +1775,12 @@ export function buildVendorAddressJson(
     },
     shipping: primary.shipping
       ? {
-          country: primary.shipping.country,
-          street: primary.shipping.street,
-          city: primary.shipping.city,
-          state: primary.shipping.state,
-          pincode: primary.shipping.pincode,
-        }
+        country: primary.shipping.country,
+        street: primary.shipping.street,
+        city: primary.shipping.city,
+        state: primary.shipping.state,
+        pincode: primary.shipping.pincode,
+      }
       : null,
     addresses: entries.map((entry) => ({
       address: entry.address,
@@ -1782,21 +1789,21 @@ export function buildVendorAddressJson(
       destination_of_supply: entry.destinationOfSupply || null,
       billing: entry.billing
         ? {
-            country: entry.billing.country,
-            street: entry.billing.street,
-            city: entry.billing.city,
-            state: entry.billing.state,
-            pincode: entry.billing.pincode,
-          }
+          country: entry.billing.country,
+          street: entry.billing.street,
+          city: entry.billing.city,
+          state: entry.billing.state,
+          pincode: entry.billing.pincode,
+        }
         : null,
       shipping: entry.shipping
         ? {
-            country: entry.shipping.country,
-            street: entry.shipping.street,
-            city: entry.shipping.city,
-            state: entry.shipping.state,
-            pincode: entry.shipping.pincode,
-          }
+          country: entry.shipping.country,
+          street: entry.shipping.street,
+          city: entry.shipping.city,
+          state: entry.shipping.state,
+          pincode: entry.shipping.pincode,
+        }
         : null,
     })),
   };

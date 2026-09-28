@@ -22,9 +22,15 @@ from modules.crm.schemas import (
     QuoteMarginSummaryResponse,
     QuoteResponse,
     QuoteSendForApprovalRequest,
+    QuoteSplitBalanceRow,
+    QuoteSplitRequest,
     QuoteUpdate,
+    VendorQuoteExtractRequest,
+    VendorQuoteExtractResponse,
 )
+from modules.crm.domain.quote_terms import DEFAULT_GENERAL_TERMS
 from modules.crm.service import QuoteService
+from modules.crm.service.vendor_quote_extract_service import extract_vendor_quote
 from modules.foundation.dependencies import require_permission
 from modules.foundation.domain.value_objects import TenantContext
 from shared.schemas import APIResponse
@@ -49,9 +55,27 @@ def next_quote_number(
     ctx: Annotated[TenantContext, Depends(require_permission("crm.quote:read"))],
     db: Annotated[Session, Depends(get_db)],
     company_id: UUID | None = None,
+    opportunity_id: UUID | None = None,
 ):
-    number = QuoteService(db).peek_next_quote_no(ctx, company_id)
+    number = QuoteService(db).peek_next_quote_no(ctx, company_id, opportunity_id)
     return APIResponse(message="OK", data={"quote_no": number})
+
+
+@quotes_router.get("/default-terms", response_model=APIResponse[dict[str, str]])
+def default_quote_terms(
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.quote:read"))],
+):
+    return APIResponse(message="OK", data={"terms": DEFAULT_GENERAL_TERMS})
+
+
+@quotes_router.post("/extract-vendor-lines", response_model=APIResponse[VendorQuoteExtractResponse])
+def extract_vendor_quote_lines(
+    body: VendorQuoteExtractRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.quote:create"))],
+):
+    """Line items read from a vendor / OEM quote file - review and edit before saving."""
+    data = extract_vendor_quote(body.file_name, body.content_base64)
+    return APIResponse(message=f"{len(data['lines'])} line(s) read from the vendor quote", data=data)
 
 
 @quotes_router.post("", response_model=APIResponse[QuoteResponse])
@@ -132,6 +156,29 @@ def delete_quote_line(
 ):
     QuoteService(db).delete_line(ctx, line_id)
     return APIResponse(message="OK", data=None)
+
+
+@quotes_router.get("/{quote_id}/split-balance", response_model=APIResponse[list[QuoteSplitBalanceRow]])
+def get_quote_split_balance(
+    quote_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.quote:read"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    return APIResponse(message="OK", data=QuoteService(db).split_balance(ctx, quote_id))
+
+
+@quotes_router.post("/{quote_id}/split", response_model=APIResponse[list[QuoteResponse]])
+def split_quote(
+    quote_id: UUID,
+    body: QuoteSplitRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.quote:create"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """One vendor-backed quote → several customer quotes with quantity drawn down, not cloned."""
+    rows = QuoteService(db).split_quote(
+        ctx, quote_id, splits=[split.model_dump(exclude_none=True) for split in body.splits]
+    )
+    return APIResponse(message=f"Quote split into {len(rows)} quotes", data=rows)
 
 
 @quotes_router.get("/{quote_id}/margin", response_model=APIResponse[QuoteMarginSummaryResponse])

@@ -5,6 +5,13 @@ from modules.procurement.models.grn import ProcGrnHeader, ProcGrnLine
 from modules.procurement.models.inventory_adjustment import ProcInventoryStockAdjustment
 from modules.procurement.models.inventory_import import ProcInventoryImportLine
 from modules.procurement.models.inventory_stock import ProcInventoryStockUnit
+from modules.procurement.models.inventory_transfer import ProcInventoryTransferRequest
+from modules.procurement.models.delivery_project import ProcDeliveryProject, ProcDeliveryProjectSite
+from modules.procurement.models.service_contract import (
+    ProcServicePlan,
+    ProcServiceRateContract,
+    ProcServiceVisit,
+)
 from modules.procurement.models.invoice import ProcInvoiceHeader, ProcInvoiceLine
 from modules.procurement.models.order import ProcOrderHeader, ProcOrderLine
 from modules.procurement.models.ovf_stock_allocation import ProcOvfStockAllocation
@@ -30,6 +37,12 @@ __all__ = [
     "ProcInventoryImportLine",
     "ProcInventoryStockAdjustment",
     "ProcInventoryStockUnit",
+    "ProcInventoryTransferRequest",
+    "ProcDeliveryProject",
+    "ProcDeliveryProjectSite",
+    "ProcServicePlan",
+    "ProcServiceRateContract",
+    "ProcServiceVisit",
     "ProcInvoiceHeader",
     "ProcInvoiceLine",
     "ProcOrderHeader",

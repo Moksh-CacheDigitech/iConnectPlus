@@ -32,6 +32,11 @@ import {
 } from "@/lib/crm/company-lead-sources";
 import { ApiClientError } from "@/services/api-client";
 import {
+  createCompanyGst,
+  listCompanyGst,
+  updateCompanyGst,
+} from "@/services/crm-deal-controls-service";
+import {
   createCompany,
   getCompany,
   listBranchOptions,
@@ -43,6 +48,13 @@ import {
   type CompanyFormInput,
   type Option,
 } from "@/services/sales-crm-service";
+
+/** Indian GSTIN: 2-digit state + PAN + entity + Z + check digit. */
+const GSTIN_PATTERN = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+
+function normalizeGstin(value: string): string {
+  return value.trim().toUpperCase().replaceAll(" ", "");
+}
 
 const INDUSTRIES = [
   "IT & Technology",
@@ -138,6 +150,8 @@ export function CompanyFormPage({ companyId }: { companyId?: string }) {
   const [mandateMessage, setMandateMessage] = useState("");
   const [nextAccountNumber, setNextAccountNumber] = useState("");
   const [sameAsBilling, setSameAsBilling] = useState(false);
+  /** Head-office GSTIN for this customer account (branches come from POs). */
+  const [headOfficeGstin, setHeadOfficeGstin] = useState("");
 
   const backHref = isEdit && companyId ? `/crm/companies/${companyId}` : "/crm/companies";
   const backLabel = isEdit ? (company?.customer_name ?? "Company") : "Companies";
@@ -193,12 +207,15 @@ export function CompanyFormPage({ companyId }: { companyId?: string }) {
         setOtherSource(knownSource ? "" : companyRow.source);
         setSameAsBilling(
           Boolean(companyRow.billing_street?.trim()) &&
-            (companyRow.shipping_street ?? "") === companyRow.billing_street &&
-            (companyRow.shipping_city ?? "") === companyRow.billing_city &&
-            (companyRow.shipping_state ?? "") === companyRow.billing_state &&
-            (companyRow.shipping_code ?? "") === companyRow.billing_code &&
-            (companyRow.shipping_country ?? "") === companyRow.billing_country,
+          (companyRow.shipping_street ?? "") === companyRow.billing_street &&
+          (companyRow.shipping_city ?? "") === companyRow.billing_city &&
+          (companyRow.shipping_state ?? "") === companyRow.billing_state &&
+          (companyRow.shipping_code ?? "") === companyRow.billing_code &&
+          (companyRow.shipping_country ?? "") === companyRow.billing_country,
         );
+        const gstRows = await listCompanyGst(companyRow.id).catch(() => []);
+        const headOffice = gstRows.find((row) => row.is_head_office) ?? gstRows[0] ?? null;
+        setHeadOfficeGstin(headOffice?.gstin ?? "");
       } else {
         setCompany(null);
         const sessionOwnerId = resolveSessionEmployeeId(emps, user);
@@ -209,6 +226,7 @@ export function CompanyFormPage({ companyId }: { companyId?: string }) {
         });
         setOtherSource("");
         setSameAsBilling(false);
+        setHeadOfficeGstin("");
         const nextNo = await peekNextCompanyAccountNumber().catch(() => "");
         setNextAccountNumber(nextNo);
       }
@@ -233,6 +251,10 @@ export function CompanyFormPage({ companyId }: { companyId?: string }) {
     if (!email || !site) return false;
     return !emailMatchesWebsite(email, site);
   }, [form.customer_email, form.website]);
+
+  const normalizedHeadGstin = useMemo(() => normalizeGstin(headOfficeGstin), [headOfficeGstin]);
+  const headGstinInvalid =
+    normalizedHeadGstin.length > 0 && !GSTIN_PATTERN.test(normalizedHeadGstin);
 
   useEffect(() => {
     void load();
@@ -332,6 +354,10 @@ export function CompanyFormPage({ companyId }: { companyId?: string }) {
       );
       return;
     }
+    if (headGstinInvalid) {
+      setError("GST Number must be a valid 15-character GSTIN (or leave it blank).");
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -349,6 +375,34 @@ export function CompanyFormPage({ companyId }: { companyId?: string }) {
       const saved = isEdit && companyId
         ? await updateCompany(companyId, payload)
         : await createCompany(payload);
+
+      if (normalizedHeadGstin) {
+        const billingAddress = [
+          form.billing_street,
+          form.billing_city,
+          form.billing_state,
+          form.billing_code,
+          form.billing_country,
+        ]
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .join(", ");
+        const existing = await listCompanyGst(saved.id).catch(() => []);
+        const already = existing.find((row) => row.gstin === normalizedHeadGstin);
+        if (already) {
+          if (!already.is_head_office) {
+            await updateCompanyGst(already.id, { is_head_office: true });
+          }
+        } else {
+          await createCompanyGst(saved.id, {
+            gstin: normalizedHeadGstin,
+            is_head_office: true,
+            location_label: "Head office",
+            billing_address: billingAddress || null,
+          });
+        }
+      }
+
       router.push(`/crm/companies/${saved.id}`);
     } catch (err) {
       setError(
@@ -428,6 +482,26 @@ export function CompanyFormPage({ companyId }: { companyId?: string }) {
                 disabled
                 aria-readonly="true"
                 className="font-mono text-sm"
+              />
+            </FinanceField>
+            <FinanceField
+              label="GST Number"
+              error={
+                headGstinInvalid
+                  ? "Enter a valid 15-character GSTIN, or leave blank"
+                  : undefined
+              }
+            >
+              <Input
+                value={headOfficeGstin}
+                maxLength={15}
+                onChange={(e) => setHeadOfficeGstin(e.target.value.toUpperCase())}
+                aria-invalid={headGstinInvalid || undefined}
+                className={
+                  headGstinInvalid
+                    ? "font-mono text-sm border-destructive/70 text-destructive focus-visible:border-destructive focus-visible:ring-destructive/20"
+                    : "font-mono text-sm"
+                }
               />
             </FinanceField>
             <FinanceField label="Industry *">

@@ -451,7 +451,7 @@ export async function buildOvfPdfDocument(input: OvfExportInput): Promise<jsPDF>
     head: [
       [
         {
-          content: "Customer Charges.",
+          content: "Customer PO Summary",
           colSpan: 9,
           styles: {
             fillColor: HEAD_FILL,
@@ -517,7 +517,7 @@ export async function buildOvfPdfDocument(input: OvfExportInput): Promise<jsPDF>
     head: [
       [
         {
-          content: "Vendor Charges.",
+          content: "Vendor PO Summary",
           colSpan: 12,
           styles: {
             fillColor: HEAD_FILL,

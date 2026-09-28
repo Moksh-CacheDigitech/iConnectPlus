@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from modules.crm.models import CrmOvf, CrmOvfLine
+from modules.crm.models import CrmOvf, CrmOvfExpense, CrmOvfLine, CrmOvfPayment
 from modules.crm.repository.base import CrmScopedRepository, utcnow
 from modules.foundation.domain.org_data_scope import (
     apply_org_scope_filter,
@@ -180,3 +180,66 @@ class OvfLineRepository(CrmScopedRepository):
         row.version = int(row.version or 1) + 1
         self.db.flush()
         return row
+
+    def soft_delete(self, ctx: TenantContext, row: CrmOvfLine) -> None:
+        now = utcnow()
+        row.is_deleted = True
+        row.deleted_at = now
+        row.deleted_by = ctx.user_id
+        row.updated_at = now
+        row.updated_by = ctx.user_id
+        self.db.flush()
+
+
+class _OvfChildRepository(CrmScopedRepository):
+    """Payments / expenses hang off an OVF the caller has already resolved."""
+
+    model: type
+
+    def get(self, ctx: TenantContext, row_id: UUID):
+        stmt = select(self.model).where(self.model.id == row_id, self.model.is_deleted.is_(False))
+        stmt = self.apply_tenant_filter(stmt, self.model, ctx)
+        return self.db.scalar(stmt)
+
+    def list_for_ovf(self, ctx: TenantContext, ovf_id: UUID) -> list:
+        stmt = select(self.model).where(self.model.ovf_id == ovf_id, self.model.is_deleted.is_(False))
+        stmt = self.apply_tenant_filter(stmt, self.model, ctx)
+        return list(self.db.scalars(stmt.order_by(self.model.created_at)).all())
+
+    def create(self, ctx: TenantContext, **fields):
+        row = self.model(
+            id=uuid4(),
+            tenant_id=ctx.tenant_id,
+            created_by=ctx.user_id,
+            updated_by=ctx.user_id,
+            **fields,
+        )
+        self.db.add(row)
+        self.db.flush()
+        return row
+
+    def update(self, ctx: TenantContext, row, **fields):
+        for k, v in fields.items():
+            setattr(row, k, v)
+        row.updated_at = utcnow()
+        row.updated_by = ctx.user_id
+        row.version = int(row.version or 1) + 1
+        self.db.flush()
+        return row
+
+    def soft_delete(self, ctx: TenantContext, row) -> None:
+        now = utcnow()
+        row.is_deleted = True
+        row.deleted_at = now
+        row.deleted_by = ctx.user_id
+        row.updated_at = now
+        row.updated_by = ctx.user_id
+        self.db.flush()
+
+
+class OvfPaymentRepository(_OvfChildRepository):
+    model = CrmOvfPayment
+
+
+class OvfExpenseRepository(_OvfChildRepository):
+    model = CrmOvfExpense

@@ -1,9 +1,9 @@
 """Procurement stock on hand - one row per unit added from GRN receipt (not billed portion)."""
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,3 +40,16 @@ class ProcInventoryStockUnit(Base, *ProcTransactionMixin):
     serial_number: Mapped[str] = mapped_column(String(120), nullable=False)
     # 1 for whole units; fractional for partial unbilled GRN stock.
     quantity: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=1)
+    warranty_valid_till: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Salesperson accountable for the unit (the OVF owner who ordered it).
+    owner_employee_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("master.master_employee.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    owner_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Soft link to crm.crm_ovf - no cross-module FK.
+    source_ovf_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
+    open_for_sale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    open_for_sale_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

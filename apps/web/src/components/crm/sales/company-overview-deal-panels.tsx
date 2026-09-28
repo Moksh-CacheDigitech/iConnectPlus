@@ -231,7 +231,7 @@ export function CompanyOverviewDealPanels({
         <CrmListPanel>
           <OverviewPanelHeader
             icon={FileStack}
-            title="OEM Quote"
+            title="Vendor Quote"
             count={oemQuoteRows.length}
             viewAllHref={`${base}/oem-quotes`}
           />

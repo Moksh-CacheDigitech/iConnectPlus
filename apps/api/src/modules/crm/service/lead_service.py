@@ -363,6 +363,10 @@ class LeadService:
         fields.setdefault("document_date", date.today())
         fields.setdefault("status", LeadStatus.NEW.value)
         row = self._repo.create(ctx, company_id=cid, branch_id=branch_id, lead_code=code, **fields)
+        if self._boq_sow_mandatory(row):
+            row.requires_boq = True
+            row.requires_sow = True
+            self._db.flush()
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,
             entity_name="crm_lead",
@@ -400,12 +404,20 @@ class LeadService:
                 fields["owner_employee_id"] = self._resolve_owner_employee_id(ctx, owner_candidate)
             elif owner_candidate != lead.owner_employee_id:
                 raise ForbiddenException("Only CRM admins can change lead owner")
+        if self._boq_sow_mandatory(lead):
+            # Technical team is always looped in on hardware/services leads.
+            fields.pop("requires_boq", None)
+            fields.pop("requires_sow", None)
         # Clearing a requirement also clears the attached flag for that doc type.
         if fields.get("requires_boq") is False:
             fields["boq_attached"] = False
         if fields.get("requires_sow") is False:
             fields["sow_attached"] = False
         row = self._repo.update(ctx, lead_id, **fields)
+        if self._boq_sow_mandatory(row) and not (row.requires_boq and row.requires_sow):
+            row.requires_boq = True
+            row.requires_sow = True
+            self._db.flush()
         if row is None:
             raise NotFoundException("Lead not found")
         self._audit.log_entity_change(
@@ -417,6 +429,13 @@ class LeadService:
         )
         self._sync_lead_doc_requests(ctx, lead_id)
         return self.get(ctx, lead_id)
+
+    @staticmethod
+    def _boq_sow_mandatory(lead: CrmLead | None) -> bool:
+        """Sales-process leads always need BOQ + SOW, except the cloud consumption flow."""
+        if lead is None or lead.company_account_id is None:
+            return False
+        return cloud_variant_from_lead(lead) is None
 
     @staticmethod
     def _lead_docs_pending(lead: CrmLead) -> bool:
@@ -475,7 +494,7 @@ class LeadService:
                 return
             if action in pending_actions:
                 return
-            user_ids = owners.list_user_ids(ctx, step_key)
+            user_ids = owners.list_user_ids(ctx, step_key) or tasks._admin_recipient_ids(ctx)
             if not user_ids:
                 raise ConflictException(
                     f"No default owners configured for {step_key.replace('_', ' ')}. "
@@ -737,6 +756,19 @@ class LeadService:
             opp_fields["company_account_id"] = lead.company_account_id
             opp_fields["blueprint_state"] = "open"
             opp_fields["project_title"] = lead.project_title
+            opp_fields["marketing_event_id"] = lead.marketing_event_id
+            purchase_model = (lead.purchase_model or "").strip().lower()
+            if purchase_model in {"capex", "opex"}:
+                opp_fields["purchase_model"] = purchase_model
+            # One number from conversion to closure: the DR number is the
+            # opportunity number and the reference quotes, OVF and tracking use.
+            from modules.crm.models import CrmOpportunity
+
+            dr_number = self._numbers.generate(
+                CrmEntityType.DEAL_REG, lead.company_id, CrmOpportunity, "deal_reg_number"
+            )
+            opp_fields["opportunity_code"] = dr_number
+            opp_fields["deal_reg_number"] = dr_number
             cloud_variant = cloud_variant_from_lead(lead)
             if cloud_variant:
                 opp_fields["cloud_blueprint_variant"] = cloud_variant

@@ -83,7 +83,9 @@ class OpportunityService:
     def create(self, ctx: TenantContext, *, branch_id: UUID, company_id: UUID | None = None, **fields):
         cid = self._scope.resolve_company_id(ctx, company_id)
         self._scope.validate_branch_access(ctx, branch_id)
-        code = self._numbers.generate(CrmEntityType.OPPORTUNITY, cid, CrmOpportunity, "opportunity_code")
+        code = fields.pop("opportunity_code", None) or self._numbers.generate(
+            CrmEntityType.OPPORTUNITY, cid, CrmOpportunity, "opportunity_code"
+        )
         fields.setdefault("document_date", date.today())
         fields.setdefault("status", OpportunityStatus.OPEN.value)
         fields.setdefault("current_stage", "qualification")
@@ -149,6 +151,16 @@ class OpportunityService:
             revenue = Decimal(str(fields.get("expected_revenue", opp.expected_revenue)))
             prob = Decimal(str(fields.get("probability_percent", opp.probability_percent)))
             fields["forecast_amount"] = (revenue * prob / Decimal("100")).quantize(Decimal("0.0001"))
+        purchase_model = fields.get("purchase_model", opp.purchase_model)
+        lease_keys = (
+            "lease_type",
+            "lease_partner",
+            "lease_interest_rate_pct",
+            "lease_tenure_months",
+            "lease_monthly_rental",
+        )
+        if purchase_model != "opex" and any(fields.get(k) is not None for k in lease_keys):
+            raise ConflictException("Lease details apply only to OpEx (lease) opportunities")
         row = self._repo.update(ctx, opportunity_id, **fields)
         if row is None:
             raise NotFoundException("Opportunity not found")

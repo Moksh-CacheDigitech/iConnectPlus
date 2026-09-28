@@ -37,6 +37,39 @@ class ProcurementMasterDataAdapter:
     def get_vendor(self, ctx: TenantContext, vendor_id: UUID):
         return self._vendors.get_vendor(ctx, vendor_id)
 
+    def employee_id_for_user(self, ctx: TenantContext, user_id: UUID | None) -> UUID | None:
+        from modules.master_data.repository.employee_repository import EmployeeRepository
+
+        if user_id is None:
+            return None
+        row = EmployeeRepository(self._db).get_by_user_id(ctx, user_id)
+        return row.id if row is not None else None
+
+    def employee_names(self, ctx: TenantContext, employee_ids: list[UUID]) -> dict[UUID, str]:
+        from modules.master_data.models.employee import MasterEmployee
+
+        ids = [eid for eid in set(employee_ids) if eid is not None]
+        if not ids:
+            return {}
+        stmt = select(MasterEmployee).where(
+            MasterEmployee.tenant_id == ctx.tenant_id,
+            MasterEmployee.id.in_(ids),
+        )
+        return {
+            row.id: f"{row.first_name} {row.last_name or ''}".strip()
+            for row in self._db.scalars(stmt).all()
+        }
+
+    def employee_user_id(self, ctx: TenantContext, employee_id: UUID | None) -> UUID | None:
+        from modules.master_data.models.employee import MasterEmployee
+
+        if employee_id is None:
+            return None
+        row = self._db.get(MasterEmployee, employee_id)
+        if row is None or row.tenant_id != ctx.tenant_id:
+            return None
+        return row.user_id
+
     def list_vendors(
         self,
         ctx: TenantContext,

@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiClientError } from "@/services/api-client";
+import { extractCustomerPo, type CustomerPoExtract } from "@/services/crm-deal-controls-service";
 import { fileToBase64, getNextDealRegNumber, listApprovalStepOwners, listCrmApprovalUsers, type BlueprintActionPayload } from "@/services/sales-crm-service";
 
 type FieldType =
@@ -18,6 +19,7 @@ type FieldType =
   | "date"
   | "number"
   | "file"
+  | "checkbox"
   | "approver"
   | "approver_stage";
 
@@ -42,7 +44,8 @@ type FieldConfig = {
   | "finance_user_ids"
   | "legal_user_ids"
   | "management_user_ids"
-  | "operations_user_ids";
+  | "operations_user_ids"
+  | "terms_accepted";
   label: string;
   type: FieldType;
   required?: boolean;
@@ -81,6 +84,12 @@ const APPROVAL_ADMIN_NOTE =
 // commercials, Legal checks terms & conditions, then Management approves.
 // Each stage's My Jobs task is raised only once the previous one is approved.
 const PO_APPROVAL_DIALOG_FIELDS: FieldConfig[] = [
+  {
+    key: "terms_accepted",
+    label: "I have checked and verified all terms & conditions of this customer PO",
+    type: "checkbox",
+    required: true,
+  },
   {
     key: "finance_user_ids",
     label: "1. Finance - tax, GST & commercials",
@@ -202,20 +211,25 @@ const ACTION_CONFIG: Record<string, ActionConfig> = {
   },
   oem_received: { label: "OEM Quotation Received", fields: [] },
   attach_oem_quote: {
-    label: "Attach OEM Quote",
-    fields: [{ key: "file_name", label: "OEM quote file", type: "file", required: true }],
+    label: "Attach Vendor Quote",
+    fields: [{ key: "file_name", label: "Vendor / OEM / market quote file", type: "file", required: true }],
     description:
-      "Hardware: OEM vendor quote. Cloud MAP migration: AWS migration quotation from the OEM.",
+      "Hardware: the quote you are buying against - OEM, distributor or open-market vendor. " +
+      "Cloud MAP migration: AWS migration quotation from the OEM.",
   },
   attach_po: {
     label: "Attach Customer PO",
     fields: [{ key: "file_name", label: "Customer PO file", type: "file", required: true }],
+    description:
+      "PO number, PO date, GSTINs and bill-to / ship-to are read from the file. New GSTINs are saved " +
+      "on the customer account.",
   },
   send_po_approval: {
     label: "Send PO for Approval",
     fields: PO_APPROVAL_DIALOG_FIELDS,
     description:
-      "Routes the customer PO through Finance (tax & commercials), then Legal (terms & conditions), " +
+      "Read the attached PO first (Documents). Sales accepts the terms, then the PO goes to " +
+      "Finance (tax & commercials), then Legal (terms & conditions), " +
       "then Management. Each stage is raised in My Jobs only after the previous one approves. " +
       "If the PO carries service (SAC) lines, the Operations owner is handed that scope as soon as " +
       `Management approves - they do not wait for the hardware. ${APPROVAL_ADMIN_NOTE}`,
@@ -379,6 +393,26 @@ export function BlueprintActions({
     { id: string; label: string; name: string; email: string }[]
   >([]);
   const [stepOwnerIds, setStepOwnerIds] = useState<Record<string, string[]>>({});
+  const [poExtract, setPoExtract] = useState<CustomerPoExtract | null>(null);
+  const [poExtracting, setPoExtracting] = useState(false);
+
+  async function previewCustomerPo(upload: File | undefined) {
+    setPoExtract(null);
+    if (!upload || !opportunityId) return;
+    setPoExtracting(true);
+    try {
+      setPoExtract(
+        await extractCustomerPo(opportunityId, {
+          file_name: upload.name,
+          content_base64: await fileToBase64(upload),
+        }),
+      );
+    } catch {
+      setPoExtract(null);
+    } finally {
+      setPoExtracting(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -514,6 +548,7 @@ export function BlueprintActions({
     );
     setFile(null);
     setFiles([]);
+    setPoExtract(null);
     setError(null);
 
     if (action === "deal_reg" && opportunityId) {
@@ -570,6 +605,13 @@ export function BlueprintActions({
         }
         continue;
       }
+      if (field.required && field.type === "checkbox") {
+        if (values[field.key] !== "true") {
+          setError("Confirm you have read and verified the customer PO terms & conditions");
+          return;
+        }
+        continue;
+      }
       if (field.required && field.type !== "file" && !values[field.key]?.trim()) {
         setError(`${field.label} is required`);
         return;
@@ -593,6 +635,7 @@ export function BlueprintActions({
       for (const field of config.fields) {
         if (
           field.type === "file" ||
+          field.type === "checkbox" ||
           field.type === "approver" ||
           field.type === "approver_stage"
         ) {
@@ -610,6 +653,7 @@ export function BlueprintActions({
         payloadBase.assigned_user_id = approverIds[0];
       }
       if (dispatchAction === "send_po_approval") {
+        payloadBase.terms_accepted = values.terms_accepted === "true";
         payloadBase.finance_user_ids = poStageApprovers.finance;
         payloadBase.legal_user_ids = poStageApprovers.legal;
         payloadBase.management_user_ids = poStageApprovers.management;
@@ -751,7 +795,20 @@ export function BlueprintActions({
                 label={field.required ? `${field.label} *` : field.label}
                 className="space-y-2"
               >
-                {field.type === "textarea" ? (
+                {field.type === "checkbox" ? (
+                  <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 size-4 shrink-0 cursor-pointer accent-primary"
+                      checked={values[field.key] === "true"}
+                      onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.checked ? "true" : "" }))}
+                    />
+                    <span>
+                      Yes, I have read the customer PO and I accept its terms - payment terms, LD clauses,
+                      delivery and warranty obligations. It can now go to Finance.
+                    </span>
+                  </label>
+                ) : field.type === "textarea" ? (
                   <FinanceTextarea
                     value={values[field.key] ?? ""}
                     onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
@@ -822,6 +879,7 @@ export function BlueprintActions({
                           ) {
                             setFiles(selected);
                             setFile(selected[0] ?? null);
+                            if (activeAction === "attach_po") void previewCustomerPo(selected[0]);
                           } else {
                             setFile(selected[0] ?? null);
                             setFiles(selected[0] ? [selected[0]] : []);
@@ -842,6 +900,38 @@ export function BlueprintActions({
                           </li>
                         ))}
                       </ul>
+                    ) : null}
+                    {activeAction === "attach_po" && (poExtracting || poExtract) ? (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                        {poExtracting ? (
+                          "Reading PO details…"
+                        ) : poExtract && poExtract.fields_found.length > 0 ? (
+                          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                            <dt className="text-slate-500">PO number</dt>
+                            <dd>{poExtract.po_number ?? "-"}</dd>
+                            <dt className="text-slate-500">PO date</dt>
+                            <dd>{poExtract.po_date ?? "-"}</dd>
+                            <dt className="text-slate-500">GSTIN</dt>
+                            <dd>
+                              {poExtract.gst_registrations.length > 0
+                                ? poExtract.gst_registrations
+                                  .map((g) => `${g.gstin}${g.state ? ` (${g.state})` : ""}${g.is_new ? " - saved to account" : ""}`)
+                                  .join(", ")
+                                : "-"}
+                            </dd>
+                            {poExtract.delivery_weeks_max ? (
+                              <>
+                                <dt className="text-slate-500">Lead time</dt>
+                                <dd>
+                                  {poExtract.delivery_weeks_min}-{poExtract.delivery_weeks_max} weeks
+                                </dd>
+                              </>
+                            ) : null}
+                          </dl>
+                        ) : (
+                          "Could not read PO details from this file - enter them on the OVF."
+                        )}
+                      </div>
                     ) : null}
                   </div>
                 ) : (

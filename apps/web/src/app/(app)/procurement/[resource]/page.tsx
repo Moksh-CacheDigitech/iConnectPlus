@@ -6,6 +6,7 @@ import { DeliveryChallanListPage } from "@/components/procurement/delivery-chall
 import { DeliveryStatusPage } from "@/components/procurement/delivery-status-page";
 import { GrnsListPage } from "@/components/procurement/grns-list-page";
 import { InstallationPage } from "@/components/procurement/installation-page";
+import { InventoryAgingPage } from "@/components/procurement/inventory-aging-page";
 import { OrdersListPage } from "@/components/procurement/orders-list-page";
 import { ProcurementApprovalsPage } from "@/components/procurement/procurement-approvals-page";
 import {
@@ -15,6 +16,7 @@ import {
 import { ProcurementTimelineListPage } from "@/components/procurement/ovf-timeline-page";
 import { ScmQueuePage } from "@/components/procurement/scm-queue-page";
 import { ProcurementInventoryListPage } from "@/components/procurement/procurement-inventory-list-page";
+import { ServiceContractsPage } from "@/components/procurement/service-contracts-page";
 import { VendorsListPage } from "@/components/procurement/vendors-list-page";
 import { getModule, getResource } from "@/config/modules";
 
@@ -34,6 +36,8 @@ export default async function ProcurementResourcePage({ params }: PageProps) {
   if (resourceKey === "installation") return <InstallationPage />;
   if (resourceKey === "vendors") return <VendorsListPage />;
   if (resourceKey === "inventory") return <ProcurementInventoryListPage />;
+  if (resourceKey === "inventory-aging") return <InventoryAgingPage />;
+  if (resourceKey === "service-contracts") return <ServiceContractsPage />;
   if (resourceKey === "approval" || resourceKey === "approvals") return <ProcurementApprovalsPage />;
   if (resourceKey === "reports") return <ProcurementReportsPage />;
   if (resourceKey === "analytics") return <ProcurementAnalyticsPage />;

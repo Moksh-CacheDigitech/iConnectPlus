@@ -15,6 +15,44 @@ def retry_invoice_posting() -> dict:
     return {"status": "stub", "retried": 0}
 
 
+@celery_app.task(name="procurement.inventory_holding_costs")
+def inventory_holding_costs() -> dict:
+    """Release stock of closed / lost deals and push stock carrying cost into OVF margins."""
+    from uuid import uuid4
+
+    from sqlalchemy import select
+
+    from database.session import SessionLocal
+    from modules.foundation.domain.value_objects import TenantContext
+    from modules.procurement.models.inventory_stock import ProcInventoryStockUnit
+    from modules.procurement.service.inventory_ownership_service import InventoryOwnershipService
+
+    db = SessionLocal()
+    try:
+        tenant_ids = list(
+            db.scalars(
+                select(ProcInventoryStockUnit.tenant_id)
+                .where(ProcInventoryStockUnit.is_deleted.is_(False))
+                .distinct()
+            ).all()
+        )
+        system_user = uuid4()
+        totals = {"released": 0, "ovfs_priced": 0, "failed_tenants": 0}
+        for tenant_id in tenant_ids:
+            ctx = TenantContext(tenant_id=tenant_id, user_id=system_user, user_type="super_admin")
+            try:
+                service = InventoryOwnershipService(db)
+                totals["released"] += service.release_closed_deal_stock(ctx)
+                totals["ovfs_priced"] += service.push_holding_costs(ctx)
+                db.commit()
+            except Exception:
+                db.rollback()
+                totals["failed_tenants"] += 1
+        return {"status": "ok", **totals}
+    finally:
+        db.close()
+
+
 @celery_app.task(name="procurement.delivery_notifications")
 def delivery_notifications() -> dict:
     """Acknowledge new orders, chase distributors for an ETD, update customers.

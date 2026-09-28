@@ -10,9 +10,12 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatInr } from "@/services/procurement-service";
 import {
+  formatInventoryDateAdded,
+  formatInventoryWarrantyLabel,
   inventoryAddedByLabel,
   inventoryRowAddedBy,
   inventoryRowStableKey,
+  isInventoryWarrantyExpired,
   nonBilledStockQuantity,
   type GrnStockByProductRow,
 } from "@/utils/procurement-inventory-report";
@@ -80,7 +83,7 @@ export function InventoryProductDetailDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="inventory-product-detail-title"
-        className="flex max-h-[min(88vh,640px)] w-full max-w-2xl flex-col rounded-xl border border-border/80 bg-card shadow-lg"
+        className="flex max-h-[min(90vh,720px)] w-full max-w-5xl flex-col rounded-xl border border-border/80 bg-card shadow-lg"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border/60 px-5 py-4">
@@ -124,73 +127,118 @@ export function InventoryProductDetailDialog({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <p className="mb-3 text-xs text-muted-foreground">
-            Source breakdown by company PO, GRN, serial, and vendor rate.
+            Source breakdown by company PO, GRN, serial, warranty, and vendor rate.
           </p>
           <div className={procurementUi.tableShell}>
-            <div className={procurementUi.tableScroll}>
-              <table className={cn(procurementUi.table, "min-w-[520px]")}>
+            <div className="overflow-x-auto">
+              <table className={cn(procurementUi.table, "w-full min-w-[720px] table-fixed")}>
+                <colgroup>
+                  <col className="w-[72px]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[56px]" />
+                  <col className="w-[12%]" />
+                </colgroup>
                 <thead className={procurementUi.thead}>
                   <tr>
-                    <th className={cn(procurementUi.th, "px-3")}>Added by</th>
-                    <th className={cn(procurementUi.th, "px-3")}>Company PO</th>
-                    <th className={cn(procurementUi.th, "px-3")}>GRN</th>
-                    <th className={cn(procurementUi.th, "px-3")}>Serial</th>
-                    <th className={cn(procurementUi.th, "px-3 text-right")}>Qty</th>
-                    <th className={cn(procurementUi.th, "px-3 text-right")}>Rate</th>
+                    <th className={cn(procurementUi.th, "px-2")}>Source</th>
+                    <th className={cn(procurementUi.th, "px-2")}>Company PO</th>
+                    <th className={cn(procurementUi.th, "px-2")}>GRN</th>
+                    <th className={cn(procurementUi.th, "px-2")}>Serial</th>
+                    <th className={cn(procurementUi.th, "px-2")}>Date added</th>
+                    <th className={cn(procurementUi.th, "px-2")}>Warranty until</th>
+                    <th className={cn(procurementUi.th, "px-2 text-right")}>Qty</th>
+                    <th className={cn(procurementUi.th, "px-2 text-right")}>Rate</th>
                   </tr>
                 </thead>
                 <tbody>
                   {unitRows.map((row, index) => {
                     const addedBy = inventoryRowAddedBy(row);
+                    const expired = isInventoryWarrantyExpired(row.warranty_valid_till);
                     return (
-                    <tr key={inventoryRowStableKey(row, index)} className={procurementUi.tr}>
-                      <td className={cn(procurementUi.td, "px-3")}>
-                        <span
+                      <tr
+                        key={inventoryRowStableKey(row, index)}
+                        className={cn(procurementUi.tr, expired && "bg-destructive/5")}
+                      >
+                        <td className={cn(procurementUi.td, "px-2")}>
+                          <span
+                            className={cn(
+                              "inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                              addedBy === "po"
+                                ? "border-sky-200 bg-sky-50 text-sky-800"
+                                : "border-border/80 bg-muted/60 text-muted-foreground",
+                            )}
+                          >
+                            {addedBy === "po" ? "PO" : "Manual"}
+                          </span>
+                        </td>
+                        <td
                           className={cn(
-                            "inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                            addedBy === "po"
-                              ? "border-sky-200 bg-sky-50 text-sky-800"
-                              : "border-border/80 bg-muted/60 text-muted-foreground",
+                            procurementUi.td,
+                            "max-w-0 truncate px-2 font-mono text-xs tabular-nums",
+                          )}
+                          title={row.company_po_number?.trim() || undefined}
+                        >
+                          {row.company_po_number?.trim() || "-"}
+                        </td>
+                        <td
+                          className={cn(
+                            procurementUi.td,
+                            "max-w-0 truncate px-2 font-mono text-xs tabular-nums",
+                          )}
+                          title={row.grn_number?.trim() || undefined}
+                        >
+                          {row.grn_number?.trim() || "-"}
+                          {row.source === "grn_reversal" ? (
+                            <span className="ml-1 text-[10px] font-medium uppercase text-destructive">
+                              Rev
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className={cn(procurementUi.td, "min-w-0 px-2")}>
+                          <InventorySerialEditor
+                            row={row}
+                            onSaved={onRefresh}
+                            onError={onError}
+                          />
+                        </td>
+                        <td
+                          className={cn(
+                            procurementUi.td,
+                            "px-2 text-xs text-muted-foreground",
                           )}
                         >
-                          {inventoryAddedByLabel(addedBy)}
-                        </span>
-                      </td>
-                      <td className={cn(procurementUi.td, "px-3 font-mono text-xs tabular-nums")}>
-                        {row.company_po_number?.trim() || "-"}
-                      </td>
-                      <td className={cn(procurementUi.td, "px-3 font-mono text-xs tabular-nums")}>
-                        {row.grn_number?.trim() || "-"}
-                        {row.source === "grn_reversal" ? (
-                          <span className="ml-1.5 text-[10px] font-medium uppercase text-destructive">
-                            Rev
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className={cn(procurementUi.td, "px-3 min-w-[120px]")}>
-                        <InventorySerialEditor
-                          row={row}
-                          onSaved={onRefresh}
-                          onError={onError}
-                        />
-                      </td>
-                      <td
-                        className={cn(
-                          procurementUi.tdNumeric,
-                          "px-3 text-right font-mono tabular-nums",
-                        )}
-                      >
-                        {nonBilledStockQuantity(row).toLocaleString("en-IN")}
-                      </td>
-                      <td
-                        className={cn(
-                          procurementUi.tdNumeric,
-                          "px-3 text-right font-mono tabular-nums",
-                        )}
-                      >
-                        {formatInr(Number(row.unit_cost) || 0)}
-                      </td>
-                    </tr>
+                          {formatInventoryDateAdded(row.receipt_at)}
+                        </td>
+                        <td
+                          className={cn(
+                            procurementUi.td,
+                            "px-2 text-xs font-medium",
+                            expired ? "text-destructive" : "text-muted-foreground",
+                          )}
+                        >
+                          {formatInventoryWarrantyLabel(row.warranty_valid_till)}
+                        </td>
+                        <td
+                          className={cn(
+                            procurementUi.tdNumeric,
+                            "px-2 text-right font-mono tabular-nums",
+                          )}
+                        >
+                          {nonBilledStockQuantity(row).toLocaleString("en-IN")}
+                        </td>
+                        <td
+                          className={cn(
+                            procurementUi.tdNumeric,
+                            "px-2 text-right font-mono tabular-nums",
+                          )}
+                        >
+                          {formatInr(Number(row.unit_cost) || 0)}
+                        </td>
+                      </tr>
                     );
                   })}
                 </tbody>

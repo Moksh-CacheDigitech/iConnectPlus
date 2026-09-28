@@ -7,7 +7,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from modules.crm.dependencies import PaginationParams, get_db, get_pagination, paginate
-from modules.crm.schemas import ApprovalTaskDecisionRequest, ApprovalTaskResponse, CrmApprovalUserOption
+from modules.crm.schemas import (
+    ApprovalTaskDecisionRequest,
+    ApprovalTaskRespondRequest,
+    ApprovalTaskResponse,
+    CrmApprovalUserOption,
+)
 from modules.crm.service import ApprovalTaskService
 from modules.foundation.dependencies import require_permission
 from modules.foundation.domain.value_objects import TenantContext
@@ -69,6 +74,18 @@ def get_my_job(
     db: Annotated[Session, Depends(get_db)],
 ):
     return APIResponse(message="OK", data=ApprovalTaskService(db).get(ctx, task_id))
+
+
+@my_jobs_router.post("/{task_id}/respond", response_model=APIResponse[ApprovalTaskResponse])
+def respond_my_job(
+    task_id: UUID,
+    body: ApprovalTaskRespondRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.my_jobs:decide"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """BOQ/SOW: confirm within 1 hour whether the document can be submitted."""
+    row = ApprovalTaskService(db).respond(ctx, task_id, can_submit=body.can_submit, reason=body.reason)
+    return APIResponse(message="Response recorded", data=row)
 
 
 @my_jobs_router.post("/{task_id}/decide", response_model=APIResponse[ApprovalTaskResponse])

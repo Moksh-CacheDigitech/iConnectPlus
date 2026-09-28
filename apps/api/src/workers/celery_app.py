@@ -43,6 +43,20 @@ celery_app.conf.update(
             "task": "crm.stale_lead_alerts",
             "schedule": 86400.0,
         },
+        # Stock carrying cost first, then the OVF live margin that absorbs it.
+        "procurement.inventory_holding_costs": {
+            "task": "procurement.inventory_holding_costs",
+            "schedule": 86400.0,
+        },
+        "crm.ovf_live_margin_refresh": {
+            "task": "crm.ovf_live_margin_refresh",
+            "schedule": 86400.0,
+        },
+        # BOQ/SOW: 1-hour response and 6-hour attach SLAs need a tight loop.
+        "crm.boq_sow_sla_escalations": {
+            "task": "crm.boq_sow_sla_escalations",
+            "schedule": 600.0,
+        },
     },
 )
 
