@@ -17,6 +17,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, ForbiddenException, NotFoundException
+from modules.crm.domain import delivery_timeline
 from modules.crm.domain.enums import CrmEntityType
 from modules.crm.domain.tax_codes import classify_hsn_sac
 from modules.crm.models import CrmOpportunity, CrmOvf, CrmOvfLine, CrmQuote
@@ -35,6 +36,10 @@ from modules.crm.service.engines import margin_engine, sales_blueprint_engine
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.service.audit_service import AuditService
 from modules.master_data.service.employee_service import EmployeeService
+
+
+FREIGHT_MEDIUMS = ("air", "road", "sea", "courier")
+NEGOTIATED_BY_OPTIONS = ("sales", "management", "scm", "presales", "finance", "other")
 
 
 def _first(*values: Any) -> Any:
@@ -693,7 +698,11 @@ class OvfService:
                 "from an accepted customer quote."
             )
         existing = self._repo.list_ovfs(ctx, opp.company_id, opportunity_id=opp.id)
-        if existing:
+        # Split quotes (one per entity / location) each carry their own customer PO and OVF.
+        split_quote_without_ovf = getattr(quote, "parent_quote_id", None) is not None and all(
+            row.quote_id != quote.id for row in existing
+        )
+        if existing and not split_quote_without_ovf:
             raise ConflictException(
                 "An OVF already exists for this opportunity. Open the existing OVF "
                 "to continue approval, SCM share, or Deal Won."
@@ -726,8 +735,17 @@ class OvfService:
         fields["finance_cost_pct"] = margin_engine.compute_finance_cost_pct(
             vendor_days, customer_days
         )
+        self._normalize_commercial_fields(fields)
+        fields.update(self._delivery_fields(None, fields))
 
-        code = self._numbers.generate(CrmEntityType.OVF, opp.company_id, CrmOvf, "ovf_no")
+        code = self._numbers.generate_for_deal(
+            CrmEntityType.OVF,
+            opp.company_id,
+            CrmOvf,
+            "ovf_no",
+            deal_number=getattr(opp, "deal_reg_number", None),
+            tag="OVF",
+        )
         approval_status = fields.pop("approval_status", None) or "not_required"
         if approval_status not in ("not_required", "pending", "approved", "rejected"):
             approval_status = "not_required"
@@ -764,6 +782,14 @@ class OvfService:
                     line_total=(quote_line.qty * unit_price).quantize(Decimal("0.0001")),
                 )
 
+        # Baseline for "negotiated vs original" vendor price on the OVF.
+        row.original_vendor_total = sum(
+            (
+                (Decimal(str(ql.qty)) * Decimal(str(ql.unit_cost))).quantize(Decimal("0.0001"))
+                for ql in self._quote_lines.list_for_quote(ctx, quote.id)
+            ),
+            Decimal("0"),
+        )
         self._recompute_margin(ctx, row.id)
 
         from_opp_state = opp.blueprint_state or "ovf_ready"
@@ -791,6 +817,9 @@ class OvfService:
         fields["finance_cost_pct"] = margin_engine.compute_finance_cost_pct(
             vendor_days, customer_days
         )
+        self._normalize_commercial_fields(fields)
+        if any(k in fields for k in ("delivery_weeks_min", "delivery_weeks_max", "delivery_period", "po_date")):
+            fields.update(self._delivery_fields(ovf, fields))
 
         approval_status = fields.get("approval_status")
         if approval_status is not None and approval_status not in (
@@ -804,11 +833,42 @@ class OvfService:
         row = self._repo.update(ctx, ovf_id, **fields)
         if row is None:
             raise NotFoundException("OVF not found")
-        if any(key in fields for key in ("freight", "vendor_payment_days", "customer_payment_days", "finance_cost_pct")):
+        if any(
+            key in fields
+            for key in (
+                "freight",
+                "vendor_payment_days",
+                "customer_payment_days",
+                "finance_cost_pct",
+                "additional_charges",
+                "early_payment_discount_pct",
+            )
+        ):
             if fields.get("total_margin_amount") is None and fields.get("total_margin_pct") is None:
                 self._recompute_margin(ctx, ovf_id)
                 row = self.get(ctx, ovf_id)
         return row
+
+    @staticmethod
+    def _normalize_commercial_fields(fields: dict[str, Any]) -> None:
+        negotiated_by = fields.get("negotiated_by")
+        if negotiated_by is not None:
+            value = negotiated_by.strip().lower()
+            if value and value not in NEGOTIATED_BY_OPTIONS:
+                raise ConflictException(
+                    f"Negotiated by must be one of {', '.join(NEGOTIATED_BY_OPTIONS)}"
+                )
+            fields["negotiated_by"] = value or None
+            if value == "other" and not (fields.get("negotiation_remark") or "").strip():
+                raise ConflictException("Add a remark saying who negotiated the price")
+        discount = fields.get("early_payment_discount_pct")
+        if discount is None:
+            fields.pop("early_payment_discount_pct", None)
+        else:
+            value = Decimal(str(discount))
+            if value < 0 or value > 100:
+                raise ConflictException("Early payment discount must be between 0 and 100%")
+            fields["early_payment_discount_pct"] = value
 
     # -- lines -----------------------------------------------------------
     def add_line(self, ctx: TenantContext, ovf_id: UUID, **fields) -> CrmOvfLine:
@@ -852,23 +912,26 @@ class OvfService:
         return row
 
     def _recompute_margin(self, ctx: TenantContext, ovf_id: UUID) -> None:
+        """Planned margin (what Management approves); the live margin is derived from it."""
         ovf = self.get(ctx, ovf_id)
         lines = self._lines.list_for_ovf(ctx, ovf_id)
         customer_total = sum((Decimal(str(ln.line_total)) for ln in lines if ln.side == "customer_po"), Decimal("0"))
         vendor_total = sum((Decimal(str(ln.line_total)) for ln in lines if ln.side == "vendor"), Decimal("0"))
-        freight = Decimal(str(ovf.freight or 0))
-        additional = Decimal(str(ovf.additional_charges or 0))
-        finance_pct = Decimal(str(ovf.finance_cost_pct or 0))
-        finance_amount = (vendor_total * finance_pct / Decimal("100")).quantize(Decimal("0.0001"))
-        margin_amount = (
-            customer_total - vendor_total - freight - additional - finance_amount
-        ).quantize(Decimal("0.0001"))
-        margin_pct = (
-            (margin_amount / customer_total * Decimal("100")).quantize(Decimal("0.001"))
-            if customer_total
-            else Decimal("0")
+        margin = margin_engine.compute_ovf_margin(
+            customer_total=customer_total,
+            vendor_total=vendor_total,
+            freight=ovf.freight,
+            additional_charges=ovf.additional_charges,
+            finance_cost_pct=ovf.finance_cost_pct,
+            early_payment_discount_pct=ovf.early_payment_discount_pct,
         )
-        self._repo.update(ctx, ovf_id, total_margin_amount=margin_amount, total_margin_pct=margin_pct)
+        self._repo.update(
+            ctx, ovf_id, total_margin_amount=margin.margin_amount, total_margin_pct=margin.margin_pct
+        )
+        if ovf.margin_at_approval_amount is not None and ovf.closed_at is None:
+            from modules.crm.service.ovf_finance_service import OvfFinanceService
+
+            OvfFinanceService(self._db).refresh_live_margin(ctx, ovf_id)
 
     # -- blueprint / approval workflow ------------------------------------
     def send_for_approval(
@@ -916,9 +979,13 @@ class OvfService:
                     "Approve is only available for OVFs pending Management approval via My Jobs"
                 )
             next_state = sales_blueprint_engine.transition("ovf", ovf.blueprint_state, "approve")
-            row = self._repo.update(ctx, ovf_id, blueprint_state=next_state, approval_status="approved", locked=False)
-            self._log(ctx, ovf, ovf.blueprint_state, next_state, "approve", payload.get("remark"))
-            return row
+            self._repo.update(ctx, ovf_id, blueprint_state=next_state, approval_status="approved", locked=False)
+            self._log(ctx, ovf, "approval", next_state, "approve", payload.get("remark"))
+            from modules.crm.service.ovf_finance_service import OvfFinanceService
+
+            OvfFinanceService(self._db).snapshot_margin_at_approval(ctx, ovf_id)
+            # Saved + approved OVFs go straight to SCM - no manual share step.
+            return self.share_to_scm(ctx, ovf_id)
         if action == "reject":
             if not (ovf.locked and ovf.blueprint_state == "approval"):
                 raise ConflictException(
@@ -936,6 +1003,8 @@ class OvfService:
 
     def share_to_scm(self, ctx: TenantContext, ovf_id: UUID) -> CrmOvf:
         ovf = self.get(ctx, ovf_id)
+        if ovf.shared_to_scm:
+            return ovf
         sales_blueprint_engine.assert_not_locked(ovf)
         next_state = sales_blueprint_engine.transition("ovf", ovf.blueprint_state, "share_to_scm")
         row = self._repo.update(
@@ -1001,9 +1070,20 @@ class OvfService:
         )
         return row
 
-    def request_freight_from_scm(self, ctx: TenantContext, ovf_id: UUID) -> CrmOvf:
+    def request_freight_from_scm(
+        self,
+        ctx: TenantContext,
+        ovf_id: UUID,
+        *,
+        medium: str | None = None,
+        weight_kg: Decimal | float | str | None = None,
+        insurance: bool | None = None,
+        remarks: str | None = None,
+    ) -> CrmOvf:
         """Ask configured SCM step owners to provide freight via My Jobs.
 
+        SCM gets what it needs to price the shipment: ship-to location, items and
+        quantities, expected weight, medium (air/road/...) and whether to insure.
         OVF remains in ``draft`` until SCM submits freight (and Sales continues editing).
         """
         ovf = self.get(ctx, ovf_id)
@@ -1013,6 +1093,21 @@ class OvfService:
             raise ConflictException(
                 f"Cannot request freight while OVF is in '{ovf.blueprint_state}'"
             )
+        freight_fields: dict[str, Any] = {}
+        if medium is not None:
+            medium = medium.strip().lower()
+            if medium not in FREIGHT_MEDIUMS:
+                raise ConflictException(f"Freight medium must be one of {', '.join(FREIGHT_MEDIUMS)}")
+            freight_fields["freight_medium"] = medium
+        if weight_kg is not None:
+            weight = Decimal(str(weight_kg))
+            if weight < 0:
+                raise ConflictException("Weight cannot be negative")
+            freight_fields["freight_weight_kg"] = weight.quantize(Decimal("0.001"))
+        if insurance is not None:
+            freight_fields["freight_insurance"] = bool(insurance)
+        if freight_fields:
+            ovf = self._repo.update(ctx, ovf_id, **freight_fields) or ovf
 
         from modules.crm.service.approval_step_owner_service import ApprovalStepOwnerService
         from modules.crm.service.approval_task_service import ApprovalTaskService
@@ -1043,13 +1138,228 @@ class OvfService:
             company_id=ovf.company_id,
             branch_id=ovf.branch_id,
             assigned_user_ids=owner_ids,
-            remarks="Sales requested freight charges",
+            remarks=self._freight_brief(ctx, ovf, remarks),
         )
         # Keep draft while waiting - Sales can still edit other fields.
         if ovf.blueprint_state == "draft":
             self._repo.update(ctx, ovf_id, blueprint_state="draft")
         self._log(ctx, ovf, ovf.blueprint_state, ovf.blueprint_state, "request_freight", None)
         return self.get(ctx, ovf_id)
+
+    def _freight_brief(self, ctx: TenantContext, ovf: CrmOvf, remarks: str | None) -> str:
+        items = [
+            f"{ln.product_name} x {Decimal(str(ln.qty)).normalize():f}"
+            for ln in self._lines.list_for_ovf(ctx, ovf.id)
+            if ln.side == "customer_po"
+        ]
+        ship_to = ", ".join(
+            part for part in (ovf.shipping_address, ovf.shipping_state, ovf.shipping_country) if part
+        )
+        parts = [
+            "Sales requested freight charges.",
+            f"Ship to: {ship_to or 'not captured on OVF'}",
+            f"Items: {'; '.join(items) or 'no customer lines'}",
+            f"Medium: {(ovf.freight_medium or 'not specified').title()}",
+        ]
+        if ovf.freight_weight_kg is not None:
+            parts.append(f"Expected weight: {ovf.freight_weight_kg} kg")
+        parts.append(f"Insurance: {'required' if ovf.freight_insurance else 'not required'}")
+        note = (remarks or "").strip()
+        if note:
+            parts.append(f"Note: {note}")
+        return "\n".join(parts)
+
+    # -- delivery timeline -------------------------------------------------
+    def _delivery_fields(self, ovf: CrmOvf | None, fields: dict[str, Any]) -> dict[str, Any]:
+        """Derive weeks range + expected delivery date from the committed lead time."""
+        weeks_min = fields.get("delivery_weeks_min", getattr(ovf, "delivery_weeks_min", None))
+        weeks_max = fields.get("delivery_weeks_max", getattr(ovf, "delivery_weeks_max", None))
+        if weeks_min is None and weeks_max is None and fields.get("delivery_period"):
+            parsed = delivery_timeline.parse_delivery_weeks(fields["delivery_period"])
+            if parsed is not None:
+                weeks_min, weeks_max = parsed
+        if weeks_min is None and weeks_max is None:
+            return {}
+        weeks_min = int(weeks_min if weeks_min is not None else weeks_max)
+        weeks_max = int(weeks_max if weeks_max is not None else weeks_min)
+        if weeks_min <= 0 or weeks_max <= 0:
+            raise ConflictException("Delivery weeks must be greater than zero")
+        if weeks_min > weeks_max:
+            raise ConflictException("Delivery 'from' weeks cannot be more than 'to' weeks")
+        start = fields.get("po_date", getattr(ovf, "po_date", None)) or date.today()
+        label = f"{weeks_min} weeks" if weeks_min == weeks_max else f"{weeks_min}-{weeks_max} weeks"
+        derived = {
+            "delivery_weeks_min": weeks_min,
+            "delivery_weeks_max": weeks_max,
+            "delivery_period": label,
+        }
+        # SCM-revised dates win over the recomputed commitment.
+        if not (ovf is not None and ovf.delivery_date_history):
+            derived["expected_delivery_date"] = delivery_timeline.expected_delivery_date(start, weeks_max)
+        return derived
+
+    def update_delivery_dates(
+        self,
+        ctx: TenantContext,
+        ovf_id: UUID,
+        *,
+        expected_delivery_date: date | None = None,
+        actual_delivery_date: date | None = None,
+        reason: str | None = None,
+    ) -> CrmOvf:
+        """SCM revises the expected date (with a reason) or records the actual delivery."""
+        ovf = self.get(ctx, ovf_id)
+        if not ovf.shared_to_scm:
+            raise ConflictException("Delivery dates are managed by SCM after the OVF is shared")
+        fields: dict[str, Any] = {}
+        history = list(ovf.delivery_date_history or [])
+        if expected_delivery_date is not None and expected_delivery_date != ovf.expected_delivery_date:
+            text = (reason or "").strip()
+            if not text:
+                raise ConflictException("Give a reason for changing the expected delivery date")
+            history.append(
+                {
+                    "from": ovf.expected_delivery_date.isoformat() if ovf.expected_delivery_date else None,
+                    "to": expected_delivery_date.isoformat(),
+                    "reason": text,
+                    "changed_by": str(ctx.user_id) if ctx.user_id else None,
+                    "changed_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            fields["expected_delivery_date"] = expected_delivery_date
+            fields["delivery_date_history"] = history
+        if actual_delivery_date is not None:
+            fields["actual_delivery_date"] = actual_delivery_date
+        if not fields:
+            return ovf
+        row = self._repo.update(ctx, ovf_id, **fields)
+        self._log(
+            ctx,
+            ovf,
+            ovf.blueprint_state,
+            ovf.blueprint_state,
+            "delivery_date_updated",
+            (reason or "").strip() or None,
+        )
+        if "expected_delivery_date" in fields:
+            self._notify_owner_delivery_change(ctx, ovf, expected_delivery_date, reason)
+        return row
+
+    def _notify_owner_delivery_change(
+        self, ctx: TenantContext, ovf: CrmOvf, new_date: date | None, reason: str | None
+    ) -> None:
+        from modules.crm.service.crm_notification_service import notify_crm_user, resolve_employee_user_id
+
+        opp = self._opportunities.get(ctx, ovf.opportunity_id)
+        user_id = resolve_employee_user_id(self._db, ctx.tenant_id, opp.owner_employee_id if opp else None)
+        if user_id is None:
+            return
+        notify_crm_user(
+            self._db,
+            tenant_id=ctx.tenant_id,
+            recipient_user_id=user_id,
+            event_type="crm.ovf.delivery_date_changed",
+            title=f"Delivery date changed - OVF {ovf.ovf_no}",
+            body=(
+                f"SCM moved the expected delivery for OVF {ovf.ovf_no} "
+                f"to {new_date.isoformat() if new_date else '-'}. Reason: {(reason or '').strip() or '-'}"
+            ),
+            entity_type="ovf",
+            entity_id=ovf.id,
+            href=f"/crm/ovf/{ovf.id}",
+            created_by=ctx.user_id,
+        )
+
+    # -- vendor PO summary break ----------------------------------------------
+    def split_vendor_line(
+        self,
+        ctx: TenantContext,
+        ovf_id: UUID,
+        *,
+        customer_line_id: UUID,
+        splits: Sequence[dict[str, Any]],
+    ) -> list[CrmOvfLine]:
+        """Break one customer PO line across several distributors (e.g. 80 + 20).
+
+        Replaces the vendor lines currently mirroring that customer line.
+        Extra supporting items (cables, SFPs) are still added as normal vendor rows.
+        """
+        ovf = self.get(ctx, ovf_id)
+        sales_blueprint_engine.assert_not_locked(ovf)
+        if ovf.shared_to_scm or ovf.deal_won:
+            raise ConflictException("Vendor lines cannot be changed after the OVF is shared to SCM")
+        lines = self._lines.list_for_ovf(ctx, ovf_id)
+        customer_line = next(
+            (ln for ln in lines if ln.id == customer_line_id and ln.side == "customer_po"), None
+        )
+        if customer_line is None:
+            raise NotFoundException("Customer PO line not found on this OVF")
+        if not splits:
+            raise ConflictException("Add at least one distributor split")
+        total_qty = Decimal("0")
+        for split in splits:
+            qty = Decimal(str(split.get("qty") or 0))
+            if qty <= 0:
+                raise ConflictException("Each split needs a quantity greater than zero")
+            if Decimal(str(split.get("unit_price") or 0)) < 0:
+                raise ConflictException("Unit price cannot be negative")
+            if not (split.get("distributor_name") or "").strip():
+                raise ConflictException("Each split needs a distributor")
+            total_qty += qty
+        if total_qty - Decimal(str(customer_line.qty)) > Decimal("0.0001"):
+            raise ConflictException(
+                f"Split quantity {total_qty.normalize():f} exceeds the customer PO quantity "
+                f"{Decimal(str(customer_line.qty)).normalize():f} for {customer_line.product_name}"
+            )
+
+        for ln in lines:
+            if ln.side != "vendor":
+                continue
+            mirrors_default = (
+                ln.source_line_id is None
+                and ln.line_no == customer_line.line_no
+                and (ln.product_name or "").strip().lower() == (customer_line.product_name or "").strip().lower()
+            )
+            if ln.source_line_id == customer_line.id or mirrors_default:
+                self._lines.soft_delete(ctx, ln)
+
+        created: list[CrmOvfLine] = []
+        for split in splits:
+            qty = Decimal(str(split["qty"]))
+            unit_price = Decimal(str(split.get("unit_price") or 0))
+            created.append(
+                self._lines.create(
+                    ctx,
+                    company_id=ovf.company_id,
+                    branch_id=ovf.branch_id,
+                    ovf_id=ovf.id,
+                    side="vendor",
+                    line_no=customer_line.line_no,
+                    product_name=customer_line.product_name,
+                    description=split.get("description") or customer_line.description,
+                    distributor_name=split["distributor_name"].strip(),
+                    contact_person=split.get("contact_person"),
+                    contact_number=split.get("contact_number"),
+                    qty=qty,
+                    unit_price=unit_price,
+                    gst_pct=Decimal(str(split.get("gst_pct") or customer_line.gst_pct or 18)),
+                    line_total=(qty * unit_price).quantize(Decimal("0.0001")),
+                    source_line_id=customer_line.id,
+                )
+            )
+        self._recompute_margin(ctx, ovf_id)
+        return created
+
+    def delete_line(self, ctx: TenantContext, line_id: UUID) -> None:
+        line = self._lines.get(ctx, line_id)
+        if line is None:
+            raise NotFoundException("OVF line not found")
+        ovf = self.get(ctx, line.ovf_id)
+        sales_blueprint_engine.assert_not_locked(ovf)
+        if ovf.shared_to_scm or ovf.deal_won:
+            raise ConflictException("OVF lines cannot be removed after the OVF is shared to SCM")
+        self._lines.soft_delete(ctx, line)
+        self._recompute_margin(ctx, ovf.id)
 
     def _has_pending_freight_task(self, ctx: TenantContext, ovf: CrmOvf) -> bool:
         from modules.crm.service.approval_task_service import ApprovalTaskService
@@ -1316,6 +1626,10 @@ class OvfService:
             return self.get_invoice_status(ctx, ovf_id)
         if self._repo.update(ctx, ovf_id, **fields) is None:
             raise NotFoundException("OVF not found")
+        if ovf.margin_at_approval_amount is not None and ovf.closed_at is None:
+            from modules.crm.service.ovf_finance_service import OvfFinanceService
+
+            OvfFinanceService(self._db).refresh_live_margin(ctx, ovf_id)
         return self.get_invoice_status(ctx, ovf_id)
 
     def record_scm_savings(

@@ -34,6 +34,8 @@ import {
 } from "@/services/procurement-service";
 import {
   buildProcurementInventoryStockSummary,
+  formatInventoryDateAdded,
+  formatInventoryWarrantyLabel,
   groupGrnStockByProduct,
   isInventoryLedgerRow,
 } from "@/utils/procurement-inventory-report";
@@ -159,6 +161,7 @@ export function ProcurementInventoryListPage() {
       description: string | null;
       serial_number: string;
       order_id: string | null;
+      warranty_valid_till: string | null;
     }>,
   ) {
     setAddBusy(true);
@@ -302,26 +305,50 @@ export function ProcurementInventoryListPage() {
                   <table
                     className={cn(
                       procurementUi.table,
-                      "min-w-[960px] border-separate border-spacing-0",
+                      "w-full min-w-[960px] table-fixed border-separate border-spacing-0",
                     )}
                   >
+                    <colgroup>
+                      <col className="w-[22%]" />
+                      <col className="w-[7%]" />
+                      <col className="w-[16%]" />
+                      <col className="w-[9%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[10%]" />
+                      <col className="w-[10%]" />
+                    </colgroup>
                     <thead className={procurementUi.thead}>
                       <tr>
-                        <th className={cn(procurementUi.th, "px-4")}>Product</th>
-                        <th className={cn(procurementUi.th, "px-4 text-right")}>Stock qty</th>
-                        <th className={cn(procurementUi.th, "px-4")}>Description</th>
-                        <th className={cn(procurementUi.th, "px-4 text-right")}>Vendor price</th>
-                        <th className={cn(procurementUi.th, "px-4")}>Serial number</th>
-                        <th className={cn(procurementUi.th, "px-4")}>GRN number</th>
+                        <th className={cn(procurementUi.th, "px-3")}>Product</th>
+                        <th className={cn(procurementUi.th, "px-3 text-right")}>Qty</th>
+                        <th className={cn(procurementUi.th, "px-3")}>Description</th>
+                        <th className={cn(procurementUi.th, "px-3 text-right")}>Price</th>
+                        <th className={cn(procurementUi.th, "px-3")}>Serial</th>
+                        <th className={cn(procurementUi.th, "px-3")}>GRN</th>
+                        <th className={cn(procurementUi.th, "px-3")}>Date added</th>
+                        <th className={cn(procurementUi.th, "px-3")}>Warranty until</th>
                       </tr>
                     </thead>
                     <tbody>
                       {grnStockByProduct.map((line) => (
-                        <tr key={line.productKey} className={procurementUi.tr}>
-                          <td className={cn(procurementUi.td, "px-4")}>
+                        <tr
+                          key={line.productKey}
+                          className={cn(
+                            procurementUi.tr,
+                            line.warrantyExpired &&
+                            "bg-destructive/5 hover:bg-destructive/10",
+                          )}
+                        >
+                          <td className={cn(procurementUi.td, "px-3")}>
                             <button
                               type="button"
-                              className="cursor-pointer text-left font-medium text-foreground transition-colors duration-200 hover:text-[#0369A1] hover:underline"
+                              className={cn(
+                                "cursor-pointer text-left font-medium transition-colors duration-200 hover:underline",
+                                line.warrantyExpired
+                                  ? "text-destructive hover:text-destructive"
+                                  : "text-foreground hover:text-[#0369A1]",
+                              )}
                               onClick={() => {
                                 setDetailError(null);
                                 setDetailProductKey(line.productKey);
@@ -329,11 +356,16 @@ export function ProcurementInventoryListPage() {
                             >
                               {line.productName}
                             </button>
+                            {line.warrantyExpired ? (
+                              <span className="mt-1 inline-flex rounded border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-destructive">
+                                Out of warranty
+                              </span>
+                            ) : null}
                           </td>
                           <td
                             className={cn(
                               procurementUi.tdNumeric,
-                              "px-4 text-right font-mono tabular-nums",
+                              "px-3 text-right font-mono tabular-nums",
                               line.stockQty < 0 ? "text-destructive" : "text-foreground",
                             )}
                           >
@@ -342,7 +374,7 @@ export function ProcurementInventoryListPage() {
                           <td
                             className={cn(
                               procurementUi.td,
-                              "px-4 max-w-[220px] text-muted-foreground",
+                              "px-3 text-muted-foreground",
                             )}
                           >
                             <span className="line-clamp-2" title={line.description}>
@@ -352,7 +384,7 @@ export function ProcurementInventoryListPage() {
                           <td
                             className={cn(
                               procurementUi.tdNumeric,
-                              "px-4 text-right font-mono tabular-nums",
+                              "px-3 text-right font-mono tabular-nums",
                             )}
                           >
                             {formatInr(line.avgUnitCost)}
@@ -360,25 +392,44 @@ export function ProcurementInventoryListPage() {
                           <td
                             className={cn(
                               procurementUi.td,
-                              "px-4 min-w-[140px] font-mono text-xs text-muted-foreground",
+                              "px-3 font-mono text-xs text-muted-foreground",
                             )}
                             title={line.serialSummary}
                           >
-                            <span className="line-clamp-2">{line.serialSummary}</span>
+                            <span className="line-clamp-2 break-all">{line.serialSummary}</span>
                           </td>
                           <td
                             className={cn(
                               procurementUi.td,
-                              "px-4 font-mono text-xs tabular-nums text-muted-foreground",
+                              "px-3 font-mono text-xs tabular-nums text-muted-foreground",
                             )}
                             title={line.grnSummary}
                           >
-                            <span className="line-clamp-2">{line.grnSummary}</span>
+                            <span className="line-clamp-2 break-all">{line.grnSummary}</span>
                             {line.hasReversal ? (
-                              <span className="ml-2 rounded-full border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-destructive">
+                              <span className="mt-1 inline-flex rounded border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-destructive">
                                 Reversed
                               </span>
                             ) : null}
+                          </td>
+                          <td
+                            className={cn(
+                              procurementUi.td,
+                              "px-3 whitespace-nowrap text-xs text-muted-foreground",
+                            )}
+                          >
+                            {formatInventoryDateAdded(line.dateAdded)}
+                          </td>
+                          <td
+                            className={cn(
+                              procurementUi.td,
+                              "px-3 whitespace-nowrap text-xs font-medium",
+                              line.warrantyExpired
+                                ? "text-destructive"
+                                : "text-muted-foreground",
+                            )}
+                          >
+                            {formatInventoryWarrantyLabel(line.warrantyValidTill)}
                           </td>
                         </tr>
                       ))}

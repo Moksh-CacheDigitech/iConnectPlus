@@ -1,0 +1,5 @@
+# Optional OCR engine for scanned PDFs / photos of customer POs, vendor quotes
+# and invoices. Pip-only (no system Tesseract); models ship inside the wheel.
+# Docker: build with --build-arg INSTALL_OCR=1 (needs PyPI access at build time).
+rapidocr==3.9.2
+onnxruntime==1.30.0

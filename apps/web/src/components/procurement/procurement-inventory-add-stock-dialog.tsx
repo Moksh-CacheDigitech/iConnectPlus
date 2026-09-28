@@ -14,6 +14,7 @@ export type ManualInventoryStockDraft = {
   description: string | null;
   serial_number: string;
   order_id: string | null;
+  warranty_valid_till: string | null;
 };
 
 type ProcurementInventoryAddStockDialogProps = {
@@ -31,6 +32,15 @@ function resizeSerials(prev: string[], qty: number): string[] {
   return [...prev, ...Array.from({ length: qty - prev.length }, () => "")];
 }
 
+function defaultWarrantyDate(): string {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() + 1);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export function ProcurementInventoryAddStockDialog({
   open,
   busy,
@@ -42,6 +52,7 @@ export function ProcurementInventoryAddStockDialog({
   const [description, setDescription] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [serials, setSerials] = useState<string[]>([""]);
+  const [warrantyValidTill, setWarrantyValidTill] = useState(defaultWarrantyDate);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const qty = useMemo(() => {
@@ -55,6 +66,7 @@ export function ProcurementInventoryAddStockDialog({
       setDescription("");
       setQuantity("1");
       setSerials([""]);
+      setWarrantyValidTill(defaultWarrantyDate());
       setLocalError(null);
     }
   }, [open]);
@@ -93,6 +105,11 @@ export function ProcurementInventoryAddStockDialog({
       setLocalError("Each unit needs a unique serial number.");
       return;
     }
+    const warranty = warrantyValidTill.trim();
+    if (!warranty) {
+      setLocalError("Warranty valid till date is required.");
+      return;
+    }
 
     const desc = description.trim() || null;
     setLocalError(null);
@@ -102,6 +119,7 @@ export function ProcurementInventoryAddStockDialog({
         description: desc,
         serial_number,
         order_id: null,
+        warranty_valid_till: warranty,
       })),
     );
   }
@@ -160,6 +178,16 @@ export function ProcurementInventoryAddStockDialog({
               const raw = e.target.value.replace(/[^\d]/g, "");
               setQuantity(raw === "" ? "" : String(Math.max(1, Number.parseInt(raw, 10) || 1)));
             }}
+            className="h-9"
+            disabled={busy}
+          />
+        </FinanceField>
+
+        <FinanceField label="Warranty valid till *">
+          <Input
+            type="date"
+            value={warrantyValidTill}
+            onChange={(e) => setWarrantyValidTill(e.target.value)}
             className="h-9"
             disabled={busy}
           />

@@ -1,7 +1,7 @@
 """SCM handoff service - Finance-approved OVF queue → vendor PO → GRN tracking."""
 
 from collections import defaultdict
-from datetime import date, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -3118,6 +3118,15 @@ class ScmHandoffService:
         start_serial = int(_bill) + int(_dc)
         qty_rec = float(line.quantity_received or 0)
         has_qty = self._inventory_stock_has_quantity()
+        from modules.procurement.service.inventory_ownership_service import InventoryOwnershipService
+
+        # Stock is accountable to the salesperson whose OVF ordered it.
+        owner_employee_id, source_ovf_id = InventoryOwnershipService(self._db).owner_for_order(ctx, order)
+        ownership = {
+            "owner_employee_id": owner_employee_id,
+            "owner_assigned_at": utcnow() if owner_employee_id else None,
+            "source_ovf_id": source_ovf_id,
+        }
 
         for i in range(whole):
             serial_idx = start_serial + i
@@ -3137,6 +3146,7 @@ class ScmHandoffService:
                 branch_id=order.branch_id,
                 created_by=ctx.user_id,
                 updated_by=ctx.user_id,
+                **ownership,
             )
             if has_qty:
                 unit.quantity = 1.0
@@ -3158,6 +3168,7 @@ class ScmHandoffService:
                 branch_id=order.branch_id,
                 created_by=ctx.user_id,
                 updated_by=ctx.user_id,
+                **ownership,
             )
             if has_qty:
                 unit.quantity = float(frac)
@@ -3403,6 +3414,10 @@ class ScmHandoffService:
                         "description": product_code or None,
                         "stock_unit_id": stock.id,
                         "import_line_id": None,
+                        "warranty_valid_till": getattr(stock, "warranty_valid_till", None),
+                        "owner_employee_id": stock.owner_employee_id,
+                        "source_ovf_id": stock.source_ovf_id,
+                        "open_for_sale": bool(stock.open_for_sale),
                     }
                 )
         else:
@@ -3499,6 +3514,7 @@ class ScmHandoffService:
                                 "description": product_code or None,
                                 "stock_unit_id": None,
                                 "import_line_id": None,
+                                "warranty_valid_till": None,
                             }
                         )
 
@@ -3551,6 +3567,7 @@ class ScmHandoffService:
                         "description": product_code or None,
                         "stock_unit_id": adj.stock_unit_id,
                         "import_line_id": None,
+                        "warranty_valid_till": None,
                     }
                 )
 
@@ -3590,7 +3607,11 @@ class ScmHandoffService:
                         "order_line_id": None,
                         "receipt_batch_id": None,
                         "grn_number": "Imported",
-                        "receipt_at": row.created_at,
+                        "receipt_at": (
+                            datetime.combine(row.received_on, datetime.min.time(), tzinfo=timezone.utc)
+                            if row.received_on
+                            else row.created_at
+                        ),
                         "company_po_number": po_label,
                         "vendor_id": vendor_id,
                         "product_name": row.product_name,
@@ -3600,10 +3621,14 @@ class ScmHandoffService:
                         "source": "import",
                         "received_quantity": 1,
                         "billing_quantity": 0,
-                        "unit_cost": 0,
+                        "unit_cost": float(row.unit_cost or 0),
                         "description": (getattr(row, "description", None) or None),
                         "stock_unit_id": None,
                         "import_line_id": row.id,
+                        "warranty_valid_till": getattr(row, "warranty_valid_till", None),
+                        "owner_employee_id": row.owner_employee_id,
+                        "source_ovf_id": row.source_ovf_id,
+                        "open_for_sale": bool(row.open_for_sale),
                     }
                 )
 
@@ -3635,8 +3660,32 @@ class ScmHandoffService:
             product = str(raw.get("product_name") or "").strip()
             serial = str(raw.get("serial_number") or "").strip()
             description = str(raw.get("description") or "").strip() or None
+            warranty_raw = raw.get("warranty_valid_till")
+            warranty_valid_till = None
+            if warranty_raw:
+                from datetime import date as date_cls
+
+                if isinstance(warranty_raw, date_cls):
+                    warranty_valid_till = warranty_raw
+                else:
+                    text = str(warranty_raw).strip()[:10]
+                    if text:
+                        warranty_valid_till = date_cls.fromisoformat(text)
             if not product or not serial:
                 continue
+            from datetime import date as date_cls
+
+            received_raw = raw.get("received_on")
+            received_on = None
+            if isinstance(received_raw, date_cls):
+                received_on = received_raw
+            elif received_raw and str(received_raw).strip():
+                received_on = date_cls.fromisoformat(str(received_raw).strip()[:10])
+            unit_cost_raw = raw.get("unit_cost")
+            unit_cost = float(unit_cost_raw) if unit_cost_raw not in (None, "") else None
+            if unit_cost is not None and unit_cost < 0:
+                raise ConflictException(f'Unit cost cannot be negative for "{product}"')
+            owner_employee_id = raw.get("owner_employee_id")
             order_id = raw.get("order_id")
             po_number: str | None = None
             if order_id is not None:
@@ -3650,8 +3699,14 @@ class ScmHandoffService:
                 product_name=product,
                 description=description[:255] if description else None,
                 serial_number=serial,
+                warranty_valid_till=warranty_valid_till,
                 order_header_id=order_id,
                 company_po_number=po_number,
+                unit_cost=unit_cost,
+                received_on=received_on,
+                owner_employee_id=owner_employee_id,
+                owner_assigned_at=utcnow() if owner_employee_id else None,
+                open_for_sale=owner_employee_id is None,
                 tenant_id=ctx.tenant_id,
                 company_id=cid,
                 branch_id=ctx.branch_id,

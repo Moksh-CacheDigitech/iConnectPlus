@@ -27,10 +27,10 @@ const META: Record<
   { title: string; flag: keyof Opportunity; label: string; subtitle: string }
 > = {
   oem_quote: {
-    title: "OEM Quote",
+    title: "Vendor Quote",
     flag: "oem_quote_attached",
-    label: "OEM Quote",
-    subtitle: "OEM quotation documents",
+    label: "Vendor Quote",
+    subtitle: "OEM, distributor and open-market quotations",
   },
   customer_po: {
     title: "Purchase Order",

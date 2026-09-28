@@ -115,6 +115,8 @@ export type BlueprintActionPayload = {
   valid_until?: string;
   deal_won_amount?: number;
   onboarding_date?: string;
+  /** send_po_approval: Sales confirms the customer PO T&C were checked. */
+  terms_accepted?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -680,6 +682,16 @@ export type Opportunity = {
   contract_attached?: boolean;
   onboarding_done?: boolean;
   onboarding_date?: string | null;
+  deal_reg_number?: string | null;
+  sales_terms_accepted?: boolean;
+  sales_terms_accepted_at?: string | null;
+  marketing_event_id?: string | null;
+  purchase_model?: "capex" | "opex" | null;
+  lease_type?: "finance" | "operating" | null;
+  lease_partner?: string | null;
+  lease_interest_rate_pct?: number | null;
+  lease_tenure_months?: number | null;
+  lease_monthly_rental?: number | null;
   version: number;
   created_at?: string | null;
   notes?: string | null;
@@ -747,6 +759,13 @@ export type OpportunityUpdateInput = {
   migration_credit_phase1?: number | null;
   migration_credit_phase2?: number | null;
   migration_credit_phase3?: number | null;
+  marketing_event_id?: string | null;
+  purchase_model?: "capex" | "opex" | null;
+  lease_type?: "finance" | "operating" | null;
+  lease_partner?: string | null;
+  lease_interest_rate_pct?: number | null;
+  lease_tenure_months?: number | null;
+  lease_monthly_rental?: number | null;
 };
 
 export async function updateOpportunity(id: string, body: OpportunityUpdateInput): Promise<Opportunity> {
@@ -872,6 +891,7 @@ export type Quote = {
   terms?: string | null;
   description?: string | null;
   sales_order_id: string | null;
+  parent_quote_id?: string | null;
   version: number;
   created_at?: string | null;
 };
@@ -927,6 +947,7 @@ export type QuoteLine = {
   gst_pct: number;
   gst_amount: number;
   line_total: number;
+  source_line_id?: string | null;
   version: number;
 };
 
@@ -968,8 +989,10 @@ export async function getQuote(id: string): Promise<Quote> {
   return unwrap(await resourceService.get<Quote>(CRM_QUOTES_API, id));
 }
 
-export async function peekNextQuoteNumber(): Promise<string> {
-  const res = await resourceService.get<{ quote_no: string }>(CRM_QUOTES_API, "next-quote-number");
+export async function peekNextQuoteNumber(opportunityId?: string): Promise<string> {
+  const res = await apiClient<{ quote_no: string }>(`${CRM_QUOTES_API}/next-quote-number`, {
+    query: opportunityId ? { opportunity_id: opportunityId } : undefined,
+  });
   return unwrap(res).quote_no;
 }
 
@@ -1111,6 +1134,33 @@ export type Ovf = {
   payment_due_date: string | null;
   payment_received_date: string | null;
   payment_delay_reason: string | null;
+  margin_at_approval_amount?: number | null;
+  margin_at_approval_pct?: number | null;
+  execution_expense_total?: number;
+  overdue_finance_cost?: number;
+  holding_cost?: number;
+  early_payment_discount_pct?: number;
+  live_margin_amount?: number | null;
+  live_margin_pct?: number | null;
+  live_margin_as_of?: string | null;
+  full_payment_received?: boolean;
+  closed_at?: string | null;
+  delivery_weeks_min?: number | null;
+  delivery_weeks_max?: number | null;
+  expected_delivery_date?: string | null;
+  actual_delivery_date?: string | null;
+  delivery_date_history?: Array<{
+    from: string | null;
+    to: string;
+    reason: string;
+    changed_at: string;
+  }> | null;
+  negotiated_by?: string | null;
+  negotiation_remark?: string | null;
+  original_vendor_total?: number | null;
+  freight_medium?: string | null;
+  freight_weight_kg?: number | null;
+  freight_insurance?: boolean;
   version: number;
   created_at?: string | null;
   updated_at?: string | null;
@@ -1180,6 +1230,11 @@ export type OvfFormInput = {
   total_margin_pct?: number;
   finance_cost_pct?: number;
   approval_status?: string;
+  delivery_weeks_min?: number | null;
+  delivery_weeks_max?: number | null;
+  negotiated_by?: string | null;
+  negotiation_remark?: string | null;
+  early_payment_discount_pct?: number | null;
 };
 
 export type OvfLine = {
@@ -1196,11 +1251,13 @@ export type OvfLine = {
   unit_price: number;
   gst_pct?: number | null;
   line_total: number;
+  source_line_id?: string | null;
   version: number;
 };
 
 export type OvfLineFormInput = {
   side?: string;
+  source_line_id?: string | null;
   product_name: string;
   description?: string | null;
   distributor_name?: string | null;
@@ -1391,6 +1448,13 @@ export type ApprovalTask = {
   action: string | null;
   company_id: string;
   branch_id: string;
+  response_due_at?: string | null;
+  responded_at?: string | null;
+  response?: "can_submit" | "cannot_submit" | null;
+  response_reason?: string | null;
+  escalated_at?: string | null;
+  escalation_level?: number;
+  created_at?: string | null;
 };
 
 export async function listMyJobs(params?: {
@@ -1453,11 +1517,18 @@ export async function replaceApprovalStepOwners(
   );
 }
 
-export async function requestOvfFreight(ovfId: string): Promise<Ovf> {
+export type OvfFreightRequestInput = {
+  medium?: "air" | "road" | "sea" | "courier" | null;
+  weight_kg?: number | null;
+  insurance?: boolean | null;
+  remarks?: string | null;
+};
+
+export async function requestOvfFreight(ovfId: string, body: OvfFreightRequestInput = {}): Promise<Ovf> {
   return unwrap(
     await apiClient<Ovf>(`${CRM_OVF_API}/${ovfId}/request-freight`, {
       method: "POST",
-      body: {},
+      body,
     }),
   );
 }

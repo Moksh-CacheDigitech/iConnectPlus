@@ -39,6 +39,18 @@ from modules.procurement.service.procurement_scope_validator import ProcurementS
 # How often the distributor is chased for a delivery date.
 ETD_REMINDER_INTERVAL_DAYS = 10
 
+# Ordered shipment milestones shown on the delivery / project tracker.
+DELIVERY_MILESTONES = (
+    "order_placed",
+    "ready_at_factory",
+    "dispatched_from_factory",
+    "received_in_india",
+    "received_at_warehouse",
+    "dispatched_to_site",
+    "reached_site",
+    "installed",
+)
+
 # Statuses where the PO is live with the distributor and worth chasing.
 _LIVE_STATUSES = (
     OrderStatus.SENT.value,
@@ -538,3 +550,51 @@ class ScmDeliveryNotificationService:
             "etd_confirmed_at": order.etd_confirmed_at,
             "customer_notified": notified,
         }
+
+    def set_delivery_milestone(
+        self,
+        ctx: TenantContext,
+        order_id: UUID,
+        *,
+        milestone: str,
+        awb_number: str | None = None,
+        actual_delivery_date: date | None = None,
+        note: str | None = None,
+    ) -> ProcOrderHeader:
+        """Advance shipment tracking: factory → India → warehouse → site, with AWB / docket."""
+        if milestone not in DELIVERY_MILESTONES:
+            raise ValidationException(f"milestone must be one of {', '.join(DELIVERY_MILESTONES)}")
+        order = self._db.get(ProcOrderHeader, order_id)
+        if order is None or order.is_deleted or order.tenant_id != ctx.tenant_id:
+            raise NotFoundException("Purchase order not found")
+        self._scope.validate_company_access(ctx, order.company_id)
+        current = order.delivery_milestone
+        if current and DELIVERY_MILESTONES.index(milestone) < DELIVERY_MILESTONES.index(current):
+            text = (note or "").strip()
+            if not text:
+                raise ValidationException("Moving a shipment back to an earlier milestone needs a note")
+        history = list(order.delivery_milestone_history or [])
+        history.append(
+            {
+                "milestone": milestone,
+                "at": utcnow().isoformat(),
+                "by": str(ctx.user_id) if ctx.user_id else None,
+                "note": (note or "").strip() or None,
+                "awb_number": (awb_number or "").strip() or None,
+            }
+        )
+        order.delivery_milestone = milestone
+        order.delivery_milestone_history = history
+        if awb_number is not None:
+            order.awb_number = awb_number.strip() or None
+        if actual_delivery_date is not None:
+            order.actual_delivery_date = actual_delivery_date
+        elif milestone in ("reached_site", "installed") and order.actual_delivery_date is None:
+            order.actual_delivery_date = date.today()
+        order.updated_by = ctx.user_id
+        order.updated_at = utcnow()
+        self._db.flush()
+        from modules.procurement.service.delivery_project_service import DeliveryProjectService
+
+        DeliveryProjectService(self._db).apply_order_milestone(ctx, order)
+        return order

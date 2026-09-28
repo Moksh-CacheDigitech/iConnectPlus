@@ -17,7 +17,13 @@ import { CrmEntityRejectionAlert } from "@/components/crm/sales/crm-approval-inb
 import { BlueprintActions } from "@/components/crm/sales/blueprint-actions";
 import { resolveSalesStageLabel } from "@/lib/crm/sales-blueprint-stages";
 import { CrmDetailEditLink } from "@/components/crm/sales/crm-detail-edit-link";
+import { OvfExecutionExpensesSection } from "@/components/crm/sales/ovf-execution-expenses-section";
 import { OvfInvoicePaymentSection } from "@/components/crm/sales/ovf-invoice-payment-section";
+import { OvfLiveMarginSection } from "@/components/crm/sales/ovf-live-margin-section";
+import { OvfServicePlanSection } from "@/components/crm/sales/ovf-service-plan-section";
+import { OvfStockSuggestions } from "@/components/crm/sales/ovf-stock-suggestions";
+import { OvfVendorSplitPanel } from "@/components/crm/sales/ovf-vendor-split-panel";
+import { NEGOTIATED_BY_OPTIONS } from "@/services/crm-deal-controls-service";
 import { CrmRecordActionsMenu } from "@/components/crm/sales/crm-record-actions-menu";
 import {
   OvfOrderLinesSection,
@@ -301,12 +307,15 @@ export function OvfDetailPage({ ovfId }: { ovfId: string }) {
     company?.billing_country,
   );
   const shippingContact = textOrDash(ovf.shipping_contact_person || quote?.entity_contact);
-  const { totalMarginAmount, totalMarginPct } = computeOvfMargins({
+  // Server margin also deducts additional charges and credits the early-payment discount.
+  const fallbackMargins = computeOvfMargins({
     customerRows,
     vendorRows,
     freight: ovf.freight,
     financeCostPct: ovf.finance_cost_pct,
   });
+  const totalMarginAmount = Number(ovf.total_margin_amount ?? fallbackMargins.totalMarginAmount);
+  const totalMarginPct = Number(ovf.total_margin_pct ?? fallbackMargins.totalMarginPct);
   const totalSaleValue = sumLineTotals(customerRows);
 
   async function onPrintPreview() {
@@ -449,7 +458,10 @@ export function OvfDetailPage({ ovfId }: { ovfId: string }) {
           <CrmDetailItem label="Customer PO received date">
             {ovf.po_date ? String(ovf.po_date).slice(0, 10) : "-"}
           </CrmDetailItem>
-          <CrmDetailItem label="Delivery Period">{textOrDash(ovf.delivery_period)}</CrmDetailItem>
+          <CrmDetailItem label="Delivery Timeline">{textOrDash(ovf.delivery_period)}</CrmDetailItem>
+          <CrmDetailItem label="Expected Delivery">
+            {ovf.expected_delivery_date ? String(ovf.expected_delivery_date).slice(0, 10) : "-"}
+          </CrmDetailItem>
           <CrmDetailItem label="OVF No.">{formatCrmCode(ovf.ovf_no)}</CrmDetailItem>
           <CrmDetailItem label="OVF sent to SCM team">{ovf.shared_to_scm ? "Yes" : "No"}</CrmDetailItem>
           <CrmDetailItem label="OVF Approver">{textOrDash(ovfApproverName)}</CrmDetailItem>
@@ -495,6 +507,23 @@ export function OvfDetailPage({ ovfId }: { ovfId: string }) {
           </CrmDetailItem>
           <CrmDetailItem label="Freight Charges (₹)">{formatInr(ovf.freight)}</CrmDetailItem>
           <CrmDetailItem label="Additional Charges (₹)">{formatInr(ovf.additional_charges)}</CrmDetailItem>
+          <CrmDetailItem label="Early-payment Discount (%)">
+            {Number(ovf.early_payment_discount_pct ?? 0).toFixed(2)}%
+          </CrmDetailItem>
+          <CrmDetailItem label="Negotiated By">
+            {NEGOTIATED_BY_OPTIONS.find((opt) => opt.value === ovf.negotiated_by)?.label ?? "-"}
+          </CrmDetailItem>
+          <CrmDetailItem label="Negotiation Remark">
+            <span className="whitespace-pre-wrap">{textOrDash(ovf.negotiation_remark)}</span>
+          </CrmDetailItem>
+          <CrmDetailItem label="Original Vendor Price">
+            {ovf.original_vendor_total != null ? formatInrPrecise(ovf.original_vendor_total) : "-"}
+          </CrmDetailItem>
+          <CrmDetailItem label="Freight Request">
+            {ovf.freight_medium
+              ? `${ovf.freight_medium.charAt(0).toUpperCase()}${ovf.freight_medium.slice(1)}${ovf.freight_weight_kg != null ? `, ${ovf.freight_weight_kg} kg` : ""}${ovf.freight_insurance ? ", insured" : ""}`
+              : "-"}
+          </CrmDetailItem>
           <CrmDetailItem label="Deal Won">{ovf.deal_won ? "Yes" : "No"}</CrmDetailItem>
           <CrmDetailItem label="Deal Won Amount">
             {ovf.deal_won_amount != null ? formatInr(ovf.deal_won_amount) : "-"}
@@ -502,7 +531,17 @@ export function OvfDetailPage({ ovfId }: { ovfId: string }) {
         </CrmDetailGrid>
       </CrmSection>
 
+      <OvfLiveMarginSection ovf={ovf} onChanged={() => void load()} />
+
+      <OvfExecutionExpensesSection ovf={ovf} onChanged={() => void load()} />
+
+      <OvfServicePlanSection ovf={ovf} onChanged={() => void load()} />
+
       <OvfInvoicePaymentSection ovfId={ovfId} enabled={ovf.shared_to_scm} />
+
+      <OvfStockSuggestions ovf={ovf} />
+
+      <OvfVendorSplitPanel ovf={ovf} distributorOptions={vendorNameOptions} onChanged={() => void load()} />
 
       <OvfOrderLinesSection
         customerRows={customerRows}

@@ -1,6 +1,6 @@
 /**
  * OVF Excel export matching the on-screen table view
- * (header fields + Customer Charges + Vendor Charges).
+ * (header fields + Customer PO Summary + Vendor PO Summary).
  */
 import {
   computeOvfMargins,
@@ -114,7 +114,7 @@ export async function exportOvfXlsx(input: OvfXlsxExportInput): Promise<void> {
   ];
 
   const customerTable: SpreadsheetCellValue[][] = [
-    [sectionCell("Customer Charges."), "", "", "", "", "", "", "", ""],
+    [sectionCell("Customer PO Summary"), "", "", "", "", "", "", "", ""],
     [
       headerCell("Product Name"),
       headerCell("Description"),
@@ -140,7 +140,7 @@ export async function exportOvfXlsx(input: OvfXlsxExportInput): Promise<void> {
   ];
 
   const vendorTable: SpreadsheetCellValue[][] = [
-    [sectionCell("Vendor Charges."), "", "", "", "", "", "", "", "", "", "", ""],
+    [sectionCell("Vendor PO Summary"), "", "", "", "", "", "", "", "", "", "", ""],
     [
       headerCell("Product Name"),
       headerCell("Description"),
@@ -173,7 +173,7 @@ export async function exportOvfXlsx(input: OvfXlsxExportInput): Promise<void> {
 
   await downloadXlsxMatrix(buildOvfXlsxFilename(ovf, input.quoteName), [
     { name: "OVF Overview", data: overview },
-    { name: "Customer Charges", data: customerTable },
-    { name: "Vendor Charges", data: vendorTable },
+    { name: "Customer PO Summary", data: customerTable },
+    { name: "Vendor PO Summary", data: vendorTable },
   ]);
 }

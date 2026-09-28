@@ -32,6 +32,7 @@ import { resolveSalesStageLabel } from "@/lib/crm/sales-blueprint-stages";
 import { CrmDetailEditLink } from "@/components/crm/sales/crm-detail-edit-link";
 import { CrmRecordActionsMenu } from "@/components/crm/sales/crm-record-actions-menu";
 import { QuoteLineTable } from "@/components/crm/sales/quote-line-table";
+import { QuoteSplitPanel } from "@/components/crm/sales/quote-split-panel";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { cloneQuoteRecord, downloadQuoteExport, printQuotePreview } from "@/lib/crm/crm-record-actions";
@@ -116,7 +117,11 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
           ? await listContacts(opp.company_account_id).catch(() => [] as Contact[])
           : [],
       );
-      setExistingOvf(ovfRows[0] ?? null);
+      // Split quotes each carry their own OVF.
+      setExistingOvf(
+        ovfRows.find((row) => row.quote_id === quoteRow.id) ??
+          (quoteRow.parent_quote_id ? null : ovfRows[0] ?? null),
+      );
     } catch (err) {
       setQuote(null);
       setError(err instanceof ApiClientError ? err.message : "Failed to load quote");
@@ -469,6 +474,8 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
         }}
         onChanged={() => void load()}
       />
+
+      <QuoteSplitPanel quote={quote} contacts={contacts} />
 
       <AttachmentsPanel
         entityType="quote"

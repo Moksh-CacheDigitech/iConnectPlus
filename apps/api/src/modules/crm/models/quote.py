@@ -105,6 +105,13 @@ class CrmQuote(Base, *CrmTransactionMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     reason_for_discount: Mapped[str | None] = mapped_column(Text, nullable=True)
     sales_order_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    # Set when this quote was broken out of another (one vendor quote → many customer quotes).
+    parent_quote_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("crm.crm_quote.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
 
 
 class CrmQuoteLine(Base, *CrmTransactionMixin):
@@ -142,3 +149,10 @@ class CrmQuoteLine(Base, *CrmTransactionMixin):
     gst_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=0)
     gst_amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
     line_total: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    # Parent quote line this quantity was split from; its balance is parent qty minus all splits.
+    source_line_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("crm.crm_quote_line.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )

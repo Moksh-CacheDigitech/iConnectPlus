@@ -126,6 +126,60 @@ def stale_lead_alerts() -> dict:
         db.close()
 
 
+def _system_contexts(db):
+    """One super-admin TenantContext per tenant that has CRM data."""
+    from uuid import uuid4
+
+    from sqlalchemy import select
+
+    from modules.crm.models import CrmOvf
+    from modules.foundation.domain.value_objects import TenantContext
+
+    tenant_ids = list(db.scalars(select(CrmOvf.tenant_id).where(CrmOvf.is_deleted.is_(False)).distinct()).all())
+    system_user = uuid4()
+    return [TenantContext(tenant_id=tid, user_id=system_user, user_type="super_admin") for tid in tenant_ids]
+
+
+@celery_app.task(name="crm.ovf_live_margin_refresh")
+def ovf_live_margin_refresh() -> dict:
+    """Re-price approved OVFs for overdue receivables, held stock and expenses."""
+    from database.session import SessionLocal
+    from modules.crm.service.ovf_finance_service import OvfFinanceService
+
+    db = SessionLocal()
+    refreshed = 0
+    failed_tenants = 0
+    try:
+        for ctx in _system_contexts(db):
+            try:
+                refreshed += OvfFinanceService(db).refresh_all_open(ctx)
+                db.commit()
+            except Exception:
+                db.rollback()
+                failed_tenants += 1
+        return {"status": "ok", "refreshed": refreshed, "failed_tenants": failed_tenants}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="crm.boq_sow_sla_escalations")
+def boq_sow_sla_escalations() -> dict:
+    """Escalate BOQ/SOW tasks that missed the 1-hour response or 6-hour attach SLA."""
+    from database.session import SessionLocal
+    from modules.crm.service.boq_sow_sla_service import BoqSowSlaService
+
+    db = SessionLocal()
+    try:
+        counts = BoqSowSlaService(db).escalate_breaches()
+        db.commit()
+        return {"status": "ok", **counts}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 @celery_app.task(name="crm.opportunity_close_reminders")
 def opportunity_close_reminders() -> dict:
     from datetime import date

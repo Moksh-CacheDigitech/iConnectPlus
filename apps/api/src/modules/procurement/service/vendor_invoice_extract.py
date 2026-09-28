@@ -10,100 +10,7 @@ from io import BytesIO
 from typing import Any
 
 
-def _decode_pdf_parentheses(raw: bytes) -> str:
-    parts: list[str] = []
-    for match in re.finditer(rb"\((?:\\.|[^\\)])*\)", raw):
-        chunk = match.group(0)[1:-1]
-        chunk = chunk.replace(rb"\(", b"(").replace(rb"\)", b")").replace(rb"\\", b"\\")
-        parts.append(chunk.decode("latin-1", errors="ignore"))
-    if parts:
-        return " ".join(parts)
-    runs = re.findall(rb"[\x20-\x7e]{4,}", raw)
-    return " ".join(r.decode("ascii", errors="ignore") for r in runs[:4000])
-
-
-def _text_from_pdf_pypdf(raw: bytes) -> str | None:
-    try:
-        from pypdf import PdfReader
-
-        reader = PdfReader(BytesIO(raw))
-        chunks: list[str] = []
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                chunks.append(text)
-        joined = "\n".join(chunks).strip()
-        return joined if joined else None
-    except Exception:
-        return None
-
-
-def _text_from_excel(raw: bytes) -> str | None:
-    try:
-        from openpyxl import load_workbook
-
-        workbook = load_workbook(BytesIO(raw), read_only=True, data_only=True)
-        parts: list[str] = []
-        for sheet in workbook.worksheets:
-            for row in sheet.iter_rows(values_only=True):
-                cells = [str(cell).strip() for cell in row if cell is not None and str(cell).strip()]
-                if cells:
-                    parts.append(" ".join(cells))
-        joined = "\n".join(parts).strip()
-        return joined if joined else None
-    except Exception:
-        return None
-
-
-def _text_from_xls(raw: bytes) -> str | None:
-    try:
-        import xlrd
-
-        book = xlrd.open_workbook(file_contents=raw)
-        parts: list[str] = []
-        for sheet in book.sheets():
-            for row_idx in range(sheet.nrows):
-                cells = [
-                    str(sheet.cell_value(row_idx, col_idx)).strip()
-                    for col_idx in range(sheet.ncols)
-                    if str(sheet.cell_value(row_idx, col_idx)).strip()
-                ]
-                if cells:
-                    parts.append(" ".join(cells))
-        joined = "\n".join(parts).strip()
-        return joined if joined else None
-    except Exception:
-        return None
-
-
-def _text_from_bytes(raw: bytes, file_name: str) -> str:
-    lower = file_name.lower()
-    if lower.endswith((".txt", ".csv")):
-        return raw.decode("utf-8", errors="ignore")
-    if lower.endswith((".xlsx", ".xlsm")):
-        excel_text = _text_from_excel(raw)
-        if excel_text:
-            return excel_text
-    if lower.endswith(".xls"):
-        xls_text = _text_from_xls(raw)
-        if xls_text:
-            return xls_text
-    if lower.endswith(".pdf") or raw[:4] == b"%PDF":
-        pypdf_text = _text_from_pdf_pypdf(raw)
-        if pypdf_text:
-            return pypdf_text
-        if raw[:4] != b"%PDF":
-            plain = raw.decode("utf-8", errors="ignore").strip()
-            if plain:
-                return plain
-        return _decode_pdf_parentheses(raw)
-    if lower.endswith(
-        (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".heic", ".heif")
-    ):
-        return ""
-    if lower.endswith((".doc", ".docx")):
-        return raw.decode("utf-8", errors="ignore")
-    return raw.decode("utf-8", errors="ignore")
+from shared.document_text import text_from_bytes as _text_from_bytes
 
 
 def _parse_amount(token: str) -> float | None:
@@ -567,7 +474,7 @@ def extract_vendor_invoice_fields(content_base64: str, file_name: str) -> dict[s
     if lower.endswith((".xlsx", ".xlsm")):
         grid = _extract_from_excel_grid(raw)
 
-    text = _text_from_bytes(raw, file_name)
+    text = _text_from_bytes(raw, file_name, ocr=True)
     compact = re.sub(r"\s+", " ", text)
     inv_date = _find_date(compact)
 

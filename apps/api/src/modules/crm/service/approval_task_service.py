@@ -137,9 +137,12 @@ class ApprovalTaskService:
     ) -> CrmApprovalTask:
         if team_role not in APPROVAL_TEAM_ROLES:
             raise ConflictException(f"Unknown approval team role '{team_role}'")
+        from modules.crm.service.boq_sow_sla_service import sla_deadlines
+
         code = self._numbers.generate(CrmEntityType.APPROVAL_TASK, company_id, CrmApprovalTask, "task_code")
         task = self._repo.create(
             ctx,
+            **sla_deadlines(action),
             company_id=company_id,
             branch_id=branch_id,
             task_code=code,
@@ -421,6 +424,20 @@ class ApprovalTaskService:
             from modules.crm.service.ovf_service import OvfService
 
             OvfService(self._db).apply_blueprint_action(ctx, task.entity_id, action, payload)
+
+    def respond(
+        self,
+        ctx: TenantContext,
+        task_id: UUID,
+        *,
+        can_submit: bool,
+        reason: str | None = None,
+    ) -> CrmApprovalTask:
+        """BOQ/SOW assignee confirms within the SLA whether they can submit the document."""
+        from modules.crm.service.boq_sow_sla_service import BoqSowSlaService
+
+        task = self.get(ctx, task_id)
+        return BoqSowSlaService(self._db).respond(ctx, task, can_submit=can_submit, reason=reason)
 
     def list_inbox_for_user(self, ctx: TenantContext, *, limit: int = 30) -> list[dict]:
         from modules.foundation.repository.notification_repository import NotificationRepository

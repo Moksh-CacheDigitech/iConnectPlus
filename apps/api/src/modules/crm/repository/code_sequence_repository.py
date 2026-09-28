@@ -41,6 +41,20 @@ class CodeSequenceRepository:
         seq_part = f"{seq:0{width}d}" if width > 0 else str(seq)
         return f"{full_prefix}{seq_part}"
 
+    def next_child_code(self, parent_code: str, tag: str, company_id: UUID, model, code_column: str) -> str:
+        """``{parent}/{tag}{n}`` - e.g. DR-2026-12/Q3 - counting soft-deleted rows too."""
+        prefix = f"{parent_code}/{tag}"
+        stmt = select(getattr(model, code_column)).where(
+            model.company_id == company_id,
+            getattr(model, code_column).like(f"{prefix}%"),
+        )
+        seq = 0
+        for code in self.db.scalars(stmt).all():
+            suffix = str(code)[len(prefix) :]
+            if suffix.isdigit():
+                seq = max(seq, int(suffix))
+        return f"{prefix}{seq + 1}"
+
     def _next_company_account_number(self, company_id: UUID, model, code_column: str) -> str:
         """Sales account numbers: COMP-01, COMP-02, … (per org company scope)."""
         prefix, width = CODE_PREFIXES[CrmEntityType.COMPANY]

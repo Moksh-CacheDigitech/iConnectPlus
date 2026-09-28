@@ -12,7 +12,10 @@ import {
   ChevronRight,
   ClipboardList,
   FileBarChart,
+  FileSignature,
+  FolderKanban,
   History,
+  Hourglass,
   LayoutDashboard,
   MapPinned,
   Mail,
@@ -51,9 +54,12 @@ export const PROCUREMENT_NAV = [
   { title: "GRNs", href: "/procurement/grns", icon: PackageCheck },
   { title: "Billing/DC", href: "/procurement/delivery-challan", icon: Truck },
   { title: "Delivery Status", href: "/procurement/delivery-status", icon: MapPinned },
+  { title: "Delivery Projects", href: "/procurement/delivery-projects", icon: FolderKanban },
   { title: "Installation", href: "/procurement/installation", icon: Wrench },
+  { title: "Service Contracts", href: "/procurement/service-contracts", icon: FileSignature },
   { title: "Vendors", href: "/procurement/vendors", icon: Building2 },
   { title: "Inventory", href: "/procurement/inventory", icon: Boxes },
+  { title: "Stock Aging", href: "/procurement/inventory-aging", icon: Hourglass },
   { title: "Approval", href: "/procurement/approval", icon: BadgeCheck },
 ] as const satisfies ReadonlyArray<ProcurementNavItem>;
 

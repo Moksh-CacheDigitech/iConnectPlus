@@ -22,6 +22,7 @@ import { CrmDetailEditLink } from "@/components/crm/sales/crm-detail-edit-link";
 import { CrmRecordActionsMenu } from "@/components/crm/sales/crm-record-actions-menu";
 import { EntityAttachmentsList } from "@/components/crm/sales/entity-attachments-list";
 import { LeadDetailsCard } from "@/components/crm/sales/lead-details-card";
+import { OpportunityDealControls } from "@/components/crm/sales/opportunity-deal-controls";
 import { CompanyWorkspaceNav } from "@/components/crm/company-workspace-nav";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -455,6 +456,10 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
 
           {blueprint.po_validation ? (
             <PoValidationChain validation={blueprint.po_validation} />
+          ) : null}
+
+          {opp.blueprint_state ? (
+            <OpportunityDealControls key={opp.version} opportunity={opp} onChanged={() => void load()} />
           ) : null}
 
           {showQuotes ? (

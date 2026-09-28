@@ -41,6 +41,10 @@ class CrmOvf(Base, *CrmTransactionMixin):
             "invoice_channel IS NULL OR invoice_channel IN ('portal','physical','mixed')",
             name="ck_crm_ovf_invoice_channel",
         ),
+        CheckConstraint(
+            "freight_medium IS NULL OR freight_medium IN ('air','road','sea','courier')",
+            name="ck_crm_ovf_freight_medium",
+        ),
         {"schema": "crm"},
     )
 
@@ -132,6 +136,102 @@ class CrmOvf(Base, *CrmTransactionMixin):
     payment_received_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     payment_delay_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Live margin: frozen at approval, then re-priced nightly for overdue
+    # receivables, stock held against the deal, and approved execution
+    # expenses until Finance marks the full payment received.
+    margin_at_approval_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    margin_at_approval_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    execution_expense_total: Mapped[Decimal] = mapped_column(
+        Numeric(18, 4), nullable=False, default=0, server_default="0"
+    )
+    overdue_finance_cost: Mapped[Decimal] = mapped_column(
+        Numeric(18, 4), nullable=False, default=0, server_default="0"
+    )
+    holding_cost: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0, server_default="0")
+    early_payment_discount_pct: Mapped[Decimal] = mapped_column(
+        Numeric(6, 3), nullable=False, default=0, server_default="0"
+    )
+    live_margin_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    live_margin_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    live_margin_as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    full_payment_received: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    full_payment_marked_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    delivery_weeks_min: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    delivery_weeks_max: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    expected_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    actual_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    delivery_date_history: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
+    negotiated_by: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    negotiation_remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    original_vendor_total: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+
+    freight_medium: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    freight_weight_kg: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
+    freight_insurance: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+
+class CrmOvfPayment(Base, *CrmTransactionMixin):
+    """One customer receipt against an OVF (part payments allowed)."""
+
+    __tablename__ = "crm_ovf_payment"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_crm_ovf_payment_amount"),
+        {"schema": "crm"},
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    ovf_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("crm.crm_ovf.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    received_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CrmOvfExpense(Base, *CrmTransactionMixin):
+    """Unplanned execution cost (cables, MATAD, visits...) raised until completion."""
+
+    __tablename__ = "crm_ovf_expense"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_crm_ovf_expense_amount"),
+        CheckConstraint(
+            "expense_type IN ('operations','purchase','cables','matad','site_visit','foc','installation','other')",
+            name="ck_crm_ovf_expense_type",
+        ),
+        CheckConstraint(
+            "raised_by_team IN ('scm','operations','sales','presales','finance','other')",
+            name="ck_crm_ovf_expense_team",
+        ),
+        CheckConstraint("status IN ('pending','approved','rejected')", name="ck_crm_ovf_expense_status"),
+        {"schema": "crm"},
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    ovf_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("crm.crm_ovf.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    expense_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    raised_by_team: Mapped[str] = mapped_column(String(20), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    incurred_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", server_default="pending")
+    decided_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+
 
 class CrmOvfLine(Base, *CrmTransactionMixin):
     __tablename__ = "crm_ovf_line"
@@ -161,3 +261,5 @@ class CrmOvfLine(Base, *CrmTransactionMixin):
     unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
     gst_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False, default=Decimal("18"))
     line_total: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    # Vendor lines broken out of one customer PO line (multi-distributor split).
+    source_line_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)

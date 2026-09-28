@@ -272,6 +272,13 @@ class OpportunityUpdate(BaseModel):
     migration_credit_phase1: Decimal | None = None
     migration_credit_phase2: Decimal | None = None
     migration_credit_phase3: Decimal | None = None
+    marketing_event_id: UUID | None = None
+    purchase_model: str | None = Field(default=None, pattern="^(capex|opex)$")
+    lease_type: str | None = Field(default=None, pattern="^(finance|operating)$")
+    lease_partner: str | None = Field(default=None, max_length=255)
+    lease_interest_rate_pct: Decimal | None = Field(default=None, ge=0, le=100)
+    lease_tenure_months: int | None = Field(default=None, ge=1, le=240)
+    lease_monthly_rental: Decimal | None = Field(default=None, ge=0)
     version: int | None = None
 
 
@@ -333,6 +340,16 @@ class OpportunityResponse(OrmModel):
     contract_attached: bool = False
     onboarding_done: bool = False
     onboarding_date: date | None = None
+    deal_reg_number: str | None = None
+    sales_terms_accepted: bool = False
+    sales_terms_accepted_at: datetime | None = None
+    marketing_event_id: UUID | None = None
+    purchase_model: str | None = None
+    lease_type: str | None = None
+    lease_partner: str | None = None
+    lease_interest_rate_pct: Decimal | None = None
+    lease_tenure_months: int | None = None
+    lease_monthly_rental: Decimal | None = None
     version: int
     created_at: datetime | None = None
 
@@ -1330,8 +1347,59 @@ class QuoteResponse(OrmModel):
     terms: str | None = None
     description: str | None = None
     sales_order_id: UUID | None
+    parent_quote_id: UUID | None = None
     version: int
     created_at: datetime | None = None
+
+
+class VendorQuoteExtractRequest(BaseModel):
+    file_name: str = Field(min_length=1, max_length=255)
+    content_base64: str = Field(min_length=1)
+
+
+class VendorQuoteExtractLine(BaseModel):
+    product_name: str
+    hsn_sac: str | None = None
+    qty: Decimal
+    unit_cost: Decimal
+    line_total: Decimal
+    gst_pct: Decimal | None = None
+
+
+class VendorQuoteExtractResponse(BaseModel):
+    lines: list[VendorQuoteExtractLine] = Field(default_factory=list)
+    text_extracted: bool = False
+    ocr_available: bool = False
+
+
+class QuoteSplitLine(BaseModel):
+    source_line_id: UUID
+    qty: Decimal = Field(gt=0)
+
+
+class QuoteSplitItem(BaseModel):
+    contact_id: UUID | None = None
+    entity_name: str | None = Field(default=None, max_length=255)
+    entity_gst: str | None = Field(default=None, max_length=30)
+    entity_address: str | None = None
+    shipping_street: str | None = Field(default=None, max_length=255)
+    shipping_city: str | None = Field(default=None, max_length=100)
+    shipping_state: str | None = Field(default=None, max_length=100)
+    shipping_zip: str | None = Field(default=None, max_length=20)
+    lines: list[QuoteSplitLine] = Field(min_length=1)
+
+
+class QuoteSplitRequest(BaseModel):
+    splits: list[QuoteSplitItem] = Field(min_length=2, max_length=50)
+
+
+class QuoteSplitBalanceRow(BaseModel):
+    line_id: UUID
+    line_no: int
+    product_name: str
+    qty: Decimal
+    allocated_qty: Decimal
+    balance_qty: Decimal
 
 
 class QuoteLineCreate(BaseModel):
@@ -1375,6 +1443,7 @@ class QuoteLineResponse(OrmModel):
     gst_pct: Decimal
     gst_amount: Decimal
     line_total: Decimal
+    source_line_id: UUID | None = None
     version: int
 
 
@@ -1429,6 +1498,11 @@ class OvfCreate(BaseModel):
     total_margin_pct: Decimal | None = None
     finance_cost_pct: Decimal | None = None
     approval_status: str | None = None
+    delivery_weeks_min: int | None = Field(default=None, ge=1, le=260)
+    delivery_weeks_max: int | None = Field(default=None, ge=1, le=260)
+    negotiated_by: str | None = Field(default=None, max_length=50)
+    negotiation_remark: str | None = None
+    early_payment_discount_pct: Decimal | None = None
 
 
 class OvfUpdate(BaseModel):
@@ -1458,6 +1532,11 @@ class OvfUpdate(BaseModel):
     total_margin_pct: Decimal | None = None
     finance_cost_pct: Decimal | None = None
     approval_status: str | None = None
+    delivery_weeks_min: int | None = Field(default=None, ge=1, le=260)
+    delivery_weeks_max: int | None = Field(default=None, ge=1, le=260)
+    negotiated_by: str | None = Field(default=None, max_length=50)
+    negotiation_remark: str | None = None
+    early_payment_discount_pct: Decimal | None = None
     version: int | None = None
 
 
@@ -1510,8 +1589,262 @@ class OvfResponse(OrmModel):
     payment_due_date: date | None = None
     payment_received_date: date | None = None
     payment_delay_reason: str | None = None
+    margin_at_approval_amount: Decimal | None = None
+    margin_at_approval_pct: Decimal | None = None
+    execution_expense_total: Decimal = Decimal("0")
+    overdue_finance_cost: Decimal = Decimal("0")
+    holding_cost: Decimal = Decimal("0")
+    early_payment_discount_pct: Decimal = Decimal("0")
+    live_margin_amount: Decimal | None = None
+    live_margin_pct: Decimal | None = None
+    live_margin_as_of: datetime | None = None
+    full_payment_received: bool = False
+    closed_at: datetime | None = None
+    delivery_weeks_min: int | None = None
+    delivery_weeks_max: int | None = None
+    expected_delivery_date: date | None = None
+    actual_delivery_date: date | None = None
+    delivery_date_history: list[dict] | None = None
+    negotiated_by: str | None = None
+    negotiation_remark: str | None = None
+    original_vendor_total: Decimal | None = None
+    freight_medium: str | None = None
+    freight_weight_kg: Decimal | None = None
+    freight_insurance: bool = False
     version: int
     created_at: datetime | None = None
+
+
+class OvfFreightRequest(BaseModel):
+    medium: str | None = Field(default=None, max_length=20)
+    weight_kg: Decimal | None = Field(default=None, ge=0)
+    insurance: bool | None = None
+    remarks: str | None = None
+
+
+class OvfDeliveryDatesUpdate(BaseModel):
+    expected_delivery_date: date | None = None
+    actual_delivery_date: date | None = None
+    reason: str | None = None
+
+
+class OvfVendorSplitItem(BaseModel):
+    distributor_name: str = Field(min_length=1, max_length=255)
+    qty: Decimal = Field(gt=0)
+    unit_price: Decimal = Field(ge=0)
+    gst_pct: Decimal | None = None
+    description: str | None = None
+    contact_person: str | None = None
+    contact_number: str | None = None
+
+
+class OvfVendorSplitRequest(BaseModel):
+    customer_line_id: UUID
+    splits: list[OvfVendorSplitItem] = Field(min_length=1)
+
+
+class OvfPaymentCreate(BaseModel):
+    amount: Decimal = Field(gt=0)
+    received_date: date
+    reference: str | None = Field(default=None, max_length=120)
+    remark: str | None = None
+
+
+class OvfPaymentResponse(OrmModel):
+    id: UUID
+    ovf_id: UUID
+    amount: Decimal
+    received_date: date
+    reference: str | None = None
+    remark: str | None = None
+    created_at: datetime | None = None
+    created_by: UUID | None = None
+
+
+class OvfFullPaymentRequest(BaseModel):
+    received_date: date
+    remark: str | None = None
+
+
+class OvfExpenseCreate(BaseModel):
+    expense_type: str = Field(max_length=30)
+    raised_by_team: str = Field(max_length=20)
+    description: str = Field(min_length=1)
+    amount: Decimal = Field(gt=0)
+    incurred_on: date | None = None
+
+
+class OvfExpenseDecisionRequest(BaseModel):
+    decision: str
+    remark: str | None = None
+
+
+class OvfExpenseResponse(OrmModel):
+    id: UUID
+    ovf_id: UUID
+    expense_type: str
+    raised_by_team: str
+    description: str
+    amount: Decimal
+    incurred_on: date | None = None
+    status: str
+    decided_by: UUID | None = None
+    decided_at: datetime | None = None
+    decision_remark: str | None = None
+    created_at: datetime | None = None
+    created_by: UUID | None = None
+
+
+class OvfLiveStatusResponse(BaseModel):
+    ovf_id: UUID
+    ovf_no: str
+    as_of: date
+    margin_at_approval_amount: Decimal | None = None
+    margin_at_approval_pct: Decimal | None = None
+    live_margin_amount: Decimal
+    live_margin_pct: Decimal
+    margin_erosion: Decimal | None = None
+    customer_total: Decimal
+    customer_receivable: Decimal
+    vendor_total: Decimal
+    received_amount: Decimal
+    outstanding_amount: Decimal
+    overdue_days: int
+    overdue_finance_cost: Decimal
+    holding_cost: Decimal
+    execution_expense_total: Decimal
+    early_payment_saving: Decimal
+    planned_finance_cost: Decimal
+    full_payment_received: bool
+    closed_at: datetime | None = None
+    payment_due_date: date | None = None
+    payment_received_date: date | None = None
+    expected_delivery_date: date | None = None
+    actual_delivery_date: date | None = None
+    delivery_overdue: bool = False
+
+
+class SalesPerformanceRow(BaseModel):
+    owner_employee_id: UUID | None = None
+    owner_name: str | None = None
+    ovf_count: int
+    open_ovf_count: int
+    margin_at_approval: Decimal
+    live_margin: Decimal
+    margin_erosion: Decimal
+    overdue_finance_cost: Decimal
+    holding_cost: Decimal
+    execution_expenses: Decimal
+    outstanding_receivable: Decimal
+
+
+class CompanyGstCreate(BaseModel):
+    gstin: str = Field(min_length=15, max_length=20)
+    location_label: str | None = Field(default=None, max_length=255)
+    billing_address: str | None = None
+    shipping_address: str | None = None
+    is_head_office: bool = False
+    certificate_attachment_id: UUID | None = None
+
+
+class CompanyGstUpdate(BaseModel):
+    location_label: str | None = Field(default=None, max_length=255)
+    billing_address: str | None = None
+    shipping_address: str | None = None
+    is_head_office: bool | None = None
+    certificate_attachment_id: UUID | None = None
+    status: str | None = None
+    version: int | None = None
+
+
+class CompanyGstResponse(OrmModel):
+    id: UUID
+    company_account_id: UUID
+    gstin: str
+    state_code: str | None = None
+    state: str | None = None
+    location_label: str | None = None
+    billing_address: str | None = None
+    shipping_address: str | None = None
+    is_head_office: bool
+    certificate_attachment_id: UUID | None = None
+    source: str
+    status: str
+    created_at: datetime | None = None
+    version: int
+
+
+class CustomerPoExtractRequest(BaseModel):
+    file_name: str = Field(min_length=1, max_length=255)
+    content_base64: str = Field(min_length=1)
+    capture_gst: bool = True
+
+
+class CustomerPoGstHit(BaseModel):
+    gstin: str
+    state_code: str | None = None
+    state: str | None = None
+    id: UUID | None = None
+    is_new: bool | None = None
+
+
+class CustomerPoExtractResponse(BaseModel):
+    po_number: str | None = None
+    po_date: date | None = None
+    billing_address: str | None = None
+    shipping_address: str | None = None
+    gst_registrations: list[CustomerPoGstHit] = Field(default_factory=list)
+    delivery_weeks_min: int | None = None
+    delivery_weeks_max: int | None = None
+    fields_found: list[str] = Field(default_factory=list)
+    text_extracted: bool = False
+
+
+class CustomerExpenseCreate(BaseModel):
+    expense_date: date
+    category: str = Field(max_length=30)
+    description: str = Field(min_length=1)
+    amount: Decimal = Field(gt=0)
+    opportunity_id: UUID | None = None
+    approved_by_name: str = Field(min_length=1, max_length=255)
+    approval_reference: str | None = None
+    adjust_in_future: bool = True
+
+
+class CustomerExpenseAdjustRequest(BaseModel):
+    ovf_id: UUID
+    remark: str | None = None
+
+
+class CustomerExpenseWriteOffRequest(BaseModel):
+    remark: str = Field(min_length=1)
+
+
+class CustomerExpenseResponse(OrmModel):
+    id: UUID
+    company_account_id: UUID
+    opportunity_id: UUID | None = None
+    expense_date: date
+    category: str
+    description: str
+    amount: Decimal
+    approved_by_name: str | None = None
+    approval_reference: str | None = None
+    adjust_in_future: bool
+    status: str
+    adjusted_ovf_id: UUID | None = None
+    adjusted_at: datetime | None = None
+    adjustment_remark: str | None = None
+    created_at: datetime | None = None
+
+
+class CustomerExpenseSummaryResponse(BaseModel):
+    company_account_id: UUID | None = None
+    open_count: int
+    open_amount: Decimal
+    adjusted_amount: Decimal
+    written_off_amount: Decimal
+    open_items: list[CustomerExpenseResponse] = Field(default_factory=list)
 
 
 class OvfScmSavingsResponse(BaseModel):
@@ -1560,6 +1893,7 @@ class OvfInvoiceStatusResponse(BaseModel):
 
 class OvfLineCreate(BaseModel):
     side: str = "customer_po"
+    source_line_id: UUID | None = None
     product_name: str
     description: str | None = None
     distributor_name: str | None = None
@@ -1598,6 +1932,7 @@ class OvfLineResponse(OrmModel):
     unit_price: Decimal
     gst_pct: Decimal = Decimal("18")
     line_total: Decimal
+    source_line_id: UUID | None = None
     version: int
 
 
@@ -1674,6 +2009,18 @@ class ApprovalTaskResponse(OrmModel):
     action: str | None
     company_id: UUID
     branch_id: UUID
+    response_due_at: datetime | None = None
+    responded_at: datetime | None = None
+    response: str | None = None
+    response_reason: str | None = None
+    escalated_at: datetime | None = None
+    escalation_level: int = 0
+    created_at: datetime | None = None
+
+
+class ApprovalTaskRespondRequest(BaseModel):
+    can_submit: bool
+    reason: str | None = None
 
 
 class CrmApprovalUserOption(BaseModel):
@@ -1789,6 +2136,8 @@ class BlueprintActionRequest(BaseModel):
     # Operations owners notified of the services/installation scope as soon as
     # the customer PO is approved (optional - only used when the PO has SAC lines).
     operations_user_ids: list[UUID] | None = None
+    # send_po_approval: Sales confirms they checked and verified the PO T&C.
+    terms_accepted: bool | None = None
 
     def to_payload(self) -> dict:
         return self.model_dump(exclude_none=True)

@@ -14,6 +14,7 @@ import {
   type DeliveryStatusFormValue,
 } from "@/components/procurement/delivery-status-form";
 import { DeliverySectionCard } from "@/components/procurement/delivery-section-card";
+import { DeliveryMilestoneCard } from "@/components/procurement/delivery-milestone-card";
 import { FinanceField } from "@/components/finance/journals/finance-form-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,6 +78,7 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
   const [billOpen, setBillOpen] = useState(false);
   const [outcomeOpen, setOutcomeOpen] = useState(false);
   const [billTick, setBillTick] = useState(0);
+  const [orderTracking, setOrderTracking] = useState<{ milestone: string | null; awb: string | null } | null>(null);
 
   useEffect(() => {
     try {
@@ -91,7 +93,7 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
       setFormPhase(deliveryStatusUiMode(seeded));
       const fromChallan =
         String(row.purchaseOrderNumber ?? "").trim() &&
-        String(row.purchaseOrderNumber ?? "").trim() !==
+          String(row.purchaseOrderNumber ?? "").trim() !==
           String(row.companyPoNumber ?? "").trim()
           ? String(row.purchaseOrderNumber ?? "").trim()
           : "";
@@ -116,6 +118,7 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
             listOrderReceiptBatches(orderId).catch(() => []),
           ]);
           if (cancelled) return;
+          setOrderTracking({ milestone: order.delivery_milestone ?? null, awb: order.awb_number ?? null });
           const resolved = resolveChallanReceiptBatches(batches, order);
           const matched = matchChallanReceiptBatches(resolved, row);
           const liveRows = deliveryStatusGrnItemRowsFromBatches(matched, order);
@@ -299,6 +302,14 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
       >
         <GrnItemsTable rows={grnItems} />
       </DeliverySectionCard>
+
+      {challan.orderId && orderTracking ? (
+        <DeliveryMilestoneCard
+          orderId={challan.orderId}
+          initialMilestone={orderTracking.milestone}
+          initialAwb={orderTracking.awb}
+        />
+      ) : null}
 
       {form && readOnly ? (
         <DeliverySectionCard title="Dispatch detail" icon={Truck}>

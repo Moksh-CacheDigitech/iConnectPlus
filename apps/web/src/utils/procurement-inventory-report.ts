@@ -38,6 +38,12 @@ export type GrnStockByProductRow = {
   hasReversal: boolean;
   /** Origin of stock units for this product group. */
   addedBy: InventoryAddedBy;
+  /** Earliest unit date added (receipt_at / created), ISO datetime or null. */
+  dateAdded: string | null;
+  /** Earliest warranty end date (YYYY-MM-DD), null if unset. */
+  warrantyValidTill: string | null;
+  /** True when warrantyValidTill is set and before today. */
+  warrantyExpired: boolean;
   lines: ProcurementInventoryRow[];
 };
 
@@ -100,6 +106,76 @@ function formatGrnSummaryFromRows(rows: ProcurementInventoryRow[]): string {
   return `${grns.slice(0, 2).join(", ")} +${grns.length - 2} more`;
 }
 
+function todayIsoDate(): string {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/** Normalize API warranty date to YYYY-MM-DD. */
+export function inventoryWarrantyDate(value: string | null | undefined): string | null {
+  const text = (value ?? "").trim();
+  if (!text) return null;
+  return text.slice(0, 10);
+}
+
+export function isInventoryWarrantyExpired(value: string | null | undefined, today = todayIsoDate()): boolean {
+  const end = inventoryWarrantyDate(value);
+  if (!end) return false;
+  return end < today;
+}
+
+export function formatInventoryDateAdded(value: string | null | undefined): string {
+  const text = (value ?? "").trim();
+  if (!text) return "-";
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text.slice(0, 10);
+  return new Intl.DateTimeFormat(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+export function formatInventoryWarrantyLabel(value: string | null | undefined): string {
+  const end = inventoryWarrantyDate(value);
+  if (!end) return "-";
+  if (isInventoryWarrantyExpired(end)) return "Expired";
+  return new Intl.DateTimeFormat(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(`${end}T00:00:00`));
+}
+
+function resolveProductDateAdded(lines: ProcurementInventoryRow[]): string | null {
+  const stamps = lines
+    .map((row) => (row.receipt_at ?? "").trim())
+    .filter(Boolean)
+    .sort();
+  return stamps[0] ?? null;
+}
+
+function resolveProductWarranty(lines: ProcurementInventoryRow[]): {
+  warrantyValidTill: string | null;
+  warrantyExpired: boolean;
+} {
+  const ends = lines
+    .map((row) => inventoryWarrantyDate(row.warranty_valid_till))
+    .filter((value): value is string => Boolean(value))
+    .sort();
+  if (ends.length === 0) {
+    return { warrantyValidTill: null, warrantyExpired: false };
+  }
+  const earliest = ends[0]!;
+  return {
+    warrantyValidTill: earliest,
+    warrantyExpired: isInventoryWarrantyExpired(earliest),
+  };
+}
+
 /** One row per product - aggregates units from all POs/GRNs for the same product name. */
 export function groupGrnStockByProduct(rows: ProcurementInventoryRow[]): GrnStockByProductRow[] {
   const map = new Map<string, { displayName: string; lines: ProcurementInventoryRow[] }>();
@@ -125,6 +201,7 @@ export function groupGrnStockByProduct(rows: ProcurementInventoryRow[]): GrnStoc
       const descriptions = [
         ...new Set(lines.map((row) => (row.description ?? "").trim()).filter(Boolean)),
       ];
+      const warranty = resolveProductWarranty(lines);
       return {
         productKey,
         productName: displayName,
@@ -140,6 +217,9 @@ export function groupGrnStockByProduct(rows: ProcurementInventoryRow[]): GrnStoc
         grnSummary: formatGrnSummaryFromRows(lines),
         hasReversal: lines.some((row) => row.source === "grn_reversal"),
         addedBy: resolveProductAddedBy(lines),
+        dateAdded: resolveProductDateAdded(lines),
+        warrantyValidTill: warranty.warrantyValidTill,
+        warrantyExpired: warranty.warrantyExpired,
         lines,
       };
     })

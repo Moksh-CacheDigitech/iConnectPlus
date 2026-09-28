@@ -1,8 +1,10 @@
 """Manual / Excel-imported procurement inventory lines (optional PO link)."""
 
+from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +20,7 @@ class ProcInventoryImportLine(Base, *ProcTransactionMixin):
     product_name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     serial_number: Mapped[str] = mapped_column(String(120), nullable=False)
+    warranty_valid_till: Mapped[date | None] = mapped_column(Date, nullable=True)
     order_header_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("procurement.proc_order_header.id", ondelete="RESTRICT"),
@@ -25,3 +28,16 @@ class ProcInventoryImportLine(Base, *ProcTransactionMixin):
         index=True,
     )
     company_po_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Legacy stock migration: purchase cost and original receipt date drive aging.
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    received_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    owner_employee_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("master.master_employee.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    owner_assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_ovf_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
+    open_for_sale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    open_for_sale_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -131,6 +131,117 @@ class ProcurementCrmAdapter:
             negotiated_vendor_total=negotiated_vendor_total,
         )
 
+    def get_ovf_owner_employee_id(self, ctx: TenantContext, ovf_id: UUID) -> UUID | None:
+        """Salesperson who owns the opportunity behind an OVF (stock accountability)."""
+        from modules.crm.models import CrmOpportunity
+        from modules.crm.repository.ovf_repository import OvfRepository
+
+        ovf = OvfRepository(self._db).get(ctx, ovf_id, branch_scoped=False)
+        if ovf is None:
+            return None
+        opp = self._db.get(CrmOpportunity, ovf.opportunity_id)
+        return opp.owner_employee_id if opp is not None else None
+
+    def get_ovf_release_states(self, ctx: TenantContext, ovf_ids: list[UUID]) -> dict[UUID, bool]:
+        """True when leftover stock of the OVF should open for sale (closed or deal lost)."""
+        from sqlalchemy import select
+
+        from modules.crm.models import CrmOpportunity, CrmOvf
+
+        ids = [oid for oid in set(ovf_ids) if oid is not None]
+        if not ids:
+            return {}
+        stmt = (
+            select(CrmOvf.id, CrmOvf.closed_at, CrmOpportunity.status)
+            .join(CrmOpportunity, CrmOpportunity.id == CrmOvf.opportunity_id)
+            .where(CrmOvf.tenant_id == ctx.tenant_id, CrmOvf.id.in_(ids))
+        )
+        return {
+            ovf_id: bool(closed_at is not None or status in ("lost", "cancelled"))
+            for ovf_id, closed_at, status in self._db.execute(stmt).all()
+        }
+
+    def get_ovf_brief(self, ctx: TenantContext, ovf_id: UUID) -> dict[str, Any] | None:
+        from modules.crm.repository.ovf_repository import OvfRepository
+
+        ovf = OvfRepository(self._db).get(ctx, ovf_id, branch_scoped=False)
+        if ovf is None:
+            return None
+        return {
+            "id": ovf.id,
+            "ovf_no": ovf.ovf_no,
+            "opportunity_id": ovf.opportunity_id,
+            "company_account_id": ovf.company_account_id,
+            "customer_name": ovf.customer_name,
+            "po_number": ovf.po_number,
+            "blueprint_state": ovf.blueprint_state,
+            "locked": bool(ovf.locked),
+            "shared_to_scm": bool(ovf.shared_to_scm),
+            "editable": ovf.blueprint_state == "draft" and not ovf.locked and not ovf.shared_to_scm,
+            "shipping_address": ovf.shipping_address,
+            "shipping_state": ovf.shipping_state,
+            "expected_delivery_date": ovf.expected_delivery_date,
+        }
+
+    def list_ovf_briefs_for_opportunity(self, ctx: TenantContext, opportunity_id: UUID) -> list[dict[str, Any]]:
+        from sqlalchemy import select
+
+        from modules.crm.models import CrmOvf, CrmOvfLine
+
+        ovfs = list(
+            self._db.scalars(
+                select(CrmOvf).where(
+                    CrmOvf.tenant_id == ctx.tenant_id,
+                    CrmOvf.opportunity_id == opportunity_id,
+                    CrmOvf.is_deleted.is_(False),
+                )
+            ).all()
+        )
+        out = []
+        for ovf in ovfs:
+            brief = self.get_ovf_brief(ctx, ovf.id)
+            if brief is None:
+                continue
+            lines = self._db.scalars(
+                select(CrmOvfLine).where(
+                    CrmOvfLine.ovf_id == ovf.id,
+                    CrmOvfLine.side == "customer_po",
+                    CrmOvfLine.is_deleted.is_(False),
+                )
+            ).all()
+            brief["item_summary"] = "; ".join(f"{ln.product_name} x {float(ln.qty):g}" for ln in lines) or None
+            brief["quantity"] = sum((float(ln.qty) for ln in lines), 0.0) or None
+            out.append(brief)
+        return out
+
+    def get_opportunity_brief(self, ctx: TenantContext, opportunity_id: UUID) -> dict[str, Any] | None:
+        from modules.crm.models import CrmCompany, CrmOpportunity
+
+        opp = self._db.get(CrmOpportunity, opportunity_id)
+        if opp is None or opp.tenant_id != ctx.tenant_id or opp.is_deleted:
+            return None
+        account = self._db.get(CrmCompany, opp.company_account_id) if opp.company_account_id else None
+        return {
+            "id": opp.id,
+            "name": opp.opportunity_name,
+            "deal_number": opp.deal_reg_number or opp.opportunity_code,
+            "company_account_id": opp.company_account_id,
+            "customer_name": getattr(account, "customer_name", None),
+        }
+
+    def add_ovf_vendor_line(self, ctx: TenantContext, ovf_id: UUID, **fields: Any) -> Any:
+        return self._ovfs.add_line(ctx, ovf_id, side="vendor", **fields)
+
+    def raise_ovf_expense(self, ctx: TenantContext, ovf_id: UUID, **fields: Any) -> Any:
+        from modules.crm.service.ovf_finance_service import OvfFinanceService
+
+        return OvfFinanceService(self._db).raise_expense(ctx, ovf_id, **fields)
+
+    def set_ovf_holding_cost(self, ctx: TenantContext, ovf_id: UUID, amount: Any) -> None:
+        from modules.crm.service.ovf_finance_service import OvfFinanceService
+
+        OvfFinanceService(self._db).set_holding_cost(ctx, ovf_id, amount)
+
     def update_scm_item_plan_vendor(
         self,
         ctx: TenantContext,

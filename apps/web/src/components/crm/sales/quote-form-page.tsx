@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Building2, FileText, ListOrdered, MapPin, Paperclip, Plus, Scale, Trash2 } from "lucide-react";
+import { ArrowLeft, Building2, FileInput, FileText, ListOrdered, MapPin, Paperclip, Plus, Scale, Trash2 } from "lucide-react";
 
 import { CrmErrorBanner, CrmIconBadge, CrmListPanel, CrmPage, CrmSection } from "@/components/crm/crm-ui";
 import { CrmSessionEmployeeField } from "@/components/crm/sales/crm-session-employee-field";
@@ -26,6 +26,7 @@ import {
   normalizeQuoteServiceType,
 } from "@/lib/crm/lead-product-options";
 import { ApiClientError } from "@/services/api-client";
+import { extractVendorQuoteLines, getDefaultQuoteTerms } from "@/services/crm-deal-controls-service";
 import {
   addQuoteLine,
   createAttachment,
@@ -170,6 +171,9 @@ export function QuoteFormPage({
   const [mandateOpen, setMandateOpen] = useState(false);
   const [mandateMessage, setMandateMessage] = useState("");
   const [nextQuoteNo, setNextQuoteNo] = useState("");
+  const vendorImportRef = useRef<HTMLInputElement>(null);
+  const [importingVendor, setImportingVendor] = useState(false);
+  const [vendorImportNote, setVendorImportNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -265,7 +269,7 @@ export function QuoteFormPage({
             : Promise.resolve([]),
           listCrmMemberOptions().catch(() => []),
           getOpportunityBlueprint(opportunityId).catch(() => null),
-          peekNextQuoteNumber().catch(() => ""),
+          peekNextQuoteNumber(opportunityId).catch(() => ""),
         ]);
       setNextQuoteNo(previewQuoteNo);
       if (
@@ -327,7 +331,7 @@ export function QuoteFormPage({
         shipping_country: companyRow?.shipping_country || companyRow?.billing_country || "",
         description: leadRow?.notes || companyRow?.description || "",
         reason_for_discount: "",
-        terms: "",
+        terms: await getDefaultQuoteTerms().catch(() => ""),
         freight: "0",
       });
       setLines([newLine()]);
@@ -375,6 +379,50 @@ export function QuoteFormPage({
       copyAddress(value);
     }
     setCopyAddressAction("");
+  }
+
+  async function importVendorQuote(file: File | undefined) {
+    if (vendorImportRef.current) vendorImportRef.current.value = "";
+    if (!file) return;
+    setImportingVendor(true);
+    setVendorImportNote(null);
+    try {
+      const result = await extractVendorQuoteLines(file.name, await fileToBase64(file));
+      if (result.lines.length === 0) {
+        setVendorImportNote(
+          result.text_extracted
+            ? `No item rows found in ${file.name} - rows need a quantity, rate and amount. Add the lines manually.`
+            : result.ocr_available
+              ? `Could not read any text from ${file.name}. Try a clearer scan or the vendor's PDF.`
+              : `${file.name} looks scanned and OCR is not installed on the server. Upload a text PDF or Excel.`,
+        );
+        return;
+      }
+      const imported = result.lines.map((row, index): LineDraft => {
+        const cost = String(Number(row.unit_cost));
+        return {
+          ...newLine(),
+          product_name: row.product_name,
+          hsn_sac: row.hsn_sac ?? "",
+          qty: String(Number(row.qty)),
+          unit_cost: cost,
+          unit_sell: cost,
+          gst_pct: row.gst_pct != null ? String(Number(row.gst_pct)) : "18",
+          vendorFile: index === 0 ? file : null,
+        };
+      });
+      setLines((current) => [
+        ...current.filter((line) => line.serverId || line.product_name.trim()),
+        ...imported,
+      ]);
+      setVendorImportNote(
+        `Added ${imported.length} line(s) from ${file.name} at vendor cost - set the margin % on each. The quote file is attached to the first line.`,
+      );
+    } catch (err) {
+      setVendorImportNote(err instanceof ApiClientError ? err.message : "Could not read the vendor quote.");
+    } finally {
+      setImportingVendor(false);
+    }
   }
 
   function setLine(key: string, field: keyof Omit<LineDraft, "key">, value: string | File | null) {
@@ -685,7 +733,15 @@ export function QuoteFormPage({
       <CrmSection title="Terms and Conditions" icon={Scale} className="min-w-0 overflow-x-clip">
         <div className="grid min-w-0 grid-cols-1 gap-y-3">
           <FinanceField label="Terms and Conditions">
-            <FinanceTextarea value={form.terms} onChange={(e) => setField("terms", e.target.value)} />
+            <FinanceTextarea
+              value={form.terms}
+              onChange={(e) => setField("terms", e.target.value)}
+              className="min-h-[180px]"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Pre-filled with the General Terms &amp; Conditions (price validity, GST extra, lead time,
+              ±2% currency clause). Edit only what differs for this customer.
+            </p>
           </FinanceField>
           <FinanceField label="Freight Charges (₹)">
             <Input type="number" min={0} value={form.freight} onChange={(e) => setField("freight", e.target.value)} />
@@ -815,16 +871,41 @@ export function QuoteFormPage({
             <CrmIconBadge icon={ListOrdered} />
             <h2 className="text-base font-extrabold tracking-tight">Quoted Items</h2>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="cursor-pointer"
-            onClick={() => setLines((current) => [...current, newLine()])}
-          >
-            <Plus className="size-3.5" /> Add row
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="cursor-pointer"
+              disabled={importingVendor}
+              onClick={() => vendorImportRef.current?.click()}
+            >
+              <FileInput className="size-3.5" /> {importingVendor ? "Reading quote…" : "Import from vendor quote"}
+            </Button>
+            <input
+              ref={vendorImportRef}
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.txt"
+              className="hidden"
+              aria-label="Vendor quote file"
+              onChange={(e) => void importVendorQuote(e.target.files?.[0])}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="cursor-pointer"
+              onClick={() => setLines((current) => [...current, newLine()])}
+            >
+              <Plus className="size-3.5" /> Add row
+            </Button>
+          </div>
         </div>
+        {vendorImportNote ? (
+          <p className="border-b border-border/70 bg-muted/30 px-4 py-2 text-xs text-muted-foreground" role="status">
+            {vendorImportNote}
+          </p>
+        ) : null}
         <div className="erp-scroll min-w-0 overflow-x-auto">
           <table className="w-max min-w-full text-left text-xs">
             <thead>

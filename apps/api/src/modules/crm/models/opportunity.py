@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Numeric,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -45,6 +46,14 @@ class CrmOpportunity(Base, *CrmTransactionMixin):
         CheckConstraint(
             "po_terms_status IN ('not_required','pending','approved','rejected')",
             name="ck_crm_opp_po_terms_status",
+        ),
+        CheckConstraint(
+            "purchase_model IS NULL OR purchase_model IN ('capex','opex')",
+            name="ck_crm_opp_purchase_model",
+        ),
+        CheckConstraint(
+            "lease_type IS NULL OR lease_type IN ('finance','operating')",
+            name="ck_crm_opp_lease_type",
         ),
         {"schema": "crm"},
     )
@@ -132,10 +141,15 @@ class CrmOpportunity(Base, *CrmTransactionMixin):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
-    # Customer PO is validated by Finance (tax/GST) and Legal (terms &
-    # conditions) before Management gives the final go-ahead. Sales never
-    # validates terms. ``po_approval_chain`` stores the approvers chosen for
-    # each stage when the PO is first sent for approval.
+    # Sales must accept the customer PO terms before the PO goes to Finance
+    # (tax/GST), then Legal (terms & conditions), then Management.
+    # ``po_approval_chain`` stores the approvers chosen for each stage when
+    # the PO is first sent for approval.
+    sales_terms_accepted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    sales_terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sales_terms_accepted_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     po_finance_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="not_required", server_default="not_required"
     )
@@ -180,3 +194,14 @@ class CrmOpportunity(Base, *CrmTransactionMixin):
         Boolean, nullable=False, default=False, server_default="false"
     )
     onboarding_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # Soft link to marketing.mkt_campaign (type=event) - credit per deal, not per account.
+    marketing_event_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
+
+    # CapEx (outright purchase) vs OpEx (lease). Lease terms are filled by Finance.
+    purchase_model: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    lease_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    lease_partner: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_interest_rate_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    lease_tenure_months: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    lease_monthly_rental: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)

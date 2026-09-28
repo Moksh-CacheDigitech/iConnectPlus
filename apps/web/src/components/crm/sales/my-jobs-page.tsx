@@ -13,6 +13,7 @@ import { FinanceStatusBadge } from "@/components/finance/finance-status-badge";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { ApiClientError } from "@/services/api-client";
+import { respondMyJob } from "@/services/crm-deal-controls-service";
 import { Input } from "@/components/ui/input";
 import {
   decideMyJob,
@@ -50,6 +51,43 @@ function approveLabel(task: ApprovalTask): string {
   return "Approve";
 }
 
+function shortTime(value: string): string {
+  return new Date(value).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Reply (1h) and attach (6h) deadlines for BOQ/SOW requests. */
+function SlaLine({ task, now }: { task: ApprovalTask; now: number }) {
+  if (!task.action || !ATTACHMENT_ACTIONS.has(task.action) || task.status !== "pending") return null;
+  const replyLate = !task.responded_at && task.response_due_at && now > Date.parse(task.response_due_at);
+  const attachLate = task.due_at && now > Date.parse(task.due_at);
+  return (
+    <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px]">
+      {task.responded_at ? (
+        <span className={task.response === "cannot_submit" ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}>
+          {task.response === "cannot_submit" ? `Cannot submit: ${task.response_reason ?? "-"}` : "Confirmed - will submit"}
+        </span>
+      ) : task.response_due_at ? (
+        <span className={replyLate ? "font-semibold text-red-700 dark:text-red-400" : "text-muted-foreground"}>
+          Reply by {shortTime(task.response_due_at)}
+          {replyLate ? " (missed)" : ""}
+        </span>
+      ) : null}
+      {task.due_at ? (
+        <span className={attachLate ? "font-semibold text-red-700 dark:text-red-400" : "text-muted-foreground"}>
+          Attach by {shortTime(task.due_at)}
+          {attachLate ? " (overdue)" : ""}
+        </span>
+      ) : null}
+      {task.escalation_level ? <span className="font-semibold text-red-700 dark:text-red-400">Escalated to manager</span> : null}
+    </div>
+  );
+}
+
 export function MyJobsPage({
   companyAccountId,
   embedded,
@@ -72,6 +110,12 @@ export function MyJobsPage({
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [deciding, setDeciding] = useState(false);
   const [decideError, setDecideError] = useState<string | null>(null);
+  const [cannotSubmitTask, setCannotSubmitTask] = useState<ApprovalTask | null>(null);
+  const [cannotReason, setCannotReason] = useState("");
+  const [responding, setResponding] = useState(false);
+  const [respondError, setRespondError] = useState<string | null>(null);
+  // SLA overdue flags are judged against when the list was fetched.
+  const [loadedAt, setLoadedAt] = useState(0);
 
   const loadNames = useCallback(async (tasks: ApprovalTask[]) => {
     const names: Record<string, string> = {};
@@ -154,6 +198,7 @@ export function MyJobsPage({
       }
 
       setRows(visible);
+      setLoadedAt(Date.now());
       await loadNames(visible);
     } catch (err) {
       setRows([]);
@@ -167,6 +212,23 @@ export function MyJobsPage({
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function respond(task: ApprovalTask, canSubmit: boolean, reason?: string) {
+    setResponding(true);
+    setRespondError(null);
+    try {
+      await respondMyJob(task.id, canSubmit, reason);
+      setCannotSubmitTask(null);
+      setCannotReason("");
+      await load();
+    } catch (err) {
+      const message = err instanceof ApiClientError ? err.message : "Failed to record response";
+      if (canSubmit) setError(message);
+      else setRespondError(message);
+    } finally {
+      setResponding(false);
+    }
+  }
 
   function openDecision(task: ApprovalTask, outcome: "approved" | "rejected") {
     setDecision({ task, outcome });
@@ -336,6 +398,7 @@ export function MyJobsPage({
                       >
                         {task.title}
                       </Link>
+                      <SlaLine task={task} now={loadedAt} />
                     </td>
                     <td className="px-4 py-2.5 text-foreground">{recordNames[task.id] ?? "-"}</td>
                     <td className="px-4 py-2.5 capitalize text-muted-foreground">{task.team_role}</td>
@@ -345,6 +408,34 @@ export function MyJobsPage({
                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
                       {task.status === "pending" ? (
                         <div className="flex justify-end gap-1.5">
+                          {task.action && ATTACHMENT_ACTIONS.has(task.action) && !task.responded_at ? (
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={responding}
+                                className="cursor-pointer"
+                                onClick={() => void respond(task, true)}
+                              >
+                                Can submit
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={responding}
+                                className="cursor-pointer"
+                                onClick={() => {
+                                  setCannotSubmitTask(task);
+                                  setCannotReason("");
+                                  setRespondError(null);
+                                }}
+                              >
+                                Can&apos;t submit
+                              </Button>
+                            </>
+                          ) : null}
                           <Button
                             type="button"
                             size="sm"
@@ -402,6 +493,11 @@ export function MyJobsPage({
         onCancel={() => !deciding && setDecision(null)}
         onConfirm={() => void submitDecision()}
       >
+        {decision?.task.action === FREIGHT_ACTION && decision.task.remarks ? (
+          <pre className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-sans text-xs whitespace-pre-wrap text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+            {decision.task.remarks}
+          </pre>
+        ) : null}
         {decision?.outcome === "approved" && decision.task.action === FREIGHT_ACTION ? (
           <FinanceField label="Freight Charges (₹) *" className="mb-3 space-y-2">
             <Input
@@ -416,8 +512,8 @@ export function MyJobsPage({
           </FinanceField>
         ) : null}
         {decision?.outcome === "approved" &&
-        decision.task.action &&
-        ATTACHMENT_ACTIONS.has(decision.task.action) ? (
+          decision.task.action &&
+          ATTACHMENT_ACTIONS.has(decision.task.action) ? (
           <FinanceField
             label={
               decision.task.action === "provide_boq_attachment" ? "BOQ file *" : "SOW file *"
@@ -443,6 +539,38 @@ export function MyJobsPage({
           />
         </FinanceField>
         {decideError ? <p className="mt-3 text-xs text-destructive">{decideError}</p> : null}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={Boolean(cannotSubmitTask)}
+        title="Can't submit this document"
+        description={
+          cannotSubmitTask
+            ? `${cannotSubmitTask.title} - your manager and the salesperson are told immediately.`
+            : undefined
+        }
+        confirmLabel="Send reason"
+        busy={responding}
+        contentClassName="max-w-lg"
+        onCancel={() => !responding && setCannotSubmitTask(null)}
+        onConfirm={() => {
+          if (!cannotSubmitTask) return;
+          if (!cannotReason.trim()) {
+            setRespondError("Say why - e.g. call not aligned yet, questionnaire unanswered.");
+            return;
+          }
+          void respond(cannotSubmitTask, false, cannotReason.trim());
+        }}
+      >
+        <FinanceField label="Reason *" className="space-y-2">
+          <FinanceTextarea
+            value={cannotReason}
+            onChange={(e) => setCannotReason(e.target.value)}
+            placeholder="Customer call not aligned yet / throughput and application details missing…"
+            className="min-h-[88px] rounded-lg border-slate-200 bg-white text-[13px] shadow-none placeholder:text-slate-400 focus-visible:border-sky-400 focus-visible:ring-2 focus-visible:ring-sky-200/80"
+          />
+        </FinanceField>
+        {respondError ? <p className="mt-3 text-xs text-destructive">{respondError}</p> : null}
       </ConfirmDialog>
     </CrmPage>
   );

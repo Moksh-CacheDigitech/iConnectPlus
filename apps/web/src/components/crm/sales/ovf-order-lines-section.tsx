@@ -520,14 +520,14 @@ export function validateChargeAttachments(
 ): string | null {
   const hasCustomerProductRows = customerRows.some((row) => row.product_name.trim());
   if (hasCustomerProductRows && !chargeTableHasFile(customerRows, "poFiles")) {
-    return "Add PO * is required for Customer Charges (upload at least one file on any product row).";
+    return "Add PO * is required for the Customer PO Summary (upload at least one file on any product row).";
   }
 
   const hasVendorProductRows = vendorRows.some(
     (row) => row.product_name.trim() || normalizeDistributorName(row.vendor_name) || row.vendor_name.trim() === DISTRIBUTOR_OTHERS_PENDING,
   );
   if (hasVendorProductRows && !chargeTableHasFile(vendorRows, "quoteFiles")) {
-    return "Add Quote * is required for Vendor Charges (upload at least one file on any product row).";
+    return "Add Quote * is required for the Vendor PO Summary (upload at least one file on any product row).";
   }
 
   for (const row of vendorRows) {
@@ -844,7 +844,7 @@ export function OvfOrderLinesSection({
 
       <div className="space-y-10 px-4 py-5">
         <ChargesTableShell
-          title="Customer Charges."
+          title="Customer PO Summary"
           totalLabel="Total Sale Value"
           totalValue={formatInrPrecise(totalSaleValue)}
           headerRight={
@@ -993,7 +993,7 @@ export function OvfOrderLinesSection({
         </ChargesTableShell>
 
         <ChargesTableShell
-          title="Vendor Charges."
+          title="Vendor PO Summary"
           totalLabel="Total Purchase Value"
           totalValue={formatInrPrecise(totalPurchaseValue)}
           headerRight={

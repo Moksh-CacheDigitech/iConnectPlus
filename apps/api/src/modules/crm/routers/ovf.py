@@ -10,18 +10,31 @@ from modules.crm.dependencies import PaginationParams, extract_update_fields, ge
 from modules.crm.schemas import (
     OvfCreate,
     OvfDealWonRequest,
+    OvfDeliveryDatesUpdate,
+    OvfExpenseCreate,
+    OvfExpenseDecisionRequest,
+    OvfExpenseResponse,
+    OvfFreightRequest,
+    OvfFullPaymentRequest,
     OvfInvoiceStatusResponse,
     OvfInvoiceSubmissionRequest,
     OvfLineCreate,
     OvfLineResponse,
     OvfLineUpdate,
+    OvfLiveStatusResponse,
+    OvfPaymentCreate,
+    OvfPaymentResponse,
     OvfPaymentUpdateRequest,
     OvfResponse,
     OvfScmSavingsResponse,
     OvfSendForApprovalRequest,
     OvfUpdate,
+    OvfVendorSplitRequest,
+    SalesPerformanceRow,
 )
 from modules.crm.service import OvfService
+from modules.crm.service.crm_scope_validator import CrmScopeValidator
+from modules.crm.service.ovf_finance_service import OvfFinanceService
 from modules.foundation.dependencies import require_permission
 from modules.foundation.domain.value_objects import TenantContext
 from shared.schemas import APIResponse
@@ -39,6 +52,48 @@ def list_ovfs(
 ):
     rows = OvfService(db).list(ctx, company_id, opportunity_id)
     return APIResponse(message="OK", data=paginate(rows, pagination))
+
+
+@ovf_router.get("/sales-performance", response_model=APIResponse[list[SalesPerformanceRow]])
+def get_sales_performance(
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:read"))],
+    db: Annotated[Session, Depends(get_db)],
+    company_id: UUID | None = None,
+):
+    """Approved vs live OVF margin per salesperson - the incentive / F&F feed."""
+    cid = CrmScopeValidator(db).resolve_company_id(ctx, company_id)
+    return APIResponse(message="OK", data=OvfFinanceService(db).sales_performance(ctx, cid))
+
+
+@ovf_router.patch("/payments/{payment_id}/void", response_model=APIResponse[dict[str, str]])
+def void_ovf_payment(
+    payment_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:update"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    OvfFinanceService(db).void_payment(ctx, payment_id)
+    return APIResponse(message="Receipt voided", data={"id": str(payment_id)})
+
+
+@ovf_router.post("/expenses/{expense_id}/decide", response_model=APIResponse[OvfExpenseResponse])
+def decide_ovf_expense(
+    expense_id: UUID,
+    body: OvfExpenseDecisionRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:read"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = OvfFinanceService(db).decide_expense(ctx, expense_id, decision=body.decision, remark=body.remark)
+    return APIResponse(message=f"Expense {body.decision}", data=row)
+
+
+@ovf_router.delete("/lines/{line_id}", response_model=APIResponse[dict[str, str]])
+def delete_ovf_line(
+    line_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:update"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    OvfService(db).delete_line(ctx, line_id)
+    return APIResponse(message="OK", data={"id": str(line_id)})
 
 
 @ovf_router.post("", response_model=APIResponse[OvfResponse])
@@ -181,10 +236,109 @@ def request_ovf_freight(
     ovf_id: UUID,
     ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:update"))],
     db: Annotated[Session, Depends(get_db)],
+    body: OvfFreightRequest | None = None,
 ):
+    details = body.model_dump() if body is not None else {}
     return APIResponse(
         message="Freight requested from SCM",
-        data=OvfService(db).request_freight_from_scm(ctx, ovf_id),
+        data=OvfService(db).request_freight_from_scm(ctx, ovf_id, **details),
+    )
+
+
+@ovf_router.post("/{ovf_id}/vendor-split", response_model=APIResponse[list[OvfLineResponse]])
+def split_ovf_vendor_line(
+    ovf_id: UUID,
+    body: OvfVendorSplitRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:update"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    rows = OvfService(db).split_vendor_line(
+        ctx,
+        ovf_id,
+        customer_line_id=body.customer_line_id,
+        splits=[split.model_dump() for split in body.splits],
+    )
+    return APIResponse(message="Vendor line split across distributors", data=rows)
+
+
+@ovf_router.patch("/{ovf_id}/delivery-dates", response_model=APIResponse[OvfResponse])
+def update_ovf_delivery_dates(
+    ovf_id: UUID,
+    body: OvfDeliveryDatesUpdate,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    return APIResponse(
+        message="Delivery dates updated",
+        data=OvfService(db).update_delivery_dates(ctx, ovf_id, **body.model_dump()),
+    )
+
+
+@ovf_router.get("/{ovf_id}/live-status", response_model=APIResponse[OvfLiveStatusResponse])
+def get_ovf_live_status(
+    ovf_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:read"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    return APIResponse(message="OK", data=OvfFinanceService(db).get_live_status(ctx, ovf_id))
+
+
+@ovf_router.get("/{ovf_id}/payments", response_model=APIResponse[list[OvfPaymentResponse]])
+def list_ovf_payments(
+    ovf_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:read"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    return APIResponse(message="OK", data=OvfFinanceService(db).list_payments(ctx, ovf_id))
+
+
+@ovf_router.post("/{ovf_id}/payments", response_model=APIResponse[OvfPaymentResponse])
+def add_ovf_payment(
+    ovf_id: UUID,
+    body: OvfPaymentCreate,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:update"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    return APIResponse(
+        message="Receipt recorded",
+        data=OvfFinanceService(db).add_payment(ctx, ovf_id, **body.model_dump()),
+    )
+
+
+@ovf_router.post("/{ovf_id}/full-payment", response_model=APIResponse[OvfResponse])
+def mark_ovf_full_payment(
+    ovf_id: UUID,
+    body: OvfFullPaymentRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:update"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Finance closes the sales cycle; the live margin becomes the final OVF margin."""
+    return APIResponse(
+        message="Full payment recorded - OVF closed",
+        data=OvfFinanceService(db).mark_full_payment(ctx, ovf_id, **body.model_dump()),
+    )
+
+
+@ovf_router.get("/{ovf_id}/expenses", response_model=APIResponse[list[OvfExpenseResponse]])
+def list_ovf_expenses(
+    ovf_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:read"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    return APIResponse(message="OK", data=OvfFinanceService(db).list_expenses(ctx, ovf_id))
+
+
+@ovf_router.post("/{ovf_id}/expenses", response_model=APIResponse[OvfExpenseResponse])
+def raise_ovf_expense(
+    ovf_id: UUID,
+    body: OvfExpenseCreate,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:read"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """SCM / Operations log unplanned execution cost; the sales owner approves it."""
+    return APIResponse(
+        message="Expense raised for owner approval",
+        data=OvfFinanceService(db).raise_expense(ctx, ovf_id, **body.model_dump()),
     )
 
 

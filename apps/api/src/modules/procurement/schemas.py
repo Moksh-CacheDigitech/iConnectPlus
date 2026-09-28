@@ -1,6 +1,7 @@
 """Procurement Pydantic schemas."""
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
@@ -321,6 +322,9 @@ class OrderResponse(BaseModel):
     currency_code: str
     payment_terms: str | None = None
     expected_delivery_date: date | None = None
+    awb_number: str | None = None
+    delivery_milestone: str | None = None
+    actual_delivery_date: date | None = None
     total_amount: float
     received_amount: float = 0
     status: str
@@ -725,6 +729,339 @@ class ScmEtdUpdateRequest(BaseModel):
     notify_customer: bool = True
 
 
+class ScmDeliveryMilestoneRequest(BaseModel):
+    milestone: str = Field(max_length=40)
+    awb_number: str | None = Field(default=None, max_length=100)
+    actual_delivery_date: date | None = None
+    note: str | None = None
+
+
+class ScmDeliveryMilestoneResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    delivery_milestone: str | None = None
+    delivery_milestone_history: list[dict] | None = None
+    awb_number: str | None = None
+    expected_delivery_date: date | None = None
+    actual_delivery_date: date | None = None
+
+
+class InventoryUnitRow(BaseModel):
+    kind: str
+    id: UUID
+    product_name: str | None = None
+    serial_number: str | None = None
+    received_on: date | None = None
+    quantity: Decimal
+    unit_cost: Decimal
+    warranty_valid_till: date | None = None
+    warranty_expired: bool = False
+    warranty_days_left: int | None = None
+    owner_employee_id: UUID | None = None
+    owner_name: str | None = None
+    source_ovf_id: UUID | None = None
+    open_for_sale: bool = False
+    status: str
+    age_days: int
+    aging_bucket: str
+    holding_cost: Decimal
+    current_value: Decimal
+
+
+class InventoryAgingTotals(BaseModel):
+    units: Decimal
+    value: Decimal
+    holding_cost: Decimal
+
+
+class InventoryAgingBucket(InventoryAgingTotals):
+    bucket: str
+
+
+class InventoryAgingOwnerRow(InventoryAgingTotals):
+    owner_employee_id: UUID | None = None
+    owner_name: str | None = None
+    oldest_age_days: int = 0
+
+
+class InventoryAgingProductRow(InventoryAgingTotals):
+    product_name: str | None = None
+
+
+class InventoryAgingReport(BaseModel):
+    as_of: date
+    target_max_age_days: int
+    total: InventoryAgingTotals
+    over_target: InventoryAgingTotals
+    warranty_expired_units: int
+    buckets: list[InventoryAgingBucket]
+    by_owner: list[InventoryAgingOwnerRow]
+    by_product: list[InventoryAgingProductRow]
+
+
+class InventorySelectionRequest(BaseModel):
+    stock_unit_ids: list[UUID] = Field(default_factory=list)
+    import_line_ids: list[UUID] = Field(default_factory=list)
+
+
+class InventoryAssignOwnerRequest(InventorySelectionRequest):
+    owner_employee_id: UUID | None = None
+
+
+class InventoryOpenForSaleRequest(InventorySelectionRequest):
+    open_for_sale: bool = True
+
+
+class InventoryTransferCreate(InventorySelectionRequest):
+    customer_note: str | None = None
+
+
+class InventoryTransferDecision(BaseModel):
+    accept: bool
+    remark: str | None = None
+
+
+class InventoryTransferResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    requester_employee_id: UUID
+    owner_employee_id: UUID | None = None
+    product_name: str
+    quantity: Decimal
+    stock_unit_ids: list[str] | None = None
+    import_line_ids: list[str] | None = None
+    customer_note: str | None = None
+    status: str
+    decided_at: datetime | None = None
+    decision_remark: str | None = None
+    created_at: datetime | None = None
+
+
+class ServiceRateContractCreate(BaseModel):
+    vendor_name: str = Field(min_length=1, max_length=255)
+    vendor_id: UUID | None = None
+    service_type: str = Field(max_length=30)
+    region: str | None = Field(default=None, max_length=120)
+    rate_per_visit: Decimal = Field(gt=0)
+    valid_from: date
+    valid_to: date | None = None
+    remarks: str | None = None
+
+
+class ServiceRateContractUpdate(BaseModel):
+    vendor_name: str | None = Field(default=None, max_length=255)
+    service_type: str | None = Field(default=None, max_length=30)
+    region: str | None = Field(default=None, max_length=120)
+    rate_per_visit: Decimal | None = Field(default=None, gt=0)
+    valid_from: date | None = None
+    valid_to: date | None = None
+    status: str | None = None
+    remarks: str | None = None
+
+
+class ServiceRateContractResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    contract_code: str
+    vendor_id: UUID | None = None
+    vendor_name: str
+    service_type: str
+    region: str | None = None
+    rate_per_visit: Decimal
+    valid_from: date
+    valid_to: date | None = None
+    status: str
+    remarks: str | None = None
+    created_at: datetime | None = None
+
+
+class ServicePlanCreate(BaseModel):
+    ovf_id: UUID
+    rate_contract_id: UUID
+    projected_visits: int = Field(gt=0, le=100000)
+    consumables_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    description: str | None = None
+    add_to_ovf: bool = True
+
+
+class ServicePlanResponse(BaseModel):
+    id: UUID
+    ovf_id: UUID
+    rate_contract_id: UUID
+    contract_code: str | None = None
+    vendor_name: str | None = None
+    service_type: str | None = None
+    description: str | None = None
+    projected_visits: int
+    visits_done: int
+    visits_remaining: int
+    extra_visits: int
+    rate_per_visit: Decimal
+    consumables_amount: Decimal
+    planned_total: Decimal
+    actual_cost: Decimal
+    added_to_ovf: bool
+    status: str
+
+
+class ServiceVisitCreate(BaseModel):
+    visit_date: date
+    site: str | None = Field(default=None, max_length=255)
+    engineer_name: str | None = Field(default=None, max_length=255)
+    remarks: str | None = None
+
+
+class ServiceVisitResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    plan_id: UUID
+    visit_date: date
+    site: str | None = None
+    engineer_name: str | None = None
+    remarks: str | None = None
+    status: str
+    beyond_projection: bool
+    expense_id: UUID | None = None
+    created_at: datetime | None = None
+
+
+class DeliveryProjectCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    opportunity_id: UUID | None = None
+    company_account_id: UUID | None = None
+    customer_name: str | None = Field(default=None, max_length=255)
+    remarks: str | None = None
+
+
+class DeliveryProjectUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=255)
+    customer_name: str | None = Field(default=None, max_length=255)
+    remarks: str | None = None
+    status: str | None = None
+    public_tracking_enabled: bool | None = None
+    rotate_tracking_token: bool = False
+
+
+class DeliverySiteInput(BaseModel):
+    circle: str | None = Field(default=None, max_length=120)
+    site_code: str | None = Field(default=None, max_length=80)
+    site_name: str | None = Field(default=None, max_length=255)
+    address: str | None = None
+    state: str | None = Field(default=None, max_length=100)
+    gstin: str | None = Field(default=None, max_length=15)
+    customer_po_number: str | None = Field(default=None, max_length=100)
+    item_summary: str | None = None
+    quantity: Decimal | None = None
+    milestone: str | None = Field(default=None, max_length=40)
+    status: str | None = Field(default=None, max_length=20)
+    expected_delivery_date: date | None = None
+    actual_delivery_date: date | None = None
+    awb_number: str | None = Field(default=None, max_length=100)
+    delay_reason: str | None = None
+    last_note: str | None = None
+    ovf_id: UUID | None = None
+    order_header_id: UUID | None = None
+
+
+class DeliverySiteResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    circle: str | None = None
+    site_code: str | None = None
+    site_name: str
+    address: str | None = None
+    state: str | None = None
+    gstin: str | None = None
+    customer_po_number: str | None = None
+    ovf_id: UUID | None = None
+    order_header_id: UUID | None = None
+    item_summary: str | None = None
+    quantity: Decimal | None = None
+    milestone: str
+    milestone_label: str
+    status: str
+    expected_delivery_date: date | None = None
+    actual_delivery_date: date | None = None
+    awb_number: str | None = None
+    delay_reason: str | None = None
+    last_note: str | None = None
+    delayed: bool = False
+    history: list[dict] = Field(default_factory=list)
+    updated_at: datetime | None = None
+
+
+class DeliveryProjectResponse(BaseModel):
+    id: UUID
+    project_code: str
+    name: str
+    company_account_id: UUID | None = None
+    customer_name: str | None = None
+    opportunity_id: UUID | None = None
+    tracking_token: str
+    public_tracking_enabled: bool
+    status: str
+    remarks: str | None = None
+    created_at: datetime | None = None
+    site_count: int = 0
+    delivered_count: int = 0
+    installed_count: int = 0
+    delayed_count: int = 0
+    on_hold_count: int = 0
+    by_milestone: dict[str, int] = Field(default_factory=dict)
+    circles: list[str] = Field(default_factory=list)
+
+
+class DeliveryProjectDetailResponse(DeliveryProjectResponse):
+    sites: list[DeliverySiteResponse] = Field(default_factory=list)
+
+
+class DeliveryTrackerImportRequest(BaseModel):
+    content_base64: str = Field(min_length=1)
+
+
+class DeliveryTrackerImportResponse(BaseModel):
+    updated: int
+    created: int
+    unchanged: int
+    errors: list[dict] = Field(default_factory=list)
+
+
+class PublicTrackerSite(BaseModel):
+    circle: str | None = None
+    site_code: str | None = None
+    site_name: str
+    customer_po_number: str | None = None
+    milestone: str
+    milestone_label: str
+    milestone_step: int
+    milestone_steps: int
+    status: str
+    expected_delivery_date: date | None = None
+    actual_delivery_date: date | None = None
+    awb_number: str | None = None
+    delayed: bool = False
+    updated_at: datetime | None = None
+
+
+class PublicTrackerResponse(BaseModel):
+    project_code: str
+    name: str
+    customer_name: str | None = None
+    status: str
+    site_count: int
+    delivered_count: int
+    installed_count: int
+    delayed_count: int
+    on_hold_count: int
+    by_milestone: dict[str, int] = Field(default_factory=dict)
+    circles: list[str] = Field(default_factory=list)
+    sites: list[PublicTrackerSite] = Field(default_factory=list)
+
+
 class ScmEtdUpdateResponse(BaseModel):
     order_id: UUID
     expected_delivery_date: date | None = None
@@ -904,6 +1241,10 @@ class ScmProcurementInventoryRowResponse(BaseModel):
     description: str | None = None
     stock_unit_id: UUID | None = None
     import_line_id: UUID | None = None
+    warranty_valid_till: date | None = None
+    owner_employee_id: UUID | None = None
+    source_ovf_id: UUID | None = None
+    open_for_sale: bool = False
 
 
 class ScmInventoryImportLineRequest(BaseModel):
@@ -911,6 +1252,10 @@ class ScmInventoryImportLineRequest(BaseModel):
     serial_number: str
     description: str | None = None
     order_id: UUID | None = None
+    warranty_valid_till: date | None = None
+    unit_cost: float | None = Field(default=None, ge=0)
+    received_on: date | None = None
+    owner_employee_id: UUID | None = None
 
     @field_validator("serial_number", "product_name")
     @classmethod
