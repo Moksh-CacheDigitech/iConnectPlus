@@ -41,15 +41,25 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://erp-postgres:erp-postgres@172.16.200.26:5432/erp",
         alias="DATABASE_URL",
     )
+    # Local Docker fallbacks (used when VM primary is unreachable).
+    # Leave blank in production/Coolify; set in local .env for offline VM work.
+    infra_fallback_enabled: bool = Field(default=True, alias="INFRA_FALLBACK_ENABLED")
+    database_url_fallback: str = Field(default="", alias="DATABASE_URL_FALLBACK")
 
     redis_url: str = Field(default="redis://172.16.200.26:6379/0", alias="REDIS_URL")
+    redis_url_fallback: str = Field(default="", alias="REDIS_URL_FALLBACK")
     celery_broker_url: str = Field(
         default="amqp://erp:erp_dev_password@172.16.200.26:5672//",
         alias="CELERY_BROKER_URL",
     )
+    celery_broker_url_fallback: str = Field(default="", alias="CELERY_BROKER_URL_FALLBACK")
     celery_result_backend: str = Field(
         default="redis://172.16.200.26:6379/1",
         alias="CELERY_RESULT_BACKEND",
+    )
+    celery_result_backend_fallback: str = Field(
+        default="",
+        alias="CELERY_RESULT_BACKEND_FALLBACK",
     )
 
     cors_origins: list[str] = Field(
@@ -96,6 +106,11 @@ class Settings(BaseSettings):
         default="",
         alias="S3_ENDPOINT_URL",
         description="Required MinIO API endpoint (e.g. http://minio:9000 or http://172.16.200.30:9000). AWS S3 is not used.",
+    )
+    s3_endpoint_url_fallback: str = Field(
+        default="",
+        alias="S3_ENDPOINT_URL_FALLBACK",
+        description="Local MinIO endpoint used when the VM primary is unreachable.",
     )
     aws_access_key_id: str = Field(
         default="",
@@ -145,6 +160,10 @@ class Settings(BaseSettings):
         default="http://172.16.200.26:9200",
         alias="OPENSEARCH_URL",
     )
+    opensearch_url_fallback: str = Field(
+        default="",
+        alias="OPENSEARCH_URL_FALLBACK",
+    )
 
     jwt_secret_key: str = Field(default="change-me-in-production", alias="JWT_SECRET_KEY")
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
@@ -161,6 +180,20 @@ class Settings(BaseSettings):
     # fans out many module calls; set API_RATE_LIMIT=300+ in AppScan / production.
     api_rate_limit: int = Field(default=0, alias="API_RATE_LIMIT")
     api_rate_window_seconds: int = Field(default=60, alias="API_RATE_WINDOW_SECONDS")
+    # Stricter limit for mutating methods (POST/PUT/PATCH/DELETE). 0 disables write bucket.
+    api_write_rate_limit: int = Field(default=0, alias="API_WRITE_RATE_LIMIT")
+    api_write_rate_window_seconds: int = Field(default=60, alias="API_WRITE_RATE_WINDOW_SECONDS")
+    # Reject well-known demo passwords when false. Default true for local DX;
+    # production / VAPT hosts must set ALLOW_DEMO_LOGIN=false.
+    allow_demo_login: bool = Field(default=True, alias="ALLOW_DEMO_LOGIN")
+    # Bind refresh tokens to User-Agent (and optionally IP) to reduce token replay (VAPT session hijack).
+    session_bind_user_agent: bool = Field(default=True, alias="SESSION_BIND_USER_AGENT")
+    session_bind_ip: bool = Field(default=False, alias="SESSION_BIND_IP")
+    # Auth cookie names (HttpOnly) - preferred over localStorage.
+    auth_cookie_access: str = Field(default="erp_access_token", alias="AUTH_COOKIE_ACCESS")
+    auth_cookie_refresh: str = Field(default="erp_refresh_token", alias="AUTH_COOKIE_REFRESH")
+    auth_cookie_secure: bool = Field(default=True, alias="AUTH_COOKIE_SECURE")
+    auth_cookie_samesite: str = Field(default="lax", alias="AUTH_COOKIE_SAMESITE")
     account_lockout_threshold: int = Field(default=5, alias="ACCOUNT_LOCKOUT_THRESHOLD")
     account_lockout_minutes: int = Field(default=15, alias="ACCOUNT_LOCKOUT_MINUTES")
     # Business-day timezone for attendance punch "today" (IST by default)
@@ -415,7 +448,12 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    loaded = Settings()
+    # Prefer VM primary; switch to local Docker URLs when VM is unreachable.
+    from core.infra_resolve import apply_infra_fallback
+
+    apply_infra_fallback(loaded)
+    return loaded
 
 
 settings = get_settings()

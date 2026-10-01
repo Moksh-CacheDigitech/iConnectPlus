@@ -100,9 +100,9 @@ function resolveOpportunityBlueprintState(
     case "deal_reg":
       return resolveOpportunityDealReg(opp);
     case "oem_pending":
-      return "Deal Registration Submitted";
+      return "Awaiting Vendor Quotation";
     case "oem_attached":
-      return "OEM Quotation Received";
+      return "Vendor Quotation Received";
     case "quote_ready":
       return "Vendor Quote Attached";
     case "quote_in_progress":

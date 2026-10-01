@@ -13,7 +13,6 @@ from modules.crm.repository.approval_step_owner_repository import ApprovalStepOw
 from modules.crm.service.crm_module_admin import CrmModuleAdminService
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecUser
-from modules.foundation.repository.user_module_repository import UserModuleRepository
 
 
 class ApprovalStepOwnerService:
@@ -81,20 +80,17 @@ class ApprovalStepOwnerService:
         grouped = self.list_grouped(ctx)
         return next(row for row in grouped if row["step_key"] == step_key)["owners"]
 
-    def _validate_owner_candidates(self, ctx: TenantContext, step_key: str, user_ids: list[UUID]) -> None:
+    def _validate_owner_candidates(self, ctx: TenantContext, _step_key: str, user_ids: list[UUID]) -> None:
+        """Owners must be active users in the tenant (CRM / Procurement / admin alike)."""
         if not user_ids:
             return
-        modules = UserModuleRepository(self._db)
-        crm_ids = set(modules.list_user_ids_for_module(ctx.tenant_id, "crm"))
-        allowed = set(crm_ids)
-        if step_key == "ovf_provide_freight":
-            allowed |= set(modules.list_user_ids_for_module(ctx.tenant_id, "procurement"))
-        missing = [uid for uid in user_ids if uid not in allowed]
-        if missing:
-            raise ConflictException(
-                "Step owners must be CRM module members"
-                + (" or Procurement members for freight" if step_key == "ovf_provide_freight" else "")
-            )
+        users = self._user_map(ctx.tenant_id, set(user_ids))
+        missing = [uid for uid in user_ids if uid not in users]
+        inactive = [
+            uid for uid in user_ids if uid in users and (users[uid].status or "").lower() != "active"
+        ]
+        if missing or inactive:
+            raise ConflictException("Step owners must be active users in this tenant")
 
     def _user_map(self, tenant_id: UUID, user_ids: set[UUID]) -> dict[UUID, SecUser]:
         if not user_ids:

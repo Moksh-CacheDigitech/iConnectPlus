@@ -334,7 +334,7 @@ _STAGE_ACTION_LABELS: dict[str, str] = {
     "deal_won": "Deal won",
     "mark_onboarding_done": "Cloud onboarding",
     "deal_reg": "Deal registration",
-    "oem_received": "OEM received",
+    "oem_received": "Vendor quotation received",
     "attach_oem_quote": "OEM quote attached",
     "create_quote": "Quote created",
     "send_po_approval": "PO sent for approval",

@@ -80,9 +80,16 @@ def register_exception_handlers(app: FastAPI) -> None:
         _: Request,
         exc: RequestValidationError,
     ) -> JSONResponse:
-        errors = [
-            f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}" for err in exc.errors()
-        ]
+        from core.config import settings
+
+        # In production, avoid leaking detailed schema paths / validator internals (VAPT info).
+        if settings.is_development:
+            errors = [
+                f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}"
+                for err in exc.errors()
+            ]
+        else:
+            errors = ["One or more fields failed validation"]
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content=ErrorResponse(

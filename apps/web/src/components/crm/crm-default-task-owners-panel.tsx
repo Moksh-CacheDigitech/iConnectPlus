@@ -16,6 +16,8 @@ import {
 import { listModuleMembers, type ModuleUserRecord } from "@/services/module-users-service";
 
 const FREIGHT_STEP = "ovf_provide_freight";
+const SUPPORTING_ITEMS_STEP = "ovf_provide_supporting_items";
+const SERVICE_VISITS_STEP = "ovf_provide_service_visits";
 
 type OwnerOption = { id: string; label: string; name: string; email: string };
 
@@ -30,6 +32,8 @@ const CRM_FLOW_STEP_ORDER = [
   "po_management",
   "service_scope",
   "ovf_provide_freight",
+  "ovf_provide_supporting_items",
+  "ovf_provide_service_visits",
   "ovf_send_for_approval",
 ] as const;
 
@@ -121,7 +125,10 @@ export function CrmDefaultTaskOwnersPanel() {
 
   function optionsForStep(stepKey: string, selectedIds: string[]): OwnerOption[] {
     const crmIds = new Set(crmUsers.map((user) => String(user.id)));
-    const allowAll = stepKey === FREIGHT_STEP;
+    const allowAll =
+      stepKey === FREIGHT_STEP ||
+      stepKey === SUPPORTING_ITEMS_STEP ||
+      stepKey === SERVICE_VISITS_STEP;
     const byId = new Map<string, OwnerOption>();
 
     for (const [id, opt] of allKnownOptions) {

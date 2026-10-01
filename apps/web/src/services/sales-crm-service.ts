@@ -8,6 +8,7 @@
  */
 import { ApiClientError, apiClient, resourceService } from "@/services/api-client";
 import { getAccessToken } from "@/lib/auth";
+import { isInlineSafeAttachment, triggerBlobDownload } from "@/lib/safe-attachment";
 import { loadCrmOverview } from "@/services/crm-service";
 import { env } from "@/utils/env";
 
@@ -41,6 +42,18 @@ export function formatInrPrecise(value: number | string | null | undefined): str
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number.isFinite(n) ? (n as number) : 0);
+}
+
+/** Markup on cost — matches quote form Margin % (cost × (1 + pct/100) = sell). */
+export function quoteLineMarkupPct(
+  unitCost: number | string | null | undefined,
+  unitSell: number | string | null | undefined,
+  fallback: number | string | null | undefined = 0,
+): number {
+  const cost = Number(unitCost) || 0;
+  const sell = Number(unitSell) || 0;
+  if (cost <= 0) return Number(fallback) || 0;
+  return Number((((sell - cost) / cost) * 100).toFixed(3));
 }
 
 export function truncateId(id?: string | null): string {
@@ -334,6 +347,13 @@ export async function createLeadFromCompany(
       body,
     }),
   );
+}
+
+export async function peekNextLeadDrNumber(companyId?: string): Promise<string> {
+  const res = await apiClient<{ dr_number: string }>("/crm/leads/next-dr-number", {
+    query: companyId ? { company_id: companyId } : undefined,
+  });
+  return unwrap(res).dr_number;
 }
 
 // ---------------------------------------------------------------------------
@@ -1474,6 +1494,22 @@ export async function decideMyJob(
   remark?: string,
   extras?: {
     freight?: number;
+    freight_medium?: string;
+    freight_weight_kg?: number;
+    freight_insurance?: boolean;
+    supporting_items?: Array<{
+      product_name: string;
+      qty: number;
+      unit_price: number;
+      distributor_name?: string | null;
+      description?: string | null;
+    }>;
+    service_plan?: {
+      rate_contract_id: string;
+      projected_visits: number;
+      consumables_amount?: number;
+      description?: string | null;
+    };
     file_name?: string;
     content_base64?: string;
     content_type?: string;
@@ -1527,6 +1563,38 @@ export type OvfFreightRequestInput = {
 export async function requestOvfFreight(ovfId: string, body: OvfFreightRequestInput = {}): Promise<Ovf> {
   return unwrap(
     await apiClient<Ovf>(`${CRM_OVF_API}/${ovfId}/request-freight`, {
+      method: "POST",
+      body,
+    }),
+  );
+}
+
+export type OvfSupportingItemsRequestInput = {
+  remarks?: string | null;
+};
+
+export async function requestOvfSupportingItems(
+  ovfId: string,
+  body: OvfSupportingItemsRequestInput = {},
+): Promise<Ovf> {
+  return unwrap(
+    await apiClient<Ovf>(`${CRM_OVF_API}/${ovfId}/request-supporting-items`, {
+      method: "POST",
+      body,
+    }),
+  );
+}
+
+export type OvfServiceVisitsRequestInput = {
+  remarks?: string | null;
+};
+
+export async function requestOvfServiceVisits(
+  ovfId: string,
+  body: OvfServiceVisitsRequestInput = {},
+): Promise<Ovf> {
+  return unwrap(
+    await apiClient<Ovf>(`${CRM_OVF_API}/${ovfId}/request-service-visits`, {
       method: "POST",
       body,
     }),
@@ -1608,6 +1676,34 @@ export async function deleteAttachment(attachmentId: string): Promise<void> {
   await unwrap(await resourceService.delete(CRM_ATTACHMENTS_API, attachmentId));
 }
 
+/** Fetch attachment bytes as base64 (for re-extract / copy flows). */
+export async function fetchAttachmentContentBase64(
+  attachmentId: string,
+): Promise<{ content_base64: string; content_type: string; file_name?: string }> {
+  const token = getAccessToken();
+  const response = await fetch(`${env.apiUrl}${CRM_ATTACHMENTS_API}/${attachmentId}/content`, {
+    headers: {
+      Accept: "*/*",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to read attachment (${response.status})`);
+  }
+  const blob = await response.blob();
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return {
+    content_base64: btoa(binary),
+    content_type: blob.type || "application/octet-stream",
+  };
+}
+
 /** Open an attachment: external links/cloud URLs open directly; uploads stream via API. */
 export async function openAttachmentInNewTab(attachment: Attachment | string): Promise<void> {
   if (typeof attachment !== "string") {
@@ -1620,18 +1716,25 @@ export async function openAttachmentInNewTab(attachment: Attachment | string): P
   }
 
   const attachmentId = typeof attachment === "string" ? attachment : attachment.id;
+  const knownName =
+    typeof attachment === "string" ? "download" : attachment.file_name || "download";
   const token = getAccessToken();
   const response = await fetch(`${env.apiUrl}${CRM_ATTACHMENTS_API}/${attachmentId}/content`, {
     headers: {
       Accept: "*/*",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
+    credentials: "include",
     cache: "no-store",
   });
   if (!response.ok) {
     throw new Error(`Failed to open attachment (${response.status})`);
   }
   const blob = await response.blob();
+  if (!isInlineSafeAttachment(knownName, blob.type)) {
+    triggerBlobDownload(blob, knownName);
+    return;
+  }
   const url = URL.createObjectURL(blob);
   // Do not fall back to same-tab navigation: with `noopener`, `window.open` often
   // returns `null` even when the new tab opened successfully.

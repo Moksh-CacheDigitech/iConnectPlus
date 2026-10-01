@@ -233,13 +233,17 @@ class ServiceContractService:
         )
         self._db.add(plan)
         self._db.flush()
-        if add_to_ovf and ovf["editable"]:
+        if add_to_ovf and not ovf.get("locked"):
+            # Tag as [service] so CRM treats these as Additional Charges, not Vendor PO.
             label = f"{contract.service_type.replace('_', ' ').title()} visits - {contract.vendor_name}"
             self._crm.add_ovf_vendor_line(
                 ctx,
                 ovf_id,
                 product_name=label[:255],
-                description=f"{projected_visits} visits x Rs {contract.rate_per_visit:,.2f} ({contract.contract_code})",
+                description=(
+                    f"[service] {projected_visits} visits x Rs "
+                    f"{contract.rate_per_visit:,.2f} ({contract.contract_code})"
+                ),
                 distributor_name=contract.vendor_name,
                 qty=Decimal(projected_visits),
                 unit_price=contract.rate_per_visit,
@@ -250,7 +254,7 @@ class ServiceContractService:
                     ctx,
                     ovf_id,
                     product_name="Service consumables (LAN cable, connectors, survey)",
-                    description=f"For {contract.contract_code}",
+                    description=f"[service] For {contract.contract_code}",
                     distributor_name=contract.vendor_name,
                     qty=Decimal("1"),
                     unit_price=consumables,

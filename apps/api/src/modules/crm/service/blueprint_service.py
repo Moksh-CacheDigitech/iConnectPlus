@@ -201,11 +201,19 @@ SERVICE_SCOPE_ENTITY = "service_scope"
 
 
 def _po_stage_user_ids(payload: dict[str, Any], stage: str) -> list[UUID]:
-    """Approvers selected for one stage, falling back to the generic selection."""
+    """Approvers selected for one stage (empty list when none were provided)."""
     raw = payload.get(f"{stage}_user_ids")
-    if raw:
-        return _require_assigned_users({"assigned_user_ids": raw})
-    return _require_assigned_users(payload)
+    if not raw:
+        return []
+    return _require_assigned_users({"assigned_user_ids": raw})
+
+
+PO_STAGE_TO_STEP_KEY = {
+    "finance": "po_finance",
+    "legal": "po_legal",
+    "management": "po_management",
+    "operations": "service_scope",
+}
 
 
 class OpportunityBlueprintService:
@@ -224,16 +232,21 @@ class OpportunityBlueprintService:
         return row
 
     def next_deal_reg_number(self, ctx: TenantContext, opportunity_id: UUID) -> str:
-        """Preview the next series DR number for Deal Registration (does not persist)."""
+        """Preview the DR number for Deal Registration (does not persist)."""
         opp = self.get(ctx, opportunity_id)
         if opp.deal_reg_number:
             return opp.deal_reg_number
-        from modules.crm.domain.enums import CrmEntityType
+        if opp.lead_id is not None:
+            from modules.crm.models import CrmLead
+
+            lead = self._db.get(CrmLead, opp.lead_id)
+            lead_dr = (getattr(lead, "dr_number", None) or getattr(lead, "lead_code", None) or "").strip()
+            if lead_dr.startswith("DR-"):
+                return lead_dr
         from modules.crm.service.document_number_service import DocumentNumberService
 
-        return DocumentNumberService(self._db).generate(
-            CrmEntityType.DEAL_REG, opp.company_id, CrmOpportunity, "deal_reg_number"
-        )
+        return DocumentNumberService(self._db).next_deal_reg_number(opp.company_id)
+
     def _require_blueprint(self, opp: CrmOpportunity) -> str:
         if not opp.blueprint_state:
             raise ConflictException(
@@ -243,7 +256,7 @@ class OpportunityBlueprintService:
         return opp.blueprint_state
 
     def state(self, ctx: TenantContext, opportunity_id: UUID) -> dict[str, Any]:
-        opp = self._reconcile_lead_docs_ready_for_deal_reg(ctx, self.get(ctx, opportunity_id))
+        opp = self._reconcile_post_lead_docs(ctx, self.get(ctx, opportunity_id))
         is_sales_blueprint = opp.blueprint_state is not None
         current = opp.blueprint_state or "open"
         if not is_sales_blueprint:
@@ -282,16 +295,23 @@ class OpportunityBlueprintService:
             "po_validation": self._po_validation(opp, current),
         }
 
-    def _reconcile_lead_docs_ready_for_deal_reg(
+    def _reconcile_post_lead_docs(
         self, ctx: TenantContext, opp: CrmOpportunity
     ) -> CrmOpportunity:
-        """Advance opportunities stuck on ``open`` after lead BOQ/SOW was attached.
+        """Advance opportunities after lead BOQ/SOW — skip Deal Reg when DR already exists.
 
-        Lead My Jobs ``provide_*_attachment`` only sets lead flags; convert used to
-        copy ``*_attached`` without ``*_approved`` or leaving ``blueprint_state=open``,
-        which hid Deal Registration (only Deal Lost remained).
+        DR is issued on lead create, so sales leads land on Vendor Quotation Received
+        instead of a redundant Deal Registration click.
         """
-        if (opp.blueprint_state or "open") != "open":
+        current = opp.blueprint_state or "open"
+        has_dr = (opp.deal_reg_number or opp.opportunity_code or "").strip().startswith("DR-")
+
+        # Already past docs but still sitting on Deal Registration with a DR → OEM next.
+        if current == "deal_reg" and has_dr:
+            row = self._repo.update(ctx, opp.id, blueprint_state="oem_pending")
+            return row or opp
+
+        if current != "open":
             return opp
         if not opp.boq_attached and not opp.sow_attached:
             return opp
@@ -304,7 +324,7 @@ class OpportunityBlueprintService:
         if opp.boq_approved or updates.get("boq_approved") or opp.sow_approved or updates.get(
             "sow_approved"
         ):
-            updates["blueprint_state"] = "deal_reg"
+            updates["blueprint_state"] = "oem_pending" if has_dr else "deal_reg"
         if not updates:
             return opp
         row = self._repo.update(ctx, opp.id, **updates)
@@ -342,21 +362,34 @@ class OpportunityBlueprintService:
     def _filter_create_actions_when_children_exist(
         self, ctx: TenantContext, opp: CrmOpportunity, allowed: list[str]
     ) -> list[str]:
-        """Hide Create Quote / Create OVF once those records already exist."""
+        """Hide Create Quote / Create OVF once those records already exist.
+
+        One opportunity → one OVF that combines all accepted split quotes.
+        """
         from modules.crm.repository.ovf_repository import OvfRepository
         from modules.crm.repository.quote_repository import QuoteRepository
 
         actions = list(allowed)
-        if "create_quote" in actions:
-            quotes = QuoteRepository(self._db).list_quotes(
-                ctx, opp.company_id, opportunity_id=opp.id
-            )
-            if quotes:
-                actions = [action for action in actions if action != "create_quote"]
+        quotes = QuoteRepository(self._db).list_quotes(
+            ctx, opp.company_id, opportunity_id=opp.id
+        )
+        if "create_quote" in actions and quotes:
+            actions = [action for action in actions if action != "create_quote"]
         if "create_ovf" in actions:
             ovfs = OvfRepository(self._db).list_ovfs(ctx, opp.company_id, opportunity_id=opp.id)
             if ovfs:
                 actions = [action for action in actions if action != "create_ovf"]
+            else:
+                parent_ids_with_children = {
+                    q.parent_quote_id for q in quotes if getattr(q, "parent_quote_id", None)
+                }
+                eligible = [
+                    q
+                    for q in quotes
+                    if q.quote_stage == "accepted" and q.id not in parent_ids_with_children
+                ]
+                if not eligible:
+                    actions = [action for action in actions if action != "create_ovf"]
         return actions
 
     @staticmethod
@@ -377,8 +410,11 @@ class OpportunityBlueprintService:
         if opp.sow_attached or opp.sow_approved:
             actions = [action for action in actions if action != "send_sow_for_attachment"]
 
-        # Deal Registration after at least one document is attached/approved.
+        # Deal Registration only when docs are ready AND no DR yet (DR now comes from lead create).
+        has_dr = (opp.deal_reg_number or opp.opportunity_code or "").strip().startswith("DR-")
         if not opp.boq_approved and not opp.sow_approved:
+            actions = [action for action in actions if action != "deal_reg"]
+        elif has_dr:
             actions = [action for action in actions if action != "deal_reg"]
 
         return actions
@@ -581,14 +617,20 @@ class OpportunityBlueprintService:
                     "Attach a BOQ or SOW before Deal Registration"
                 )
             reg_no = (payload.get("deal_reg_number") or "").strip() or (opp.deal_reg_number or "").strip()
+            if not reg_no and opp.lead_id is not None:
+                from modules.crm.models import CrmLead
+
+                lead = self._db.get(CrmLead, opp.lead_id)
+                lead_dr = (getattr(lead, "dr_number", None) or getattr(lead, "lead_code", None) or "").strip()
+                if lead_dr.startswith("DR-"):
+                    reg_no = lead_dr
             if not reg_no:
-                from modules.crm.domain.enums import CrmEntityType
                 from modules.crm.service.document_number_service import DocumentNumberService
 
-                reg_no = DocumentNumberService(self._db).generate(
-                    CrmEntityType.DEAL_REG, opp.company_id, CrmOpportunity, "deal_reg_number"
-                )
+                reg_no = DocumentNumberService(self._db).next_deal_reg_number(opp.company_id)
             updates["deal_reg_number"] = reg_no
+            if not (opp.opportunity_code or "").startswith("DR-"):
+                updates["opportunity_code"] = reg_no
         elif action == "oem_received":
             updates["oem_quotation_received"] = True
         elif action == "attach_oem_quote":
@@ -628,13 +670,33 @@ class OpportunityBlueprintService:
             updates["sales_terms_accepted"] = True
             updates["sales_terms_accepted_at"] = utcnow()
             updates["sales_terms_accepted_by"] = ctx.user_id
-            chain = {
-                stage: [str(uid) for uid in _po_stage_user_ids(payload, stage)]
-                for stage, _team, _stage_action in PO_VALIDATION_STAGES
-            }
-            chain[OPERATIONS_STAGE] = [
-                str(uid) for uid in (payload.get("operations_user_ids") or [])
-            ]
+            from modules.crm.service.approval_step_owner_service import ApprovalStepOwnerService
+
+            owners = ApprovalStepOwnerService(self._db)
+            from modules.crm.service.approval_task_service import ApprovalTaskService
+
+            admin_fallback = ApprovalTaskService(self._db)._admin_recipient_ids(ctx)
+            chain: dict[str, list[str]] = {}
+            for stage, _team, _stage_action in PO_VALIDATION_STAGES:
+                ids = _po_stage_user_ids(payload, stage)
+                if not ids:
+                    ids = owners.list_user_ids(ctx, PO_STAGE_TO_STEP_KEY[stage])
+                if not ids and stage == "management":
+                    # Reuse quote / OVF management owners when PO management is unset.
+                    ids = owners.list_user_ids(ctx, "quote_send_for_approval") or owners.list_user_ids(
+                        ctx, "ovf_send_for_approval"
+                    )
+                if not ids:
+                    ids = list(admin_fallback)
+                if not ids:
+                    raise ConflictException(
+                        f"No {stage} owners configured. Set them under CRM Users → Default task owners."
+                    )
+                chain[stage] = [str(uid) for uid in ids]
+            ops_ids = _po_stage_user_ids(payload, OPERATIONS_STAGE)
+            if not ops_ids:
+                ops_ids = owners.list_user_ids(ctx, PO_STAGE_TO_STEP_KEY[OPERATIONS_STAGE])
+            chain[OPERATIONS_STAGE] = [str(uid) for uid in ops_ids]
             updates["po_approval_chain"] = chain
             updates["po_finance_status"] = "pending"
             updates["po_terms_status"] = "not_required"
@@ -801,8 +863,8 @@ class OpportunityBlueprintService:
             assigned_user_ids.append(uid)
         if not assigned_user_ids:
             raise ConflictException(
-                f"No {stage} approver was selected for this customer PO. "
-                "Send the PO for approval again and pick approvers for every stage."
+                f"No {stage} owners configured for this customer PO. "
+                "Set them under CRM Users → Default task owners, then send the PO again."
             )
         self._raise_approval(
             ctx,

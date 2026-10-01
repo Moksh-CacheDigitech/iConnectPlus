@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Briefcase, Check, X } from "lucide-react";
 
 import { CrmErrorBanner, CrmListPanel, CrmPage, CRM_TABLE_HEAD_ROW } from "@/components/crm/crm-ui";
@@ -18,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import {
   decideMyJob,
   fileToBase64,
+  formatInrPrecise,
   getOpportunity,
   getOvf,
   getQuote,
@@ -30,11 +32,45 @@ import {
   myJobEntityHref,
   type ApprovalTask,
 } from "@/services/sales-crm-service";
+import {
+  listServiceContracts,
+  serviceTypeLabel,
+  type ServiceRateContract,
+} from "@/services/service-projects-service";
 
 const TEAM_ROLES = ["presales", "project", "management", "accounts", "scm", "legal"];
 const STATUSES = ["pending", "approved", "rejected", "cancelled"];
 const FREIGHT_ACTION = "provide_freight";
+const SUPPORTING_ITEMS_ACTION = "provide_supporting_items";
+const SERVICE_VISITS_ACTION = "provide_service_visits";
 const ATTACHMENT_ACTIONS = new Set(["provide_boq_attachment", "provide_sow_attachment"]);
+const FREIGHT_MEDIUMS = [
+  { value: "road", label: "Road" },
+  { value: "air", label: "Air" },
+  { value: "sea", label: "Sea" },
+  { value: "courier", label: "Courier" },
+] as const;
+
+type SupportingDraft = {
+  key: string;
+  product_name: string;
+  qty: string;
+  unit_price: string;
+  distributor_name: string;
+};
+
+function blankSupportingDraft(): SupportingDraft {
+  return {
+    key: `si-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    product_name: "",
+    qty: "1",
+    unit_price: "0",
+    distributor_name: "",
+  };
+}
+
+const SELECT_CLASS =
+  "h-9 w-full cursor-pointer rounded-lg border border-input bg-background px-2.5 text-sm transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
 
 type SortKey = "title" | "opportunity_name" | "team_role" | "status";
 
@@ -47,6 +83,8 @@ function myJobDetailHref(task: ApprovalTask): string {
 
 function approveLabel(task: ApprovalTask): string {
   if (task.action === FREIGHT_ACTION) return "Submit freight";
+  if (task.action === SUPPORTING_ITEMS_ACTION) return "Submit items";
+  if (task.action === SERVICE_VISITS_ACTION) return "Submit plan";
   if (task.action && ATTACHMENT_ACTIONS.has(task.action)) return "Submit file";
   return "Approve";
 }
@@ -107,6 +145,16 @@ export function MyJobsPage({
   const [decision, setDecision] = useState<{ task: ApprovalTask; outcome: "approved" | "rejected" } | null>(null);
   const [remark, setRemark] = useState("");
   const [freightAmount, setFreightAmount] = useState("");
+  const [freightMedium, setFreightMedium] = useState("road");
+  const [freightWeightKg, setFreightWeightKg] = useState("");
+  const [freightInsurance, setFreightInsurance] = useState(false);
+  const [supportingDrafts, setSupportingDrafts] = useState<SupportingDraft[]>([blankSupportingDraft()]);
+  const [supportingDescription, setSupportingDescription] = useState("");
+  const [serviceContracts, setServiceContracts] = useState<ServiceRateContract[] | null>(null);
+  const [serviceContractId, setServiceContractId] = useState("");
+  const [serviceProjected, setServiceProjected] = useState("");
+  const [serviceConsumables, setServiceConsumables] = useState("");
+  const [serviceDescription, setServiceDescription] = useState("");
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [deciding, setDeciding] = useState(false);
   const [decideError, setDecideError] = useState<string | null>(null);
@@ -116,6 +164,7 @@ export function MyJobsPage({
   const [respondError, setRespondError] = useState<string | null>(null);
   // SLA overdue flags are judged against when the list was fetched.
   const [loadedAt, setLoadedAt] = useState(0);
+  const router = useRouter();
 
   const loadNames = useCallback(async (tasks: ApprovalTask[]) => {
     const names: Record<string, string> = {};
@@ -234,8 +283,22 @@ export function MyJobsPage({
     setDecision({ task, outcome });
     setRemark("");
     setFreightAmount("");
+    setFreightMedium("road");
+    setFreightWeightKg("");
+    setFreightInsurance(false);
+    setSupportingDrafts([blankSupportingDraft()]);
+    setSupportingDescription("");
+    setServiceContractId("");
+    setServiceProjected("");
+    setServiceConsumables("");
+    setServiceDescription("");
     setAttachmentFile(null);
     setDecideError(null);
+    if (outcome === "approved" && task.action === SERVICE_VISITS_ACTION && serviceContracts === null) {
+      void listServiceContracts(true)
+        .then((rows) => setServiceContracts(rows))
+        .catch(() => setServiceContracts([]));
+    }
   }
 
   async function submitDecision() {
@@ -251,6 +314,80 @@ export function MyJobsPage({
         setDecideError("Enter a valid freight amount (₹).");
         return;
       }
+      if (!freightMedium.trim()) {
+        setDecideError("Select a freight medium.");
+        return;
+      }
+    }
+    let supportingPayload:
+      | Array<{
+        product_name: string;
+        qty: number;
+        unit_price: number;
+        distributor_name?: string | null;
+        description?: string | null;
+      }>
+      | undefined;
+    if (decision.outcome === "approved" && action === SUPPORTING_ITEMS_ACTION) {
+      const sharedDescription = supportingDescription.trim() || null;
+      const cleaned = supportingDrafts
+        .map((row) => ({
+          product_name: row.product_name.trim(),
+          qty: Number(row.qty),
+          unit_price: Number(row.unit_price),
+          distributor_name: row.distributor_name.trim() || null,
+          description: sharedDescription,
+        }))
+        .filter((row) => row.product_name);
+      if (cleaned.length === 0) {
+        setDecideError("Add at least one supporting item with a name.");
+        return;
+      }
+      for (const row of cleaned) {
+        if (!Number.isFinite(row.qty) || row.qty <= 0) {
+          setDecideError(`Enter a qty greater than zero for "${row.product_name}".`);
+          return;
+        }
+        if (!Number.isFinite(row.unit_price) || row.unit_price < 0) {
+          setDecideError(`Enter a valid unit purchase for "${row.product_name}".`);
+          return;
+        }
+      }
+      supportingPayload = cleaned.map((row) => ({
+        ...row,
+        qty: Number(row.qty.toFixed(4)),
+        unit_price: Number(row.unit_price.toFixed(2)),
+      }));
+    }
+    let servicePlanPayload:
+      | {
+        rate_contract_id: string;
+        projected_visits: number;
+        consumables_amount?: number;
+        description?: string | null;
+      }
+      | undefined;
+    if (decision.outcome === "approved" && action === SERVICE_VISITS_ACTION) {
+      if (!serviceContractId) {
+        setDecideError("Select a rate contract.");
+        return;
+      }
+      const projected = Math.floor(Number(serviceProjected) || 0);
+      if (projected < 1) {
+        setDecideError("Projected visits must be at least 1.");
+        return;
+      }
+      const consumables = Number(serviceConsumables || 0);
+      if (!Number.isFinite(consumables) || consumables < 0) {
+        setDecideError("Enter a valid consumables amount.");
+        return;
+      }
+      servicePlanPayload = {
+        rate_contract_id: serviceContractId,
+        projected_visits: projected,
+        consumables_amount: Number(consumables.toFixed(2)),
+        description: serviceDescription.trim() || null,
+      };
     }
     if (
       decision.outcome === "approved" &&
@@ -267,12 +404,28 @@ export function MyJobsPage({
     try {
       const extras: {
         freight?: number;
+        freight_medium?: string;
+        freight_weight_kg?: number;
+        freight_insurance?: boolean;
+        supporting_items?: typeof supportingPayload;
+        service_plan?: typeof servicePlanPayload;
         file_name?: string;
         content_base64?: string;
         content_type?: string;
       } = {};
       if (decision.outcome === "approved" && action === FREIGHT_ACTION) {
         extras.freight = Number(Number(freightAmount).toFixed(2));
+        extras.freight_medium = freightMedium;
+        if (freightWeightKg.trim()) {
+          extras.freight_weight_kg = Number(freightWeightKg);
+        }
+        extras.freight_insurance = freightInsurance;
+      }
+      if (decision.outcome === "approved" && action === SUPPORTING_ITEMS_ACTION && supportingPayload) {
+        extras.supporting_items = supportingPayload;
+      }
+      if (decision.outcome === "approved" && action === SERVICE_VISITS_ACTION && servicePlanPayload) {
+        extras.service_plan = servicePlanPayload;
       }
       if (decision.outcome === "approved" && action && ATTACHMENT_ACTIONS.has(action) && attachmentFile) {
         extras.file_name = attachmentFile.name;
@@ -285,7 +438,25 @@ export function MyJobsPage({
         remark.trim() || undefined,
         Object.keys(extras).length > 0 ? extras : undefined,
       );
+      const completedTask = decision.task;
+      const completedAction = completedTask.action;
+      const completedOutcome = decision.outcome;
       setDecision(null);
+
+      // Lead BOQ/SOW attach auto-converts — open opportunity Transitions next.
+      if (
+        completedOutcome === "approved" &&
+        completedTask.entity_type === "lead" &&
+        completedAction &&
+        ATTACHMENT_ACTIONS.has(completedAction)
+      ) {
+        const lead = await getSalesLead(completedTask.entity_id).catch(() => null);
+        if (lead?.converted_opportunity_id) {
+          router.push(`/crm/opportunities/${lead.converted_opportunity_id}`);
+          return;
+        }
+      }
+
       await load();
     } catch (err) {
       setDecideError(err instanceof ApiClientError ? err.message : "Failed to record decision");
@@ -472,9 +643,13 @@ export function MyJobsPage({
           decision?.outcome === "approved"
             ? decision.task.action === FREIGHT_ACTION
               ? "Submit freight"
-              : decision.task.action && ATTACHMENT_ACTIONS.has(decision.task.action)
-                ? "Submit attachment"
-                : "Approve task"
+              : decision.task.action === SUPPORTING_ITEMS_ACTION
+                ? "Submit supporting items"
+                : decision.task.action === SERVICE_VISITS_ACTION
+                  ? "Submit service visit plan"
+                  : decision.task.action && ATTACHMENT_ACTIONS.has(decision.task.action)
+                    ? "Submit attachment"
+                    : "Approve task"
             : "Reject task"
         }
         description={decision ? decision.task.title : undefined}
@@ -483,33 +658,274 @@ export function MyJobsPage({
           decision?.outcome === "approved"
             ? decision.task.action === FREIGHT_ACTION
               ? "Submit freight"
-              : decision.task.action && ATTACHMENT_ACTIONS.has(decision.task.action)
-                ? "Submit file"
-                : "Approve"
+              : decision.task.action === SUPPORTING_ITEMS_ACTION
+                ? "Submit items"
+                : decision.task.action === SERVICE_VISITS_ACTION
+                  ? "Submit plan"
+                  : decision.task.action && ATTACHMENT_ACTIONS.has(decision.task.action)
+                    ? "Submit file"
+                    : "Approve"
             : "Reject"
         }
         busy={deciding}
-        contentClassName="max-w-lg"
+        contentClassName={
+          decision?.outcome === "approved" &&
+            (decision.task.action === SUPPORTING_ITEMS_ACTION ||
+              decision.task.action === SERVICE_VISITS_ACTION)
+            ? "max-w-3xl"
+            : "max-w-lg"
+        }
         onCancel={() => !deciding && setDecision(null)}
         onConfirm={() => void submitDecision()}
       >
-        {decision?.task.action === FREIGHT_ACTION && decision.task.remarks ? (
+        {(decision?.task.action === FREIGHT_ACTION) &&
+          decision.task.remarks ? (
           <pre className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-sans text-xs whitespace-pre-wrap text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
             {decision.task.remarks}
           </pre>
         ) : null}
         {decision?.outcome === "approved" && decision.task.action === FREIGHT_ACTION ? (
-          <FinanceField label="Freight Charges (₹) *" className="mb-3 space-y-2">
-            <Input
-              type="number"
-              min={0}
-              step="0.01"
-              value={freightAmount}
-              onChange={(e) => setFreightAmount(e.target.value)}
-              placeholder="0.00"
-              className="h-9"
-            />
-          </FinanceField>
+          <div className="mb-3 space-y-3">
+            <FinanceField label="Freight Charges (₹) *" className="space-y-2">
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={freightAmount}
+                onChange={(e) => setFreightAmount(e.target.value)}
+                placeholder="0.00"
+                className="h-9"
+              />
+            </FinanceField>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <FinanceField label="Medium *" className="space-y-2">
+                <select
+                  aria-label="Freight medium"
+                  className={SELECT_CLASS}
+                  value={freightMedium}
+                  onChange={(e) => setFreightMedium(e.target.value)}
+                >
+                  {FREIGHT_MEDIUMS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </FinanceField>
+              <FinanceField label="Weight (kg)" className="space-y-2">
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.1"
+                  value={freightWeightKg}
+                  onChange={(e) => setFreightWeightKg(e.target.value)}
+                  placeholder="0"
+                  className="h-9"
+                />
+              </FinanceField>
+              <label className="col-span-2 flex cursor-pointer items-end gap-2 pb-2 text-xs sm:col-span-1">
+                <input
+                  type="checkbox"
+                  className="size-4 cursor-pointer accent-primary"
+                  checked={freightInsurance}
+                  onChange={(e) => setFreightInsurance(e.target.checked)}
+                />
+                Insure shipment
+              </label>
+            </div>
+          </div>
+        ) : null}
+        {decision?.outcome === "approved" && decision.task.action === SUPPORTING_ITEMS_ACTION ? (
+          <div className="mb-3 space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Add items outside the main customer PO (cables, SFPs, etc.).
+            </p>
+            <div className="rounded-md border border-border/70">
+              <table className="w-full table-fixed text-left text-xs">
+                <thead>
+                  <tr className="border-b border-border/70 bg-muted/50 text-[11px] font-medium text-muted-foreground uppercase">
+                    <th className="w-[34%] px-3 py-2">Item *</th>
+                    <th className="w-[12%] px-3 py-2">Qty *</th>
+                    <th className="w-[16%] px-3 py-2">Unit (₹) *</th>
+                    <th className="w-[30%] px-3 py-2">Distributor</th>
+                    <th className="w-[8%] px-2 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {supportingDrafts.map((row) => (
+                    <tr key={row.key} className="border-b border-border/40 last:border-0">
+                      <td className="px-3 py-2">
+                        <Input
+                          value={row.product_name}
+                          onChange={(e) =>
+                            setSupportingDrafts((rows) =>
+                              rows.map((r) =>
+                                r.key === row.key ? { ...r, product_name: e.target.value } : r,
+                              ),
+                            )
+                          }
+                          placeholder="Item name"
+                          className="h-8 w-full"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          step="1"
+                          value={row.qty}
+                          onChange={(e) =>
+                            setSupportingDrafts((rows) =>
+                              rows.map((r) => (r.key === row.key ? { ...r, qty: e.target.value } : r)),
+                            )
+                          }
+                          className="h-8 w-full"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={row.unit_price}
+                          onChange={(e) =>
+                            setSupportingDrafts((rows) =>
+                              rows.map((r) =>
+                                r.key === row.key ? { ...r, unit_price: e.target.value } : r,
+                              ),
+                            )
+                          }
+                          className="h-8 w-full"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <Input
+                          value={row.distributor_name}
+                          onChange={(e) =>
+                            setSupportingDrafts((rows) =>
+                              rows.map((r) =>
+                                r.key === row.key ? { ...r, distributor_name: e.target.value } : r,
+                              ),
+                            )
+                          }
+                          placeholder="Optional"
+                          className="h-8 w-full"
+                        />
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="cursor-pointer px-2"
+                          disabled={supportingDrafts.length <= 1}
+                          onClick={() =>
+                            setSupportingDrafts((rows) => rows.filter((r) => r.key !== row.key))
+                          }
+                        >
+                          <X className="size-3.5" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="cursor-pointer"
+              onClick={() => setSupportingDrafts((rows) => [...rows, blankSupportingDraft()])}
+            >
+              Add row
+            </Button>
+            <FinanceField label="Description" className="space-y-2">
+              <FinanceTextarea
+                value={supportingDescription}
+                onChange={(e) => setSupportingDescription(e.target.value)}
+                placeholder="Optional note about these supporting items…"
+                className="min-h-[72px] rounded-lg border-slate-200 bg-white text-[13px] shadow-none placeholder:text-slate-400 focus-visible:border-sky-400 focus-visible:ring-2 focus-visible:ring-sky-200/80"
+              />
+            </FinanceField>
+          </div>
+        ) : null}
+        {decision?.outcome === "approved" && decision.task.action === SERVICE_VISITS_ACTION ? (
+          <div className="mb-3 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Pick a rate contract and projected visits. Planned cost goes to Additional Charges on the
+              OVF (not Vendor PO).
+            </p>
+            {serviceContracts !== null && serviceContracts.length === 0 ? (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                No active rate contracts. SCM adds them under Procurement → Service Contracts.
+              </p>
+            ) : null}
+            <FinanceField label="Rate contract *" className="space-y-2">
+              <select
+                aria-label="Rate contract"
+                className={SELECT_CLASS}
+                value={serviceContractId}
+                onChange={(e) => setServiceContractId(e.target.value)}
+              >
+                <option value="">Select…</option>
+                {(serviceContracts ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.vendor_name} · {serviceTypeLabel(c.service_type)} ·{" "}
+                    {formatInrPrecise(c.rate_per_visit)}/visit
+                    {c.region ? ` · ${c.region}` : ""}
+                  </option>
+                ))}
+              </select>
+            </FinanceField>
+            <div className="grid grid-cols-2 gap-2">
+              <FinanceField label="Projected visits *" className="space-y-2">
+                <Input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={serviceProjected}
+                  onChange={(e) => setServiceProjected(e.target.value)}
+                  className="h-9"
+                />
+              </FinanceField>
+              <FinanceField label="Consumables (₹)" className="space-y-2">
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={serviceConsumables}
+                  onChange={(e) => setServiceConsumables(e.target.value)}
+                  className="h-9"
+                />
+              </FinanceField>
+            </div>
+            <FinanceField label="Scope / notes" className="space-y-2">
+              <Input
+                value={serviceDescription}
+                onChange={(e) => setServiceDescription(e.target.value)}
+                placeholder="Install + 1 revisit per site…"
+                className="h-9"
+              />
+            </FinanceField>
+            {serviceContractId && Math.floor(Number(serviceProjected) || 0) > 0
+              ? (() => {
+                const contract = (serviceContracts ?? []).find((c) => c.id === serviceContractId);
+                if (!contract) return null;
+                const projected = Math.floor(Number(serviceProjected) || 0);
+                const preview =
+                  projected * Number(contract.rate_per_visit) + (Number(serviceConsumables) || 0);
+                return (
+                  <p className="text-xs text-muted-foreground">
+                    Planned cost:{" "}
+                    <span className="font-semibold tabular-nums text-foreground">
+                      {formatInrPrecise(preview)}
+                    </span>
+                  </p>
+                );
+              })()
+              : null}
+          </div>
         ) : null}
         {decision?.outcome === "approved" &&
           decision.task.action &&
@@ -527,17 +943,20 @@ export function MyJobsPage({
             />
           </FinanceField>
         ) : null}
-        <FinanceField
-          label={decision?.outcome === "rejected" ? "Remark *" : "Remark"}
-          className="space-y-2"
-        >
-          <FinanceTextarea
-            value={remark}
-            onChange={(e) => setRemark(e.target.value)}
-            placeholder="Add a remark…"
-            className="min-h-[88px] rounded-lg border-slate-200 bg-white text-[13px] shadow-none placeholder:text-slate-400 focus-visible:border-sky-400 focus-visible:ring-2 focus-visible:ring-sky-200/80"
-          />
-        </FinanceField>
+        {decision?.outcome === "rejected" ||
+          decision?.task.action !== SUPPORTING_ITEMS_ACTION ? (
+          <FinanceField
+            label={decision?.outcome === "rejected" ? "Remark *" : "Remark"}
+            className="space-y-2"
+          >
+            <FinanceTextarea
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+              placeholder="Add a remark…"
+              className="min-h-[88px] rounded-lg border-slate-200 bg-white text-[13px] shadow-none placeholder:text-slate-400 focus-visible:border-sky-400 focus-visible:ring-2 focus-visible:ring-sky-200/80"
+            />
+          </FinanceField>
+        ) : null}
         {decideError ? <p className="mt-3 text-xs text-destructive">{decideError}</p> : null}
       </ConfirmDialog>
 

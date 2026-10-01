@@ -18,11 +18,18 @@ from sqlalchemy.orm import Session
 
 from core import object_storage
 from core.config import settings
-from core.exceptions import NotFoundException
+from core.exceptions import NotFoundException, ValidationException
 from modules.crm.repository.attachment_repository import AttachmentRepository
 from modules.crm.service.crm_record_visibility import CrmRecordVisibility
 from modules.crm.service.crm_scope_validator import CrmScopeValidator
 from modules.foundation.domain.value_objects import TenantContext
+from shared.upload_safety import (
+    DEFAULT_MAX_ATTACHMENTS_PER_ENTITY,
+    DEFAULT_MAX_UPLOAD_BYTES,
+    UnsafeUploadError,
+    sanitize_filename,
+    validate_upload,
+)
 
 
 def _upload_root() -> Path:
@@ -127,19 +134,49 @@ class AttachmentService:
         file_path: str | None = None,
         content_base64: str | None = None,
         content_type: str | None = None,
+        replace_existing_category: bool = False,
     ):
         cid = self._scope.resolve_company_id(ctx, company_id)
         size: int | None = None
         stored_path = file_path
+        safe_name = sanitize_filename(file_name)
+        media_type = content_type
 
         if content_base64:
             raw = base64.b64decode(content_base64)
+            try:
+                safe_name, media_type = validate_upload(
+                    file_name=safe_name,
+                    content_type=content_type,
+                    raw=raw,
+                    max_bytes=DEFAULT_MAX_UPLOAD_BYTES,
+                )
+            except UnsafeUploadError as exc:
+                raise ValidationException(str(exc)) from exc
+            existing = [
+                row
+                for row in self.list_for_entity(ctx, entity_type, entity_id)
+                if (row.source or "upload") == "upload"
+            ]
+            if replace_existing_category:
+                for row in list(existing):
+                    if row.category == category:
+                        self.delete(ctx, row.id)
+                existing = [
+                    row
+                    for row in self.list_for_entity(ctx, entity_type, entity_id)
+                    if (row.source or "upload") == "upload"
+                ]
+            if len(existing) >= DEFAULT_MAX_ATTACHMENTS_PER_ENTITY:
+                raise ValidationException(
+                    f"Attachment limit of {DEFAULT_MAX_ATTACHMENTS_PER_ENTITY} files per record exceeded"
+                )
             size = len(raw)
-            stored_name = f"{uuid.uuid4()}_{file_name}"
+            stored_name = f"{uuid.uuid4()}_{safe_name}"
             if object_storage.is_enabled():
                 key = object_storage.module_key("crm", "attachments", stored_name)
                 stored_path = object_storage.put_bytes(
-                    key, raw, content_type or "application/octet-stream"
+                    key, raw, media_type or "application/octet-stream"
                 )
             else:
                 upload_root = _upload_root()
@@ -148,6 +185,17 @@ class AttachmentService:
                 dest.write_bytes(raw)
                 stored_path = str(dest)
             source = "upload"
+        else:
+            # Link/cloud references still must not carry active filenames.
+            safe_name = sanitize_filename(file_name)
+            if Path(safe_name).suffix.lower() in {
+                ".html",
+                ".htm",
+                ".xhtml",
+                ".svg",
+                ".js",
+            }:
+                raise ValidationException("Active web file types are not allowed as attachments")
 
         if not stored_path:
             raise NotFoundException("Either file_path or content_base64 must be provided")
@@ -158,9 +206,9 @@ class AttachmentService:
             branch_id=branch_id,
             entity_type=entity_type,
             entity_id=entity_id,
-            file_name=file_name,
+            file_name=safe_name,
             file_path=stored_path,
-            content_type=content_type,
+            content_type=media_type,
             size=size,
             category=category,
             source=source,

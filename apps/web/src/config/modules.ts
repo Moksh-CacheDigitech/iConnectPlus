@@ -780,6 +780,12 @@ export const erpModules: ErpModule[] = [
         apiPath: "/crm/ovf",
       },
       {
+        key: "inventory-aging",
+        title: "Stock & Aging",
+        description: "Shared stock aging and ownership view (synced with Procurement)",
+        apiPath: "/crm/inventory-aging",
+      },
+      {
         key: "contacts",
         title: "Contacts",
         description: "Company contact persons",

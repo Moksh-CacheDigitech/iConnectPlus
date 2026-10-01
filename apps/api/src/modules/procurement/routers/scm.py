@@ -269,13 +269,24 @@ def download_scm_commercial_attachment(
     ).resolve_commercial_attachment_file(ctx, attachment_id)
     if external_url:
         return RedirectResponse(url=external_url, status_code=status.HTTP_302_FOUND)
+    from shared.upload_safety import content_disposition_type
+
     media = content_type or "application/octet-stream"
-    disposition = "attachment" if download else "inline"
+    # Never inline active content; only PDF/images may render in-browser.
+    disposition = (
+        "attachment"
+        if download
+        else content_disposition_type(file_name, content_type)
+    )
+    headers = {"X-Content-Type-Options": "nosniff"}
     if content is not None:
         return StreamingResponse(
             BytesIO(content),
             media_type=media,
-            headers={"Content-Disposition": f'{disposition}; filename="{file_name}"'},
+            headers={
+                **headers,
+                "Content-Disposition": f'{disposition}; filename="{file_name}"',
+            },
         )
     assert path is not None
     return FileResponse(
@@ -283,6 +294,7 @@ def download_scm_commercial_attachment(
         filename=file_name,
         media_type=media,
         content_disposition_type=disposition,
+        headers=headers,
     )
 
 

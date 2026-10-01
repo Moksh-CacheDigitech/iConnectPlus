@@ -2342,6 +2342,8 @@ class ScmHandoffService:
 
         _ = remarks  # reserved for future metadata; CRM attachment model has no remarks column
         order = self._order_service.get_order(ctx, order_id)
+        # Preset document slots (Customer PO / Vendor Quote) replace prior file.
+        replace = (category or "other") in {"customer_po", "vendor_quote"}
         return AttachmentService(self._db).create(
             ctx,
             entity_type=self.PO_ATTACHMENT_ENTITY,
@@ -2352,6 +2354,7 @@ class ScmHandoffService:
             company_id=company_id or order.company_id,
             content_base64=content_base64,
             content_type=content_type,
+            replace_existing_category=replace,
         )
 
     def list_commercial_documents_for_order(

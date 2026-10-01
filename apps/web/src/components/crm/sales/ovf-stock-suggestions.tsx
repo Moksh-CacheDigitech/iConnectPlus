@@ -62,7 +62,7 @@ export function OvfStockSuggestions({ ovf }: { ovf: Ovf }) {
         })}
       </ul>
       <Link
-        href="/procurement/inventory-aging"
+        href="/crm/inventory-aging"
         className="mt-2 inline-block cursor-pointer text-xs font-medium text-primary underline underline-offset-2"
       >
         Open stock &amp; request units

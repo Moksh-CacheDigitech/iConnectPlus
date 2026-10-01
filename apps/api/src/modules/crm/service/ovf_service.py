@@ -38,6 +38,28 @@ from modules.foundation.service.audit_service import AuditService
 from modules.master_data.service.employee_service import EmployeeService
 
 
+def _is_supporting_charge_line(description: str | None) -> bool:
+    return (description or "").lstrip().startswith("[supporting]")
+
+
+def _is_service_charge_line(description: str | None, product_name: str | None = None) -> bool:
+    """Service-visit costs count as Additional Charges, not Vendor PO purchase."""
+    desc = (description or "").lstrip()
+    if desc.startswith("[service]"):
+        return True
+    name = (product_name or "").strip().lower()
+    if " visits - " in name:
+        return True
+    if name.startswith("service consumables"):
+        return True
+    return False
+
+
+def _is_additional_charge_line(description: str | None, product_name: str | None = None) -> bool:
+    return _is_supporting_charge_line(description) or _is_service_charge_line(
+        description, product_name
+    )
+
 FREIGHT_MEDIUMS = ("air", "road", "sea", "courier")
 NEGOTIATED_BY_OPTIONS = ("sales", "management", "scm", "presales", "finance", "other")
 
@@ -680,8 +702,31 @@ class OvfService:
         if patched:
             self._db.flush()
 
+    @staticmethod
+    def _ovf_source_quotes(quotes: list[Any]) -> list[Any]:
+        """Accepted quotes that carry fulfillable qty (exclude split parents)."""
+        parent_ids = {
+            q.parent_quote_id for q in quotes if getattr(q, "parent_quote_id", None)
+        }
+        sources = [
+            q
+            for q in quotes
+            if q.quote_stage == "accepted" and q.id not in parent_ids
+        ]
+        return sorted(
+            sources,
+            key=lambda q: (str(getattr(q, "quote_no", "") or ""), str(q.id)),
+        )
+
     # -- create ------------------------------------------------------------
     def create(self, ctx: TenantContext, *, quote_id: UUID, branch_id: UUID, **fields) -> CrmOvf:
+        """Create the single OVF for an opportunity.
+
+        Lines are merged from every accepted split quote (or the one accepted
+        quote when the deal was not split). ``quote_id`` is the split-source
+        (parent) when present so Quote No shows the source quote; otherwise the
+        sole accepted quote.
+        """
         quote = self._get_quote(ctx, quote_id)
         opp = self._get_opportunity(ctx, quote.opportunity_id)
 
@@ -692,23 +737,51 @@ class OvfService:
             )
         if not opp.customer_po_approved:
             raise ConflictException("OVF can only be created after the customer PO is approved")
-        if quote.quote_stage != "accepted":
+
+        opp_quotes = self._quotes.list_quotes(ctx, opp.company_id, opportunity_id=opp.id)
+        source_quotes = self._ovf_source_quotes(opp_quotes)
+        if not source_quotes:
             raise ConflictException(
-                f"Quote is in stage '{quote.quote_stage}'; OVF can only be created "
-                "from an accepted customer quote."
+                "No accepted quote is available for OVF. Accept the customer quote "
+                "(or its split quotes) first."
             )
-        existing = self._repo.list_ovfs(ctx, opp.company_id, opportunity_id=opp.id)
-        # Split quotes (one per entity / location) each carry their own customer PO and OVF.
-        split_quote_without_ovf = getattr(quote, "parent_quote_id", None) is not None and all(
-            row.quote_id != quote.id for row in existing
+
+        source_ids = {q.id for q in source_quotes}
+        is_split_parent = any(
+            getattr(q, "parent_quote_id", None) == quote.id for q in opp_quotes
         )
-        if existing and not split_quote_without_ovf:
+        if quote.id not in source_ids and not is_split_parent:
+            if quote.quote_stage != "accepted":
+                raise ConflictException(
+                    f"Quote is in stage '{quote.quote_stage}'; OVF can only be created "
+                    "from an accepted customer quote."
+                )
             raise ConflictException(
-                "An OVF already exists for this opportunity. Open the existing OVF "
-                "to continue approval, SCM share, or Deal Won."
+                "This quote is not eligible for OVF. Use an accepted split quote "
+                "or create the opportunity OVF from the deal."
+            )
+
+        existing = self._repo.list_ovfs(ctx, opp.company_id, opportunity_id=opp.id)
+        if existing:
+            raise ConflictException(
+                "An OVF already exists for this opportunity. Open that OVF to continue."
             )
         sales_blueprint_engine.assert_not_locked(opp)
 
+        # Prefer the split-source (parent) as the OVF's quote_id so Quote No
+        # shows DR-…/Q1; lines still come from all accepted children.
+        split_parent = next(
+            (q for q in opp_quotes if any(getattr(c, "parent_quote_id", None) == q.id for c in opp_quotes)),
+            None,
+        )
+        if is_split_parent:
+            anchor = quote
+        elif split_parent is not None:
+            anchor = split_parent
+        elif quote.id in source_ids:
+            anchor = quote
+        else:
+            anchor = source_quotes[0]
         account = (
             self._companies.get(ctx, opp.company_account_id)
             if opp.company_account_id
@@ -717,7 +790,7 @@ class OvfService:
         fields.update(
             self._snapshot_fields_from_related(
                 ctx,
-                quote=quote,
+                quote=anchor,
                 opp=opp,
                 account=account,
                 current=fields,
@@ -726,10 +799,15 @@ class OvfService:
 
         # Freight is SCM-owned (Ask SCM / post-share charges). Do not take Sales input.
         fields["freight"] = Decimal("0")
-        if fields.get("total_margin_pct") is None:
-            fields["total_margin_pct"] = quote.avg_margin_pct
+        margin_amount = sum(
+            (Decimal(str(getattr(q, "total_margin_amount", 0) or 0)) for q in source_quotes),
+            Decimal("0"),
+        )
         if fields.get("total_margin_amount") is None:
-            fields["total_margin_amount"] = quote.total_margin_amount
+            fields["total_margin_amount"] = margin_amount
+        if fields.get("total_margin_pct") is None:
+            # Prefer recompute from merged lines; seed from anchor until then.
+            fields["total_margin_pct"] = getattr(anchor, "avg_margin_pct", None)
         vendor_days = int(fields.get("vendor_payment_days", 0) or 0)
         customer_days = int(fields.get("customer_payment_days", 0) or 0)
         fields["finance_cost_pct"] = margin_engine.compute_finance_cost_pct(
@@ -754,7 +832,7 @@ class OvfService:
             company_id=opp.company_id,
             branch_id=opp.branch_id,
             ovf_no=code,
-            quote_id=quote_id,
+            quote_id=anchor.id,
             opportunity_id=opp.id,
             company_account_id=opp.company_account_id,
             approval_status=approval_status,
@@ -762,34 +840,65 @@ class OvfService:
             **fields,
         )
 
-        for quote_line in self._quote_lines.list_for_quote(ctx, quote.id):
-            for side, unit_price in (
-                ("customer_po", quote_line.unit_sell),
-                ("vendor", quote_line.unit_cost),
-            ):
+        # Customer PO = split-source (parent) lines; Vendor = all accepted split
+        # children (or the sole quote when never split). Quote No is tagged on
+        # vendor descriptions as [quote:…] for round-trip without a schema column.
+        customer_quotes = [anchor] if split_parent is not None or is_split_parent else source_quotes
+        if not customer_quotes:
+            customer_quotes = source_quotes
+        vendor_quotes = source_quotes
+
+        line_no = 1
+        original_vendor_total = Decimal("0")
+        for src in customer_quotes:
+            for quote_line in self._quote_lines.list_for_quote(ctx, src.id):
+                unit_price = quote_line.unit_sell
                 self._lines.create(
                     ctx,
                     company_id=opp.company_id,
                     branch_id=opp.branch_id,
                     ovf_id=row.id,
-                    side=side,
-                    line_no=quote_line.line_no,
+                    side="customer_po",
+                    line_no=line_no,
                     product_name=quote_line.product_name,
                     description=(quote_line.description or None),
                     qty=quote_line.qty,
                     unit_price=unit_price,
                     gst_pct=Decimal(str(quote_line.gst_pct or 18)),
                     line_total=(quote_line.qty * unit_price).quantize(Decimal("0.0001")),
+                    source_line_id=quote_line.id,
                 )
+                line_no += 1
 
-        # Baseline for "negotiated vs original" vendor price on the OVF.
-        row.original_vendor_total = sum(
-            (
-                (Decimal(str(ql.qty)) * Decimal(str(ql.unit_cost))).quantize(Decimal("0.0001"))
-                for ql in self._quote_lines.list_for_quote(ctx, quote.id)
-            ),
-            Decimal("0"),
-        )
+        vendor_line_no = 1
+        for src in vendor_quotes:
+            quote_tag = (getattr(src, "quote_no", None) or "").strip()
+            for quote_line in self._quote_lines.list_for_quote(ctx, src.id):
+                unit_price = quote_line.unit_cost
+                desc = (quote_line.description or "").strip()
+                if quote_tag:
+                    desc = f"[quote:{quote_tag}] {desc}".strip() if desc else f"[quote:{quote_tag}]"
+                self._lines.create(
+                    ctx,
+                    company_id=opp.company_id,
+                    branch_id=opp.branch_id,
+                    ovf_id=row.id,
+                    side="vendor",
+                    line_no=vendor_line_no,
+                    product_name=quote_line.product_name,
+                    description=desc or None,
+                    qty=quote_line.qty,
+                    unit_price=unit_price,
+                    gst_pct=Decimal(str(quote_line.gst_pct or 18)),
+                    line_total=(quote_line.qty * unit_price).quantize(Decimal("0.0001")),
+                    source_line_id=quote_line.id,
+                )
+                original_vendor_total += (
+                    Decimal(str(quote_line.qty)) * Decimal(str(quote_line.unit_cost))
+                ).quantize(Decimal("0.0001"))
+                vendor_line_no += 1
+
+        row.original_vendor_total = original_vendor_total
         self._recompute_margin(ctx, row.id)
 
         from_opp_state = opp.blueprint_state or "ovf_ready"
@@ -799,7 +908,11 @@ class OvfService:
             self._db, ctx, company_id=opp.company_id, branch_id=opp.branch_id,
             entity_type="opportunity", entity_id=opp.id,
             from_state=from_opp_state, to_state=next_state, action="create_ovf",
-            remark=f"OVF {code} created",
+            remark=(
+                f"OVF {code} created "
+                f"(customer from {len(customer_quotes)} quote(s), "
+                f"vendor from {len(vendor_quotes)} quote(s))"
+            ),
         )
         return row
 
@@ -915,13 +1028,43 @@ class OvfService:
         """Planned margin (what Management approves); the live margin is derived from it."""
         ovf = self.get(ctx, ovf_id)
         lines = self._lines.list_for_ovf(ctx, ovf_id)
-        customer_total = sum((Decimal(str(ln.line_total)) for ln in lines if ln.side == "customer_po"), Decimal("0"))
-        vendor_total = sum((Decimal(str(ln.line_total)) for ln in lines if ln.side == "vendor"), Decimal("0"))
+        customer_total = sum(
+            (Decimal(str(ln.line_total)) for ln in lines if ln.side == "customer_po"),
+            Decimal("0"),
+        )
+        # Supporting / service-visit lines count as additional charges, not purchase.
+        vendor_total = Decimal("0")
+        supporting_total = Decimal("0")
+        service_total = Decimal("0")
+        for ln in lines:
+            if ln.side != "vendor":
+                continue
+            amount = Decimal(str(ln.line_total))
+            if _is_supporting_charge_line(ln.description):
+                supporting_total += amount
+            elif _is_service_charge_line(ln.description, ln.product_name):
+                service_total += amount
+            else:
+                vendor_total += amount
+        charge_verticals = supporting_total + service_total
+        additional = Decimal(str(ovf.additional_charges or 0))
+        if charge_verticals > 0:
+            # Prefer the live supporting + service sum when those lines exist.
+            additional = charge_verticals
+            if Decimal(str(ovf.additional_charges or 0)) != charge_verticals.quantize(
+                Decimal("0.0001")
+            ):
+                self._repo.update(
+                    ctx,
+                    ovf_id,
+                    additional_charges=charge_verticals.quantize(Decimal("0.0001")),
+                )
+                ovf = self.get(ctx, ovf_id)
         margin = margin_engine.compute_ovf_margin(
             customer_total=customer_total,
             vendor_total=vendor_total,
             freight=ovf.freight,
-            additional_charges=ovf.additional_charges,
+            additional_charges=additional,
             finance_cost_pct=ovf.finance_cost_pct,
             early_payment_discount_pct=ovf.early_payment_discount_pct,
         )
@@ -1146,6 +1289,228 @@ class OvfService:
         self._log(ctx, ovf, ovf.blueprint_state, ovf.blueprint_state, "request_freight", None)
         return self.get(ctx, ovf_id)
 
+    def request_supporting_items_from_ops(
+        self,
+        ctx: TenantContext,
+        ovf_id: UUID,
+        *,
+        remarks: str | None = None,
+    ) -> CrmOvf:
+        """Ask Operations (project) step owners to add supporting items via My Jobs."""
+        ovf = self.get(ctx, ovf_id)
+        if ovf.deal_won:
+            raise ConflictException("Cannot request supporting items after Deal Won")
+        if ovf.blueprint_state not in {"draft", "approved", "shared_scm"}:
+            raise ConflictException(
+                f"Cannot request supporting items while OVF is in '{ovf.blueprint_state}'"
+            )
+
+        from modules.crm.service.approval_step_owner_service import ApprovalStepOwnerService
+        from modules.crm.service.approval_task_service import ApprovalTaskService
+
+        pending = ApprovalTaskService(self._db).list(
+            ctx,
+            company_id=ovf.company_id,
+            status="pending",
+            entity_type="ovf",
+            entity_id=ovf.id,
+        )
+        if any(task.action == "provide_supporting_items" for task in pending):
+            raise ConflictException("A supporting-items request is already pending for this OVF")
+
+        owner_ids = ApprovalStepOwnerService(self._db).list_user_ids(
+            ctx, "ovf_provide_supporting_items"
+        )
+        if not owner_ids:
+            raise ConflictException(
+                "No Operations supporting-items step owners configured. "
+                "Set them under CRM → Users → Default task owners."
+            )
+
+        note = (remarks or "").strip()
+        brief = (
+            f"Sales requested supporting items (outside the main PO) for OVF {ovf.ovf_no}.\n"
+            "Submit each item name, qty and unit cost in My Jobs."
+            + (f"\nNote: {note}" if note else "")
+        )
+        ApprovalTaskService(self._db).route_approval(
+            ctx,
+            title=f"Provide supporting items for OVF {ovf.ovf_no}",
+            entity_type="ovf",
+            entity_id=ovf.id,
+            team_role="project",
+            action="provide_supporting_items",
+            company_id=ovf.company_id,
+            branch_id=ovf.branch_id,
+            assigned_user_ids=owner_ids,
+            remarks=brief,
+        )
+        self._log(
+            ctx, ovf, ovf.blueprint_state, ovf.blueprint_state, "request_supporting_items", None
+        )
+        return self.get(ctx, ovf_id)
+
+    def request_service_visits_from_ops(
+        self,
+        ctx: TenantContext,
+        ovf_id: UUID,
+        *,
+        remarks: str | None = None,
+    ) -> CrmOvf:
+        """Ask Operations step owners to set up a service visit plan via My Jobs."""
+        ovf = self.get(ctx, ovf_id)
+        if ovf.deal_won:
+            raise ConflictException("Cannot request service visits after Deal Won")
+        if ovf.blueprint_state not in {"draft", "approved", "shared_scm"}:
+            raise ConflictException(
+                f"Cannot request service visits while OVF is in '{ovf.blueprint_state}'"
+            )
+
+        from modules.crm.service.approval_step_owner_service import ApprovalStepOwnerService
+        from modules.crm.service.approval_task_service import ApprovalTaskService
+        from modules.procurement.service.service_contract_service import ServiceContractService
+
+        pending = ApprovalTaskService(self._db).list(
+            ctx,
+            company_id=ovf.company_id,
+            status="pending",
+            entity_type="ovf",
+            entity_id=ovf.id,
+        )
+        if any(task.action == "provide_service_visits" for task in pending):
+            raise ConflictException("A service-visits request is already pending for this OVF")
+
+        existing_plans = ServiceContractService(self._db).list_plans(ctx, ovf_id=ovf_id)
+        if existing_plans:
+            raise ConflictException(
+                "A service visit plan already exists for this OVF. "
+                "Ask Operations again only after the existing plan is removed."
+            )
+
+        owner_ids = ApprovalStepOwnerService(self._db).list_user_ids(
+            ctx, "ovf_provide_service_visits"
+        )
+        if not owner_ids:
+            raise ConflictException(
+                "No Operations service-visits step owners configured. "
+                "Set them under CRM → Users → Default task owners."
+            )
+
+        note = (remarks or "").strip()
+        brief = (
+            f"Sales requested service visit planning for OVF {ovf.ovf_no}.\n"
+            "Pick a rate contract, projected visits and consumables in My Jobs. "
+            "Planned cost is added to Additional Charges on the OVF."
+            + (f"\nNote: {note}" if note else "")
+        )
+        ApprovalTaskService(self._db).route_approval(
+            ctx,
+            title=f"Provide service visits for OVF {ovf.ovf_no}",
+            entity_type="ovf",
+            entity_id=ovf.id,
+            team_role="project",
+            action="provide_service_visits",
+            company_id=ovf.company_id,
+            branch_id=ovf.branch_id,
+            assigned_user_ids=owner_ids,
+            remarks=brief,
+        )
+        self._log(
+            ctx, ovf, ovf.blueprint_state, ovf.blueprint_state, "request_service_visits", None
+        )
+        return self.get(ctx, ovf_id)
+
+    def apply_service_plan_from_ops(
+        self,
+        ctx: TenantContext,
+        ovf_id: UUID,
+        plan: dict[str, Any],
+    ) -> CrmOvf:
+        """Create a service plan from a completed My Jobs Ops task (cost → additional charges)."""
+        ovf = self.get(ctx, ovf_id)
+        rate_contract_id = plan.get("rate_contract_id")
+        if rate_contract_id is None:
+            raise ConflictException("Rate contract is required")
+        projected = int(plan.get("projected_visits") or 0)
+        if projected <= 0:
+            raise ConflictException("Projected visits must be greater than zero")
+        consumables = Decimal(str(plan.get("consumables_amount") or 0))
+        description = plan.get("description")
+        if isinstance(description, str):
+            description = description.strip() or None
+
+        from modules.procurement.service.service_contract_service import ServiceContractService
+
+        ServiceContractService(self._db).create_plan(
+            ctx,
+            ovf_id=ovf_id,
+            rate_contract_id=UUID(str(rate_contract_id)),
+            projected_visits=projected,
+            consumables_amount=consumables,
+            description=description,
+            add_to_ovf=True,
+        )
+        self._log(
+            ctx,
+            ovf,
+            ovf.blueprint_state,
+            ovf.blueprint_state,
+            "ops_provide_service_visits",
+            f"visits={projected}",
+        )
+        return self.get(ctx, ovf_id)
+
+    def apply_supporting_items_from_ops(
+        self,
+        ctx: TenantContext,
+        ovf_id: UUID,
+        items: list[dict[str, Any]],
+    ) -> CrmOvf:
+        """Write supporting vendor lines from a completed My Jobs Ops task."""
+        ovf = self.get(ctx, ovf_id)
+        if not items:
+            raise ConflictException("Add at least one supporting item")
+        created = 0
+        for raw in items:
+            name = str(raw.get("product_name") or "").strip()
+            qty = Decimal(str(raw.get("qty") or 0))
+            unit_price = Decimal(str(raw.get("unit_price") or 0))
+            if not name or qty <= 0:
+                raise ConflictException("Each supporting item needs a name and qty greater than zero")
+            if unit_price < 0:
+                raise ConflictException("Unit price cannot be negative")
+            distributor = (raw.get("distributor_name") or None)
+            if isinstance(distributor, str):
+                distributor = distributor.strip() or None
+            description = raw.get("description")
+            if isinstance(description, str):
+                description = description.strip() or None
+            # Tag without a schema column so the create-OVF form can show these
+            # in a separate Supporting Items table.
+            tagged = (
+                f"[supporting] {description}" if description else "[supporting]"
+            )
+            self.add_line(
+                ctx,
+                ovf_id,
+                side="vendor",
+                product_name=name,
+                description=tagged,
+                distributor_name=distributor,
+                qty=qty,
+                unit_price=unit_price,
+            )
+            created += 1
+        self._log(
+            ctx,
+            ovf,
+            ovf.blueprint_state,
+            ovf.blueprint_state,
+            "ops_provide_supporting_items",
+            f"items={created}",
+        )
+        return self.get(ctx, ovf_id)
+
     def _freight_brief(self, ctx: TenantContext, ovf: CrmOvf, remarks: str | None) -> str:
         items = [
             f"{ln.product_name} x {Decimal(str(ln.qty)).normalize():f}"
@@ -1159,11 +1524,8 @@ class OvfService:
             "Sales requested freight charges.",
             f"Ship to: {ship_to or 'not captured on OVF'}",
             f"Items: {'; '.join(items) or 'no customer lines'}",
-            f"Medium: {(ovf.freight_medium or 'not specified').title()}",
+            "Choose medium, weight and insurance when submitting the freight amount.",
         ]
-        if ovf.freight_weight_kg is not None:
-            parts.append(f"Expected weight: {ovf.freight_weight_kg} kg")
-        parts.append(f"Insurance: {'required' if ovf.freight_insurance else 'not required'}")
         note = (remarks or "").strip()
         if note:
             parts.append(f"Note: {note}")
@@ -1379,6 +1741,9 @@ class OvfService:
         ovf_id: UUID,
         *,
         freight: Decimal | float | str | None,
+        medium: str | None = None,
+        weight_kg: Decimal | float | str | None = None,
+        insurance: bool | None = None,
     ) -> CrmOvf:
         """Write freight from a completed My Jobs provide_freight task (pre- or post-share)."""
         ovf = self.get(ctx, ovf_id)
@@ -1387,7 +1752,20 @@ class OvfService:
         value = Decimal(str(freight))
         if value < 0:
             raise ConflictException("Freight cannot be negative")
-        row = self._repo.update(ctx, ovf_id, freight=value.quantize(Decimal("0.0001")))
+        fields: dict[str, Any] = {"freight": value.quantize(Decimal("0.0001"))}
+        if medium is not None:
+            medium_norm = medium.strip().lower()
+            if medium_norm not in FREIGHT_MEDIUMS:
+                raise ConflictException(f"Freight medium must be one of {', '.join(FREIGHT_MEDIUMS)}")
+            fields["freight_medium"] = medium_norm
+        if weight_kg is not None and str(weight_kg).strip() != "":
+            weight = Decimal(str(weight_kg))
+            if weight < 0:
+                raise ConflictException("Weight cannot be negative")
+            fields["freight_weight_kg"] = weight.quantize(Decimal("0.001"))
+        if insurance is not None:
+            fields["freight_insurance"] = bool(insurance)
+        row = self._repo.update(ctx, ovf_id, **fields)
         if row is None:
             raise NotFoundException("OVF not found")
         self._recompute_margin(ctx, ovf_id)

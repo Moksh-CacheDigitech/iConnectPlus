@@ -1,6 +1,7 @@
 import { ApiClientError, apiClient, resourceService } from "@/services/api-client";
 import { getAccessToken } from "@/lib/auth";
 import { cachedFetch, invalidateClientCache, peekCachedValue } from "@/lib/client-cache";
+import { isInlineSafeAttachment, triggerBlobDownload } from "@/lib/safe-attachment";
 import { env } from "@/utils/env";
 
 /** Short TTL so tab switches reuse in-flight / recent list responses. */
@@ -1311,6 +1312,11 @@ export async function openScmCommercialAttachment(
   }
 
   const { blob } = await fetchScmCommercialAttachmentBlob(attachmentId, { download: false });
+  const name = attachment?.file_name || "document";
+  if (!isInlineSafeAttachment(name, blob.type)) {
+    triggerBlobDownload(blob, name);
+    return;
+  }
   const url = URL.createObjectURL(blob);
   window.open(url, "_blank", "noopener,noreferrer");
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);

@@ -123,18 +123,9 @@ function mapCrmInboxItem(row: CrmApprovalInboxItem): CrmBellItem {
   };
 }
 
-/** Approvals first, then stage completions, then lead reminders, then other. */
-function crmInboxSortPriority(eventType: string): number {
-  if (eventType.startsWith("crm.approval.")) return 0;
-  if (eventType === "crm.opportunity.stage_completed") return 1;
-  if (eventType === "crm.lead.stale_reminder") return 2;
-  return 3;
-}
-
+/** Newest first — show notifications in the order they arrive. */
 function sortCrmInboxItems(items: CrmBellItem[]): CrmBellItem[] {
   return [...items].sort((a, b) => {
-    const byType = crmInboxSortPriority(a.event_type) - crmInboxSortPriority(b.event_type);
-    if (byType !== 0) return byType;
     const aTime = a.created_at ? Date.parse(a.created_at) : 0;
     const bTime = b.created_at ? Date.parse(b.created_at) : 0;
     return bTime - aTime;

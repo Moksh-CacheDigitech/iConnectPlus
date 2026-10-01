@@ -52,20 +52,26 @@ def download_attachment(
     ctx: Annotated[TenantContext, Depends(require_permission("crm.attachment:read"))],
     db: Annotated[Session, Depends(get_db)],
 ):
+    from shared.upload_safety import content_disposition_type
+
     download = AttachmentService(db).resolve_download(ctx, attachment_id)
     media = download.content_type or "application/octet-stream"
+    disposition = content_disposition_type(download.file_name, download.content_type)
+    headers = {"X-Content-Type-Options": "nosniff"}
     if download.path is not None:
         return FileResponse(
             path=download.path,
             filename=download.file_name,
             media_type=media,
-            content_disposition_type="inline",
+            content_disposition_type=disposition,
+            headers=headers,
         )
     return StreamingResponse(
         BytesIO(download.content or b""),
         media_type=media,
         headers={
-            "Content-Disposition": f'inline; filename="{download.file_name}"',
+            **headers,
+            "Content-Disposition": f'{disposition}; filename="{download.file_name}"',
         },
     )
 

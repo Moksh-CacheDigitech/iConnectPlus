@@ -31,6 +31,7 @@ import { cloneOpportunityRecord, downloadOpportunityExport, printOpportunityPrev
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
 import { setCrmOpportunityContext, setCrmSidebarFocus } from "@/lib/crm-sidebar-focus";
 import { ApiClientError } from "@/services/api-client";
+import { listCompanyGst } from "@/services/crm-deal-controls-service";
 import {
   applyOpportunityAction,
   applyQuoteAction,
@@ -103,6 +104,7 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
   const [blueprint, setBlueprint] = useState<BlueprintState | null>(null);
   const [sourceLead, setSourceLead] = useState<SalesLead | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
+  const [companyGstin, setCompanyGstin] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Option[]>([]);
   const [leadSources, setLeadSources] = useState<Option[]>([]);
   const [marketingEvents, setMarketingEvents] = useState<Option[]>([]);
@@ -130,7 +132,7 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
       setEmployees(employeeOptions);
       setLeadSources(leadSourceOptions);
       setMarketingEvents(marketingEventOptions);
-      const [quoteRows, ovfRows, attachmentRows, leadRow, companyRow] = await Promise.all([
+      const [quoteRows, ovfRows, attachmentRows, leadRow, companyRow, gstRows] = await Promise.all([
         listQuotes({ opportunity_id: opportunityId }).catch(() => []),
         listOvfs({ opportunity_id: opportunityId }).catch(() => []),
         listAttachments("opportunity", opportunityId).catch(() => []),
@@ -138,14 +140,21 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
         oppRow.company_account_id
           ? getCompany(oppRow.company_account_id).catch(() => null)
           : Promise.resolve(null),
+        oppRow.company_account_id
+          ? listCompanyGst(oppRow.company_account_id).catch(() => [])
+          : Promise.resolve([]),
       ]);
       setQuotes(quoteRows);
       setOvfs(ovfRows);
       setAttachments(attachmentRows);
       setSourceLead(leadRow);
       setCompany(companyRow);
+      setCompanyGstin(
+        (gstRows.find((row) => row.is_head_office) ?? gstRows[0])?.gstin?.trim() ?? null,
+      );
     } catch (err) {
       setOpp(null);
+      setCompanyGstin(null);
       setError(err instanceof ApiClientError ? err.message : "Failed to load opportunity");
     } finally {
       setLoading(false);
@@ -172,8 +181,26 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
       }
       const accepted = quotes.find((q) => q.quote_stage === "accepted");
       const quote = accepted ?? quotes[0];
-      if (action === "create_ovf" && quote) {
-        onCreateOvf(quote);
+      if (action === "create_ovf" || action.startsWith("create_ovf:")) {
+        const parentsWithChildren = new Set(
+          quotes.map((q) => q.parent_quote_id).filter((id): id is string => Boolean(id)),
+        );
+        const splitSource = quotes.find((q) => parentsWithChildren.has(q.id)) ?? null;
+        const childSources = quotes.filter(
+          (q) => q.quote_stage === "accepted" && !parentsWithChildren.has(q.id),
+        );
+        // Prefer the split-source (parent) so create always starts there; fall back
+        // to the sole accepted quote when the deal was never split.
+        const target = splitSource ?? childSources[0] ?? null;
+        if (!target || ovfs.length > 0 || childSources.length === 0) {
+          throw new ApiClientError(
+            ovfs.length > 0
+              ? "An OVF already exists for this opportunity. Open that OVF to continue."
+              : "No accepted quote is available for OVF. Accept the quote (or its splits) first.",
+            409,
+          );
+        }
+        onCreateOvf(target);
         return;
       }
       const quoteFollowOn = quote ? (QUOTE_STAGE_ACTIONS[quote.quote_stage] ?? []) : [];
@@ -229,7 +256,7 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
   }
 
   function onCreateQuote() {
-    router.push(`/crm/opportunities/${opportunityId}/quotes/new`);
+    router.push(`/crm/quotes/new?opportunityId=${opportunityId}`);
   }
 
   function onCreateOvf(quote: Quote) {
@@ -278,7 +305,17 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
 
   const acceptedQuote = quotes.find((q) => q.quote_stage === "accepted");
   const activeQuote = acceptedQuote ?? quotes[0];
-  const existingOvf = ovfs[0];
+  const opportunityOvf = ovfs[0] ?? null;
+  const parentsWithChildren = new Set(
+    quotes.map((q) => q.parent_quote_id).filter((id): id is string => Boolean(id)),
+  );
+  const quotesForOvf = quotes.filter(
+    (q) => q.quote_stage === "accepted" && !parentsWithChildren.has(q.id),
+  );
+  /** Button lives on the split source; if never split, on the sole accepted quote. */
+  const ovfAnchorQuote =
+    quotes.find((q) => parentsWithChildren.has(q.id)) ?? quotesForOvf[0] ?? null;
+  const existingOvf = opportunityOvf;
   const canCreateQuote =
     blueprint.allowed_actions.includes("create_quote") &&
     !blueprint.locked &&
@@ -286,9 +323,18 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
   const canCreateOvf =
     blueprint.allowed_actions.includes("create_ovf") &&
     !blueprint.locked &&
-    !existingOvf &&
-    !!acceptedQuote &&
+    quotesForOvf.length > 0 &&
+    ovfs.length === 0 &&
     blueprint.state === "ovf_ready";
+  const createOvfActions = canCreateOvf ? ["create_ovf"] : [];
+  const createOvfLabels: Record<string, string> = canCreateOvf
+    ? {
+      create_ovf:
+        quotesForOvf.length > 1
+          ? `Create OVF · ${quotesForOvf.length} quotes`
+          : "Create OVF",
+    }
+    : {};
   const showQuotes =
     quotes.length > 0 ||
     ["quote_ready", "quote_in_progress", "po_pending", "po_approval", "ovf_ready", "won"].includes(
@@ -306,16 +352,17 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
       : [];
   const blueprintActions = Array.from(
     new Set([
-      ...blueprint.allowed_actions,
+      ...blueprint.allowed_actions.filter((action) => action !== "create_ovf"),
       ...quoteFollowOnActions,
       ...ovfFollowOnActions,
       ...(canCreateQuote ? ["create_quote"] : []),
-      ...(canCreateOvf ? ["create_ovf"] : []),
+      ...createOvfActions,
     ]),
   ).filter((action) => {
-    // Once quote/OVF exists, never offer create again (opp may still be ovf_ready).
     if (action === "create_quote" && quotes.length > 0) return false;
-    if (action === "create_ovf" && existingOvf) return false;
+    if (action === "create_ovf" || action.startsWith("create_ovf:")) {
+      return createOvfActions.includes(action);
+    }
     return true;
   });
 
@@ -447,6 +494,7 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
               ovfs,
             })}
             excludeActions={CUSTOM_ACTIONS}
+            actionLabelOverrides={createOvfLabels}
             defaultValues={{
               deal_won_amount: activeQuote?.grand_total ?? existingOvf?.deal_won_amount ?? null,
             }}
@@ -483,25 +531,71 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
                         <th className="px-4 py-2">Stage</th>
                         <th className="px-4 py-2">Grand Total</th>
                         <th className="px-4 py-2">Margin</th>
+                        <th className="px-4 py-2">OVF</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {quotes.map((q) => (
-                        <tr key={q.id} className="border-b border-border/50 last:border-0 hover:bg-accent/30">
-                          <td className="px-4 py-2 font-medium">
-                            <Link href={`/crm/quotes/${q.id}`} className="cursor-pointer hover:underline">
-                              {formatCrmCode(q.quote_no)}
-                            </Link>
-                          </td>
-                          <td className="px-4 py-2">
-                            <Badge variant="outline" className="capitalize">
-                              {q.quote_stage.replaceAll("_", " ")}
-                            </Badge>
-                          </td>
-                          <td className="px-4 py-2">{formatInr(q.grand_total)}</td>
-                          <td className="px-4 py-2">{q.avg_margin_pct}%</td>
-                        </tr>
-                      ))}
+                      {quotes.map((q) => {
+                        const isSplitParent = parentsWithChildren.has(q.id);
+                        const isSplitChild = Boolean(q.parent_quote_id);
+                        const showOvfLink =
+                          Boolean(opportunityOvf) &&
+                          (isSplitParent || isSplitChild || quotesForOvf.some((row) => row.id === q.id));
+                        const canRaiseOvf = canCreateOvf && ovfAnchorQuote?.id === q.id;
+                        return (
+                          <tr key={q.id} className="border-b border-border/50 last:border-0 hover:bg-accent/30">
+                            <td className="px-4 py-2 font-medium">
+                              <Link href={`/crm/quotes/${q.id}`} className="cursor-pointer hover:underline">
+                                {formatCrmCode(q.quote_no)}
+                              </Link>
+                              {isSplitChild ? (
+                                <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
+                                  Split quote
+                                </span>
+                              ) : isSplitParent ? (
+                                <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
+                                  Split source
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-2">
+                              <Badge variant="outline" className="capitalize">
+                                {q.quote_stage.replaceAll("_", " ")}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-2">{formatInr(q.grand_total)}</td>
+                            <td className="px-4 py-2">{q.avg_margin_pct}%</td>
+                            <td className="px-4 py-2">
+                              {showOvfLink && opportunityOvf ? (
+                                <Link
+                                  href={`/crm/ovf/${opportunityOvf.id}`}
+                                  className="cursor-pointer font-medium text-primary hover:underline"
+                                >
+                                  {formatCrmCode(opportunityOvf.ovf_no)}
+                                </Link>
+                              ) : canRaiseOvf ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 cursor-pointer"
+                                  disabled={busy}
+                                  onClick={() => onCreateOvf(q)}
+                                >
+                                  <Plus className="size-3.5" />
+                                  Create OVF
+                                </Button>
+                              ) : isSplitChild && canCreateOvf ? (
+                                <span className="text-xs text-muted-foreground">
+                                  Combined on opportunity OVF
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -519,8 +613,8 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
               </div>
               {ovfs.length === 0 ? (
                 <p className="px-4 py-6 text-xs text-muted-foreground">
-                  {acceptedQuote
-                    ? "No OVF yet - use “Create OVF” after the customer PO is approved."
+                  {quotesForOvf.length > 0
+                    ? "No OVF yet — create one for this opportunity (combines all accepted split quotes)."
                     : "Create OVF once a Quote is accepted and the customer PO is approved."}
                 </p>
               ) : (
@@ -529,28 +623,44 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
                     <thead>
                       <tr className={CRM_TABLE_HEAD_ROW}>
                         <th className="px-4 py-2">OVF No.</th>
+                        <th className="px-4 py-2">Quote</th>
                         <th className="px-4 py-2">State</th>
                         <th className="px-4 py-2">Deal Won</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {ovfs.map((o) => (
-                        <tr key={o.id} className="border-b border-border/50 last:border-0 hover:bg-accent/30">
-                          <td className="px-4 py-2 font-medium">
-                            <Link href={`/crm/ovf/${o.id}`} className="cursor-pointer hover:underline">
-                              {formatCrmCode(o.ovf_no)}
-                            </Link>
-                          </td>
-                          <td className="px-4 py-2">
-                            <Badge variant="outline" className="capitalize">
-                              {o.blueprint_state.replaceAll("_", " ")}
-                            </Badge>
-                          </td>
-                          <td className="px-4 py-2">
-                            {o.deal_won ? formatInr(o.deal_won_amount ?? 0) : "-"}
-                          </td>
-                        </tr>
-                      ))}
+                      {ovfs.map((o) => {
+                        const linkedQuote = quotes.find((q) => q.id === o.quote_id);
+                        return (
+                          <tr key={o.id} className="border-b border-border/50 last:border-0 hover:bg-accent/30">
+                            <td className="px-4 py-2 font-medium">
+                              <Link href={`/crm/ovf/${o.id}`} className="cursor-pointer hover:underline">
+                                {formatCrmCode(o.ovf_no)}
+                              </Link>
+                            </td>
+                            <td className="px-4 py-2">
+                              {linkedQuote ? (
+                                <Link
+                                  href={`/crm/quotes/${linkedQuote.id}`}
+                                  className="cursor-pointer hover:underline"
+                                >
+                                  {formatCrmCode(linkedQuote.quote_no)}
+                                </Link>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="px-4 py-2">
+                              <Badge variant="outline" className="capitalize">
+                                {o.blueprint_state.replaceAll("_", " ")}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-2">
+                              {o.deal_won ? formatInr(o.deal_won_amount ?? 0) : "-"}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -562,6 +672,7 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
             <LeadDetailsCard
               lead={sourceLead}
               company={company}
+              companyGstin={companyGstin}
               employees={employees}
               leadSources={leadSources}
               marketingEvents={marketingEvents}

@@ -21,13 +21,21 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_tenant_context(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     db: Annotated[Session, Depends(get_db)],
 ) -> TenantContext:
-    if credentials is None:
+    from modules.foundation.auth_cookies import ACCESS_COOKIE
+
+    token: str | None = None
+    if credentials is not None and credentials.credentials:
+        token = credentials.credentials
+    elif request.cookies.get(ACCESS_COOKIE):
+        token = request.cookies.get(ACCESS_COOKIE)
+    if not token:
         raise UnauthorizedException("Missing authentication token")
     jwt_service = JWTService()
-    payload = jwt_service.decode_token(credentials.credentials, expected_type="access")
+    payload = jwt_service.decode_token(token, expected_type="access")
     session_id = UUID(payload["session_id"])
     session_repo = SessionRepository(db)
     session = session_repo.get_active(session_id)

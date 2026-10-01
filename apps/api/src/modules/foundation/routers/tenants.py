@@ -18,10 +18,15 @@ router = APIRouter(prefix="/tenants", tags=["Tenants"])
 
 @router.get("", response_model=APIResponse[list[TenantResponse]])
 def list_tenants(
-    _: Annotated[TenantContext, Depends(require_permission("foundation.tenant:read"))],
+    ctx: Annotated[TenantContext, Depends(require_permission("foundation.tenant:read"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> APIResponse[list[TenantResponse]]:
-    tenants = TenantService(db).list_tenants()
+    service = TenantService(db)
+    # Non-platform admins only see their own tenant (VAPT cross-tenant enumeration).
+    if ctx.user_type in {"super_admin", "platform_admin"}:
+        tenants = service.list_tenants()
+    else:
+        tenants = [service.get_tenant(ctx.tenant_id)]
     return APIResponse(
         message="Tenants retrieved",
         data=[TenantResponse(**t.__dict__) for t in tenants],

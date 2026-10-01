@@ -22,6 +22,16 @@ APPROVAL_STEP_CATALOG: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "po_management": ("Customer PO — Management", "management", ()),
     "service_scope": ("Operations / service scope", "project", ()),
     "ovf_provide_freight": ("OVF — Provide freight", "scm", ()),
+    "ovf_provide_supporting_items": (
+        "OVF — Provide supporting items",
+        "project",
+        (),
+    ),
+    "ovf_provide_service_visits": (
+        "OVF — Provide service visits",
+        "project",
+        (),
+    ),
     "ovf_send_for_approval": (
         "OVF — Send for approval",
         "management",

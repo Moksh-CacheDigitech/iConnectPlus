@@ -90,35 +90,15 @@ const PO_APPROVAL_DIALOG_FIELDS: FieldConfig[] = [
     type: "checkbox",
     required: true,
   },
-  {
-    key: "finance_user_ids",
-    label: "1. Finance - tax, GST & commercials",
-    type: "approver_stage",
-    stage: "finance",
-    required: true,
-  },
-  {
-    key: "legal_user_ids",
-    label: "2. Legal - terms & conditions",
-    type: "approver_stage",
-    stage: "legal",
-    required: true,
-  },
-  {
-    key: "management_user_ids",
-    label: "3. Management - final go-ahead",
-    type: "approver_stage",
-    stage: "management",
-    required: true,
-  },
-  {
-    key: "operations_user_ids",
-    label: "Operations owner - services & installation scope (optional)",
-    type: "approver_stage",
-    stage: "operations",
-  },
   { key: "remarks", label: "Remarks", type: "textarea", required: true },
 ];
+
+const PO_STAGE_STEP_KEYS: Record<PoStage, string> = {
+  finance: "po_finance",
+  legal: "po_legal",
+  management: "po_management",
+  operations: "service_scope",
+};
 
 const EMPTY_PO_STAGE_APPROVERS: Record<PoStage, string[]> = {
   finance: [],
@@ -209,30 +189,18 @@ const ACTION_CONFIG: Record<string, ActionConfig> = {
     ],
     description: "DR Number is auto-generated in series. Confirm to register this deal.",
   },
-  oem_received: { label: "OEM Quotation Received", fields: [] },
+  oem_received: { label: "Vendor Quotation Received", fields: [] },
   attach_oem_quote: {
     label: "Attach Vendor Quote",
     fields: [{ key: "file_name", label: "Vendor / OEM / market quote file", type: "file", required: true }],
-    description:
-      "Hardware: the quote you are buying against - OEM, distributor or open-market vendor. " +
-      "Cloud MAP migration: AWS migration quotation from the OEM.",
   },
   attach_po: {
     label: "Attach Customer PO",
     fields: [{ key: "file_name", label: "Customer PO file", type: "file", required: true }],
-    description:
-      "PO number, PO date, GSTINs and bill-to / ship-to are read from the file. New GSTINs are saved " +
-      "on the customer account.",
   },
   send_po_approval: {
     label: "Send PO for Approval",
     fields: PO_APPROVAL_DIALOG_FIELDS,
-    description:
-      "Read the attached PO first (Documents). Sales accepts the terms, then the PO goes to " +
-      "Finance (tax & commercials), then Legal (terms & conditions), " +
-      "then Management. Each stage is raised in My Jobs only after the previous one approves. " +
-      "If the PO carries service (SAC) lines, the Operations owner is handed that scope as soon as " +
-      `Management approves - they do not wait for the hardware. ${APPROVAL_ADMIN_NOTE}`,
   },
   send_for_approval: {
     label: "Send for Approval",
@@ -273,7 +241,8 @@ const ACTION_CONFIG: Record<string, ActionConfig> = {
   create_ovf: {
     label: "Create OVF",
     fields: [],
-    description: "Create an order value form from the accepted quote.",
+    description:
+      "Create one order value form for this opportunity (combines all accepted split quotes).",
   },
 };
 
@@ -482,9 +451,20 @@ export function BlueprintActions({
 
   if (!currentStageLabel && visibleActions.length === 0) return null;
 
+  function resolvePoStageApproversFromOwners(): Record<PoStage, string[]> {
+    return {
+      finance: stepOwnerIds[PO_STAGE_STEP_KEYS.finance] ?? [],
+      legal: stepOwnerIds[PO_STAGE_STEP_KEYS.legal] ?? [],
+      management: stepOwnerIds[PO_STAGE_STEP_KEYS.management] ?? [],
+      operations: stepOwnerIds[PO_STAGE_STEP_KEYS.operations] ?? [],
+    };
+  }
+
   function resolveConfig(action: string): ActionConfig {
+    const normalized =
+      action === "create_ovf" || action.startsWith("create_ovf:") ? "create_ovf" : action;
     const base =
-      ACTION_CONFIG[action] ?? {
+      ACTION_CONFIG[normalized] ?? {
         label: action.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase()),
         fields: [REMARK_FIELD_ALT],
       };
@@ -534,18 +514,7 @@ export function BlueprintActions({
       ),
     );
     setApproverIds(mergeApproverSelection(defaultIds, pinnedIds));
-    // Finance owns the first PO check, so the pinned/default accounts approvers seed it.
-    setPoStageApprovers(
-      action === "send_po_approval"
-        ? {
-          ...EMPTY_PO_STAGE_APPROVERS,
-          finance: mergeApproverSelection(defaultIds, pinnedIds),
-          legal: stepOwnerIds.po_legal ?? [],
-          management: stepOwnerIds.po_management ?? [],
-          operations: stepOwnerIds.service_scope ?? [],
-        }
-        : EMPTY_PO_STAGE_APPROVERS,
-    );
+    setPoStageApprovers(EMPTY_PO_STAGE_APPROVERS);
     setFile(null);
     setFiles([]);
     setPoExtract(null);
@@ -598,13 +567,6 @@ export function BlueprintActions({
         }
         continue;
       }
-      if (field.required && field.type === "approver_stage") {
-        if (!field.stage || poStageApprovers[field.stage].length === 0) {
-          setError(`Pick at least one approver for "${field.label}"`);
-          return;
-        }
-        continue;
-      }
       if (field.required && field.type === "checkbox") {
         if (values[field.key] !== "true") {
           setError("Confirm you have read and verified the customer PO terms & conditions");
@@ -625,6 +587,18 @@ export function BlueprintActions({
           setError(`${field.label} is required`);
           return;
         }
+      }
+    }
+
+    let resolvedPoStageOwners: Record<PoStage, string[]> | null = null;
+    if (dispatchAction === "send_po_approval") {
+      resolvedPoStageOwners = resolvePoStageApproversFromOwners();
+      // Finance is raised immediately; later stages fall back to quote/admin owners on the API.
+      if (resolvedPoStageOwners.finance.length === 0) {
+        setError(
+          "Configure Finance owners under CRM Users → Default task owners before sending the PO.",
+        );
+        return;
       }
     }
 
@@ -652,16 +626,15 @@ export function BlueprintActions({
         payloadBase.assigned_user_ids = approverIds;
         payloadBase.assigned_user_id = approverIds[0];
       }
-      if (dispatchAction === "send_po_approval") {
+      if (dispatchAction === "send_po_approval" && resolvedPoStageOwners) {
         payloadBase.terms_accepted = values.terms_accepted === "true";
-        payloadBase.finance_user_ids = poStageApprovers.finance;
-        payloadBase.legal_user_ids = poStageApprovers.legal;
-        payloadBase.management_user_ids = poStageApprovers.management;
-        payloadBase.operations_user_ids = poStageApprovers.operations;
-        // Only Finance is raised now; the later stages are stored on the
-        // opportunity and raised as each stage approves.
-        payloadBase.assigned_user_ids = poStageApprovers.finance;
-        payloadBase.assigned_user_id = poStageApprovers.finance[0];
+        payloadBase.finance_user_ids = resolvedPoStageOwners.finance;
+        payloadBase.legal_user_ids = resolvedPoStageOwners.legal;
+        payloadBase.management_user_ids = resolvedPoStageOwners.management;
+        payloadBase.operations_user_ids = resolvedPoStageOwners.operations;
+        // Only Finance is raised now; later stages are stored and raised as each approves.
+        payloadBase.assigned_user_ids = resolvedPoStageOwners.finance;
+        payloadBase.assigned_user_id = resolvedPoStageOwners.finance[0];
       }
       if (activeAction === "lost" && values.reason) {
         payloadBase.remark = values.reason;
@@ -738,7 +711,8 @@ export function BlueprintActions({
               const isLost = action === "lost";
               const isOemQuote = OEM_QUOTE_ACTIONS.has(action);
               const isQuoteFlow = QUOTE_FLOW_ACTIONS.has(action);
-              const isPrimaryFlow = PRIMARY_FLOW_ACTIONS.has(action);
+              const isPrimaryFlow =
+                PRIMARY_FLOW_ACTIONS.has(action) || action.startsWith("create_ovf:");
               const colorClass = isLost
                 ? LOST_BUTTON_CLASS
                 : isAttach || isApproval || isOemQuote || isQuoteFlow || isPrimaryFlow

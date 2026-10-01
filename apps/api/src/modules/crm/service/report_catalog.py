@@ -259,7 +259,7 @@ COLUMNS: dict[str, list[dict[str, str]]] = {
         _col("sow_attached", "SOW Attached"),
         _col("sow_approved", "SOW Approved"),
         _col("sow_skipped", "SOW Skipped"),
-        _col("oem_quotation_received", "OEM Quotation Received"),
+        _col("oem_quotation_received", "Vendor Quotation Received"),
         _col("oem_quote_attached", "Vendor Quote Attached"),
         _col("customer_po_attached", "Customer PO Attached"),
         _col("customer_po_approved", "Customer PO Approved"),

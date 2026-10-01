@@ -171,7 +171,8 @@ export function QuoteSplitPanel({ quote, contacts }: Props) {
               </Link>
             </span>
           ))}
-          . Each goes through approval and gets its own customer PO and OVF.
+          . When the source was already accepted, each split stays accepted and
+          all of them combine into one opportunity OVF.
         </p>
       ) : null}
 
@@ -245,17 +246,40 @@ export function QuoteSplitPanel({ quote, contacts }: Props) {
                 </FinanceField>
               </div>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                {balance.map((row) => (
-                  <FinanceField key={row.line_id} label={`${row.product_name} (left ${Number(row.balance_qty) - (allocated[row.line_id] ?? 0) + (Number(d.qty[row.line_id]) || 0)})`}>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={d.qty[row.line_id] ?? ""}
-                      onChange={(e) => patch(index, { qty: { ...d.qty, [row.line_id]: e.target.value } })}
-                      className="h-9 text-[13px]"
-                    />
-                  </FinanceField>
-                ))}
+                {balance.map((row) => {
+                  const currentQty = Number(d.qty[row.line_id]) || 0;
+                  const maxQty = Math.max(
+                    0,
+                    Number(row.balance_qty) - (allocated[row.line_id] ?? 0) + currentQty,
+                  );
+                  return (
+                    <FinanceField
+                      key={row.line_id}
+                      label={`${row.product_name} (left ${maxQty})`}
+                    >
+                      <Input
+                        type="number"
+                        min={0}
+                        max={maxQty}
+                        value={d.qty[row.line_id] ?? ""}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === "") {
+                            patch(index, { qty: { ...d.qty, [row.line_id]: "" } });
+                            return;
+                          }
+                          const next = Number(raw);
+                          if (!Number.isFinite(next)) return;
+                          const clamped = Math.max(0, Math.min(maxQty, next));
+                          patch(index, {
+                            qty: { ...d.qty, [row.line_id]: String(clamped) },
+                          });
+                        }}
+                        className="h-9 text-[13px]"
+                      />
+                    </FinanceField>
+                  );
+                })}
               </div>
             </div>
           ))}

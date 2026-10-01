@@ -16,12 +16,11 @@ import { CrmDetailEditLink } from "@/components/crm/sales/crm-detail-edit-link";
 import { CrmRecordActionsMenu } from "@/components/crm/sales/crm-record-actions-menu";
 import { LeadDetailsCard } from "@/components/crm/sales/lead-details-card";
 import { PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
 import { cloneLeadRecord, downloadLeadExport, printLeadPreview } from "@/lib/crm/crm-record-actions";
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
 import { ApiClientError } from "@/services/api-client";
+import { listCompanyGst } from "@/services/crm-deal-controls-service";
 import {
-  convertLead,
   deleteLead,
   fullName,
   getCompany,
@@ -41,6 +40,7 @@ export function LeadDetailPage({ leadId }: { leadId: string }) {
   const router = useRouter();
   const [lead, setLead] = useState<SalesLead | null>(null);
   const [company, setCompany] = useState<Company | null>(null);
+  const [companyGstin, setCompanyGstin] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Option[]>([]);
   const [leadSources, setLeadSources] = useState<Option[]>([]);
   const [marketingEvents, setMarketingEvents] = useState<Option[]>([]);
@@ -53,13 +53,25 @@ export function LeadDetailPage({ leadId }: { leadId: string }) {
     setLoading(true);
     setError(null);
     try {
-      const [leadRow, bp, employeeOptions, leadSourceOptions, marketingEventOptions] = await Promise.all([
+      // Blueprint GET may auto-convert once BOQ/SOW are attached — run it first, then
+      // reload the lead so we can open the opportunity Transitions (OEM next, …).
+      const bp = await getLeadBlueprint(leadId);
+      const [leadRow, employeeOptions, leadSourceOptions, marketingEventOptions] = await Promise.all([
         getSalesLead(leadId),
-        getLeadBlueprint(leadId),
         listCrmMemberOptions().catch(() => [] as Option[]),
         listLeadSourceOptions().catch(() => [] as Option[]),
         listMarketingEventOptions().catch(() => [] as Option[]),
       ]);
+
+      const opportunityId = leadRow.converted_opportunity_id;
+      if (
+        opportunityId &&
+        (leadRow.blueprint_state === "converted" || bp.state === "converted")
+      ) {
+        router.replace(`/crm/opportunities/${opportunityId}`);
+        return;
+      }
+
       setLead(leadRow);
       setBlueprint(bp);
       setEmployees(employeeOptions);
@@ -70,13 +82,22 @@ export function LeadDetailPage({ leadId }: { leadId: string }) {
           ? await getCompany(leadRow.company_account_id).catch(() => null)
           : null,
       );
+      if (leadRow.company_account_id) {
+        const gstRows = await listCompanyGst(leadRow.company_account_id).catch(() => []);
+        setCompanyGstin(
+          (gstRows.find((row) => row.is_head_office) ?? gstRows[0])?.gstin?.trim() ?? null,
+        );
+      } else {
+        setCompanyGstin(null);
+      }
     } catch (err) {
       setLead(null);
+      setCompanyGstin(null);
       setError(err instanceof ApiClientError ? err.message : "Failed to load lead");
     } finally {
       setLoading(false);
     }
-  }, [leadId]);
+  }, [leadId, router]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -85,11 +106,6 @@ export function LeadDetailPage({ leadId }: { leadId: string }) {
 
   async function onBlueprintAction(action: string, payload: Record<string, unknown>) {
     if (!lead) return;
-    if (action === "convert") {
-      const opp = await convertLead(lead.id, {});
-      router.push(`/crm/opportunities/${opp.id}`);
-      return;
-    }
     if (action === "lost") {
       await markLeadLost(lead.id, String(payload.reason ?? payload.remark ?? ""));
       await load();
@@ -116,8 +132,6 @@ export function LeadDetailPage({ leadId }: { leadId: string }) {
     );
   }
 
-  const converted = blueprint.state === "converted" && Boolean(lead.converted_opportunity_id);
-
   return (
     <CrmPage>
       <div>
@@ -135,11 +149,11 @@ export function LeadDetailPage({ leadId }: { leadId: string }) {
         reason={
           (lead.requires_boq && !lead.boq_attached) || (lead.requires_sow && !lead.sow_attached)
             ? `waiting for ${[
-                lead.requires_boq && !lead.boq_attached ? "BOQ" : null,
-                lead.requires_sow && !lead.sow_attached ? "SOW" : null,
-              ]
-                .filter(Boolean)
-                .join(" and ")} attachment in My Jobs before convert to opportunity.`
+              lead.requires_boq && !lead.boq_attached ? "BOQ" : null,
+              lead.requires_sow && !lead.sow_attached ? "SOW" : null,
+            ]
+              .filter(Boolean)
+              .join(" and ")} attachment in My Jobs — converts to an opportunity automatically when complete.`
             : null
         }
       />
@@ -152,16 +166,6 @@ export function LeadDetailPage({ leadId }: { leadId: string }) {
               <CrmDetailEditLink
                 href={`/crm/companies/${lead.company_account_id}/edit-lead/${lead.id}`}
               />
-            ) : null}
-            {converted && lead.converted_opportunity_id ? (
-              <Button
-                type="button"
-                size="sm"
-                className="cursor-pointer"
-                onClick={() => router.push(`/crm/opportunities/${lead.converted_opportunity_id}`)}
-              >
-                Open Opportunity
-              </Button>
             ) : null}
             <CrmRecordActionsMenu
               entityType="lead"
@@ -193,12 +197,14 @@ export function LeadDetailPage({ leadId }: { leadId: string }) {
           locked: blueprint.locked,
           lead,
         })}
+        excludeActions={["convert"]}
         onAction={onBlueprintAction}
       />
 
       <LeadDetailsCard
         lead={lead}
         company={company}
+        companyGstin={companyGstin}
         employees={employees}
         leadSources={leadSources}
         marketingEvents={marketingEvents}

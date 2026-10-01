@@ -67,7 +67,7 @@ export const CRM_NAV: readonly CrmNavItem[] = [
   { title: "Purchase Order", href: "/crm/purchase-orders", icon: ShoppingCart },
   { title: "OVF", href: "/crm/ovf", icon: Receipt },
   { title: "Sales Performance", href: "/crm/sales-performance", icon: TrendingDown },
-  { title: "Stock & Aging", href: "/procurement/inventory-aging", icon: Boxes },
+  { title: "Stock & Aging", href: "/crm/inventory-aging", icon: Boxes },
   { title: "Contacts", href: "/crm/contacts", icon: Users },
   { title: "Products", href: "/crm/products", icon: Package },
   { title: "Meetings", href: "/crm/meetings", icon: CalendarDays },

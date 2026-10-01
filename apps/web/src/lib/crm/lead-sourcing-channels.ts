@@ -7,7 +7,8 @@ export type HardwareSourcingChannel = (typeof HARDWARE_SOURCING_CHANNELS)[number
 export type ServiceSourcingChannel = (typeof SERVICE_SOURCING_CHANNELS)[number];
 
 export type LeadSourcingChannels = {
-  hardware?: string;
+  /** One or more hardware channels (B2B / Open Market). */
+  hardware?: string[];
   service?: string;
 };
 
@@ -31,6 +32,24 @@ export function leadNeedsServiceSourcing(productTypes: readonly string[]): boole
   return hasServiceProductType(productTypes);
 }
 
+function normalizeHardwareChannels(value: unknown): string[] | undefined {
+  const allowed = new Set<string>(HARDWARE_SOURCING_CHANNELS);
+  const fromList = (items: unknown[]): string[] =>
+    items
+      .map((item) => String(item ?? "").trim())
+      .filter((item) => item && allowed.has(item));
+
+  if (Array.isArray(value)) {
+    const rows = fromList(value);
+    return rows.length > 0 ? rows : undefined;
+  }
+  if (typeof value === "string") {
+    const rows = fromList(value.split(","));
+    return rows.length > 0 ? rows : undefined;
+  }
+  return undefined;
+}
+
 export function parseLeadSourcingChannels(
   dealType: string | null | undefined,
 ): LeadSourcingChannels {
@@ -40,7 +59,7 @@ export function parseLeadSourcingChannels(
     try {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       return {
-        hardware: typeof parsed.hardware === "string" ? parsed.hardware : undefined,
+        hardware: normalizeHardwareChannels(parsed.hardware),
         service: typeof parsed.service === "string" ? parsed.service : undefined,
       };
     } catch {
@@ -55,9 +74,9 @@ export function formatLeadSourcingChannels(
   channels: LeadSourcingChannels,
   productTypes: readonly string[],
 ): string | null {
-  const payload: Record<string, string> = {};
-  if (hasHardwareProductType(productTypes) && channels.hardware?.trim()) {
-    payload.hardware = channels.hardware.trim();
+  const payload: Record<string, string | string[]> = {};
+  if (hasHardwareProductType(productTypes) && channels.hardware && channels.hardware.length > 0) {
+    payload.hardware = channels.hardware;
   }
   if (hasServiceProductType(productTypes) && channels.service?.trim()) {
     payload.service = channels.service.trim();
@@ -76,8 +95,8 @@ export function displayLeadSourcingChannels(
     .filter(Boolean);
   const channels = parseLeadSourcingChannels(dealType);
   const parts: string[] = [];
-  if (hasHardwareProductType(types) && channels.hardware) {
-    parts.push(`Hardware: ${channels.hardware}`);
+  if (hasHardwareProductType(types) && channels.hardware && channels.hardware.length > 0) {
+    parts.push(`Hardware: ${channels.hardware.join(", ")}`);
   }
   if (hasServiceProductType(types) && channels.service) {
     parts.push(`Service: ${channels.service}`);
