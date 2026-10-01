@@ -83,8 +83,27 @@ services:
       timeout: 10s
       retries: 10
 
+  clamav:
+    image: clamav/clamav:1.4
+    container_name: erp-clamav
+    restart: unless-stopped
+    networks: [erp-net]
+    environment:
+      CLAMAV_NO_FRESHCLAMD: "false"
+      CLAMD_STARTUP_TIMEOUT: "1800"
+    ports:
+      - "${CLAMAV_HOST_PORT:-3310}:3310"
+    volumes:
+      - erp_clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 3 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 300s
+
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     container_name: erp-minio
     restart: unless-stopped
     networks: [erp-net]
@@ -104,7 +123,7 @@ services:
       retries: 10
 
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     container_name: erp-minio-init
     networks: [erp-net]
     depends_on:
@@ -133,3 +152,5 @@ volumes:
     name: erp_opensearch_data
   erp_minio_data:
     name: erp_minio_data
+  erp_clamav_data:
+    name: erp_clamav_data

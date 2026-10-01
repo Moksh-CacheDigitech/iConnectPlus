@@ -989,12 +989,20 @@ class CompanyResponse(OrmModel):
 class ContactCreate(BaseModel):
     company_account_id: UUID
     branch_id: UUID
-    first_name: str = Field(min_length=1, max_length=100)
-    last_name: str | None = Field(default=None, max_length=100)
+    first_name: str = Field(
+        min_length=1,
+        max_length=100,
+        pattern=r"^[\w .'\-]{1,100}$",
+    )
+    last_name: str | None = Field(
+        default=None,
+        max_length=100,
+        pattern=r"^[\w .'\-]{0,100}$",
+    )
     email: str | None = Field(default=None, max_length=255)
-    phone: str | None = Field(default=None, max_length=40)
-    mobile: str | None = Field(default=None, max_length=40)
-    title: str | None = Field(default=None, max_length=120)
+    phone: str | None = Field(default=None, max_length=40, pattern=r"^[\d +\-().]{0,40}$")
+    mobile: str | None = Field(default=None, max_length=40, pattern=r"^[\d +\-().]{0,40}$")
+    title: str | None = Field(default=None, max_length=120, pattern=r"^[\w .'\-/&]{0,120}$")
     is_primary: bool = False
     owner_id: UUID | None = None
 

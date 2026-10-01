@@ -99,7 +99,26 @@ class SessionRepository(TenantScopedRepository):
         )
         return self.db.scalar(stmt)
 
+    def get_refresh_token_any(self, token: str) -> SecRefreshToken | None:
+        """Lookup refresh token including revoked rows (reuse detection)."""
+        stmt = select(SecRefreshToken).where(
+            SecRefreshToken.token_hash == hash_token(token),
+        )
+        return self.db.scalar(stmt)
+
     def revoke_refresh_token(self, row: SecRefreshToken, replaced_by: UUID | None = None) -> None:
         row.revoked_at = utcnow()
         row.replaced_by = replaced_by
+        self.db.flush()
+
+    def revoke_all_refresh_for_session(
+        self, session_id: UUID, *, revoked_by: UUID | None = None
+    ) -> None:
+        _ = revoked_by
+        stmt = select(SecRefreshToken).where(
+            SecRefreshToken.session_id == session_id,
+            SecRefreshToken.revoked_at.is_(None),
+        )
+        for row in self.db.scalars(stmt).all():
+            row.revoked_at = utcnow()
         self.db.flush()

@@ -28,8 +28,20 @@ class JWTService:
         tenant_id: UUID,
         user_type: str,
         session_id: UUID,
+        expires_minutes: int | None = None,
     ) -> str:
         now = datetime.now(timezone.utc)
+        ttl = expires_minutes if expires_minutes is not None else self._access_minutes
+        # Privileged roles get a shorter hijack window (VAPT 7.1.6).
+        if expires_minutes is None and user_type in {
+            "super_admin",
+            "platform_admin",
+            "tenant_admin",
+        }:
+            ttl = min(
+                ttl,
+                int(getattr(settings, "jwt_privileged_access_token_expire_minutes", 15) or 15),
+            )
         payload = {
             "sub": str(user_id),
             "tenant_id": str(tenant_id),
@@ -37,7 +49,7 @@ class JWTService:
             "session_id": str(session_id),
             "type": "access",
             "iat": now,
-            "exp": now + timedelta(minutes=self._access_minutes),
+            "exp": now + timedelta(minutes=max(1, ttl)),
         }
         return jwt.encode(payload, self._secret, algorithm=self._algorithm)
 

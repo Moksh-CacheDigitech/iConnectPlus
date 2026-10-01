@@ -79,6 +79,13 @@ class Settings(BaseSettings):
         alias="CRM_UPLOAD_ROOT",
         description="Directory for CRM attachment files; default apps/api/var/crm-attachments",
     )
+    # ClamAV / clamd (VAPT 7.1.25) — scan uploads before persist.
+    clamav_enabled: bool = Field(default=False, alias="CLAMAV_ENABLED")
+    clamav_host: str = Field(default="clamav", alias="CLAMAV_HOST")
+    clamav_port: int = Field(default=3310, alias="CLAMAV_PORT")
+    clamav_timeout_seconds: float = Field(default=30.0, alias="CLAMAV_TIMEOUT_SECONDS")
+    # When true, allow uploads if clamd is unreachable (dev only). Production: false.
+    clamav_fail_open: bool = Field(default=False, alias="CLAMAV_FAIL_OPEN")
     project_tracker_upload_root: str = Field(
         default="",
         alias="PROJECT_TRACKER_UPLOAD_ROOT",
@@ -183,9 +190,20 @@ class Settings(BaseSettings):
     # Stricter limit for mutating methods (POST/PUT/PATCH/DELETE). 0 disables write bucket.
     api_write_rate_limit: int = Field(default=0, alias="API_WRITE_RATE_LIMIT")
     api_write_rate_window_seconds: int = Field(default=60, alias="API_WRITE_RATE_WINDOW_SECONDS")
+    # Access token lifetime for platform/super admins (VAPT session hijack window).
+    jwt_privileged_access_token_expire_minutes: int = Field(
+        default=15, alias="JWT_PRIVILEGED_ACCESS_TOKEN_EXPIRE_MINUTES"
+    )
+    # Bind access tokens to the session's User-Agent / IP on every request.
+    access_bind_user_agent: bool = Field(default=True, alias="ACCESS_BIND_USER_AGENT")
+    access_bind_ip: bool = Field(default=False, alias="ACCESS_BIND_IP")
+    # Refresh-token reuse detection: presenting a revoked refresh kills the session family.
+    refresh_reuse_detection: bool = Field(default=True, alias="REFRESH_REUSE_DETECTION")
     # Reject well-known demo passwords when false. Default true for local DX;
     # production / VAPT hosts must set ALLOW_DEMO_LOGIN=false.
     allow_demo_login: bool = Field(default=True, alias="ALLOW_DEMO_LOGIN")
+    # Interactive OpenAPI /docs — off by default even in development (VAPT).
+    enable_api_docs: bool = Field(default=False, alias="ENABLE_API_DOCS")
     # Bind refresh tokens to User-Agent (and optionally IP) to reduce token replay (VAPT session hijack).
     session_bind_user_agent: bool = Field(default=True, alias="SESSION_BIND_USER_AGENT")
     session_bind_ip: bool = Field(default=False, alias="SESSION_BIND_IP")

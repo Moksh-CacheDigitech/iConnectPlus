@@ -341,6 +341,18 @@ class AuthService:
         payload = self._jwt.decode_token(refresh_token, expected_type="refresh")
         stored = self._sessions.get_refresh_token(refresh_token)
         if stored is None:
+            # Refresh-token reuse: a previously rotated token presented again → kill family.
+            if settings.refresh_reuse_detection:
+                prior = self._sessions.get_refresh_token_any(refresh_token)
+                if prior is not None and prior.revoked_at is not None:
+                    self._sessions.revoke(prior.session_id, revoked_by=UUID(payload["sub"]))
+                    self._sessions.revoke_all_refresh_for_session(prior.session_id)
+                    self._store.delete_session(prior.session_id)
+                    self._audit.log_security_event(
+                        tenant_id=prior.tenant_id,
+                        event_type="auth.refresh_reuse",
+                        user_id=prior.user_id,
+                    )
             raise UnauthorizedException("Refresh token revoked or invalid")
 
         user_id = UUID(payload["sub"])

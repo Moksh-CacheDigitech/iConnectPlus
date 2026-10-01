@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session, load_only
 
-from core.exceptions import ConflictException, NotFoundException
+from core.exceptions import ConflictException, NotFoundException, ValidationException
 from modules.crm.service.ovf_service import resolve_scm_hold_started_at
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.repository.user_repository import UserRepository
@@ -2339,17 +2339,26 @@ class ScmHandoffService:
         remarks: str | None = None,
     ):
         from modules.crm.service.attachment_service import AttachmentService
+        from shared.upload_safety import PO_MAX_ATTACHMENTS
 
         _ = remarks  # reserved for future metadata; CRM attachment model has no remarks column
         order = self._order_service.get_order(ctx, order_id)
         # Preset document slots (Customer PO / Vendor Quote) replace prior file.
-        replace = (category or "other") in {"customer_po", "vendor_quote"}
+        category_key = (category or "other").strip().lower() or "other"
+        replace = category_key in {"customer_po", "vendor_quote"}
+        if not replace:
+            existing = self.list_po_attachments(ctx, order_id)
+            if len(existing) >= PO_MAX_ATTACHMENTS:
+                raise ValidationException(
+                    f"Purchase Order allows at most {PO_MAX_ATTACHMENTS} attachments "
+                    "(Customer PO and Vendor Quote). Replace an existing slot instead of adding more."
+                )
         return AttachmentService(self._db).create(
             ctx,
             entity_type=self.PO_ATTACHMENT_ENTITY,
             entity_id=order_id,
             file_name=file_name,
-            category=category or "other",
+            category=category_key,
             branch_id=branch_id,
             company_id=company_id or order.company_id,
             content_base64=content_base64,
