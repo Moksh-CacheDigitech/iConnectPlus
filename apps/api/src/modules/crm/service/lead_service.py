@@ -95,9 +95,28 @@ class LeadService:
             created_by = self._visibility.current_user_id(ctx)
             if created_by is None:
                 return []
-        return self._repo.list_leads(
+        rows = self._repo.list_leads(
             ctx, cid, company_account_id, created_by=created_by
         )
+        # Convert any open sales leads that already have required BOQ/SOW attached
+        # (covers cases where My Jobs finished before auto-convert was deployed).
+        converted_ids: set[UUID] = set()
+        for lead in rows:
+            if (
+                lead.company_account_id is not None
+                and lead.blueprint_state == "open"
+                and (bool(lead.requires_boq) or bool(lead.requires_sow))
+                and not self._lead_docs_pending(lead)
+            ):
+                try:
+                    self.maybe_auto_convert_after_docs(ctx, lead.id)
+                    converted_ids.add(lead.id)
+                except Exception:
+                    # Leave the lead listed; convert can be retried on blueprint GET.
+                    continue
+        if converted_ids:
+            rows = [lead for lead in rows if lead.id not in converted_ids]
+        return rows
 
     def get(self, ctx: TenantContext, lead_id: UUID) -> CrmLead:
         row = self._repo.get(ctx, lead_id)
@@ -354,12 +373,24 @@ class LeadService:
         self._db.flush()
         return row.id
 
+    def peek_next_dr_number(self, ctx: TenantContext, company_id: UUID | None = None) -> str:
+        cid = self._scope.resolve_company_id(ctx, company_id)
+        return self._numbers.next_deal_reg_number(cid)
+
     def create(self, ctx: TenantContext, *, branch_id: UUID, company_id: UUID | None = None, **fields):
         cid = self._scope.resolve_company_id(ctx, company_id)
         self._scope.validate_branch_access(ctx, branch_id)
         owner_candidate = fields.pop("owner_employee_id", None)
         fields["owner_employee_id"] = self._resolve_owner_employee_id(ctx, owner_candidate)
-        code = self._numbers.generate(CrmEntityType.LEAD, cid, CrmLead, "lead_code")
+        # Sales leads use the DR number as their unique ID from create; other leads keep LEAD-.
+        fields.pop("dr_number", None)
+        fields.pop("new_dr_number", None)
+        is_sales_lead = fields.get("company_account_id") is not None
+        if is_sales_lead:
+            code = self._numbers.next_deal_reg_number(cid)
+            fields["dr_number"] = code
+        else:
+            code = self._numbers.generate(CrmEntityType.LEAD, cid, CrmLead, "lead_code")
         fields.setdefault("document_date", date.today())
         fields.setdefault("status", LeadStatus.NEW.value)
         row = self._repo.create(ctx, company_id=cid, branch_id=branch_id, lead_code=code, **fields)
@@ -404,6 +435,9 @@ class LeadService:
                 fields["owner_employee_id"] = self._resolve_owner_employee_id(ctx, owner_candidate)
             elif owner_candidate != lead.owner_employee_id:
                 raise ForbiddenException("Only CRM admins can change lead owner")
+        # DR number is assigned at create and is the lead's unique ID - do not overwrite.
+        fields.pop("dr_number", None)
+        fields.pop("lead_code", None)
         if self._boq_sow_mandatory(lead):
             # Technical team is always looped in on hardware/services leads.
             fields.pop("requires_boq", None)
@@ -511,7 +545,7 @@ class LeadService:
                 action=action,
                 company_id=lead.company_id,
                 branch_id=lead.branch_id,
-                remarks="Required before converting this lead to an opportunity",
+                remarks="Required — lead converts to an opportunity when documents are attached",
             )
 
         ensure_request(
@@ -534,6 +568,19 @@ class LeadService:
             updated = self._repo.update(ctx, lead_id, locked=pending_docs)
             if updated is not None:
                 lead = updated
+        return lead
+
+    def maybe_auto_convert_after_docs(self, ctx: TenantContext, lead_id: UUID) -> CrmLead:
+        """Convert open sales leads once required BOQ/SOW attachments are present."""
+        lead = self.get(ctx, lead_id)
+        if (
+            lead.company_account_id is not None
+            and lead.blueprint_state == "open"
+            and (bool(lead.requires_boq) or bool(lead.requires_sow))
+            and not self._lead_docs_pending(lead)
+        ):
+            self.convert(ctx, lead_id)
+            return self.get(ctx, lead_id)
         return lead
 
     def apply_attachment_action(
@@ -592,7 +639,12 @@ class LeadService:
 
         if updates:
             self._repo.update(ctx, lead_id, **updates)
-        return self._sync_lead_doc_requests(ctx, lead_id)
+            self._db.flush()
+            self._db.expire_all()
+        self._sync_lead_doc_requests(ctx, lead_id)
+        if action in {"provide_boq_attachment", "provide_sow_attachment"}:
+            return self.maybe_auto_convert_after_docs(ctx, lead_id)
+        return self.get(ctx, lead_id)
 
     def _copy_lead_attachments_to_opportunity(
         self, ctx: TenantContext, lead: CrmLead, opportunity_id: UUID
@@ -625,8 +677,8 @@ class LeadService:
             flags["sow_attached"] = True
             flags["sow_approved"] = True
         if flags:
-            # Same landing state as approve_boq / approve_sow → Deal Registration next.
-            flags["blueprint_state"] = "deal_reg"
+            # DR is assigned on lead create — skip Deal Registration and land on OEM.
+            flags["blueprint_state"] = "oem_pending"
             OpportunityRepository(self._db).update(ctx, opportunity_id, **flags)
 
     def delete(self, ctx: TenantContext, lead_id: UUID) -> None:
@@ -760,13 +812,12 @@ class LeadService:
             purchase_model = (lead.purchase_model or "").strip().lower()
             if purchase_model in {"capex", "opex"}:
                 opp_fields["purchase_model"] = purchase_model
-            # One number from conversion to closure: the DR number is the
-            # opportunity number and the reference quotes, OVF and tracking use.
-            from modules.crm.models import CrmOpportunity
-
-            dr_number = self._numbers.generate(
-                CrmEntityType.DEAL_REG, lead.company_id, CrmOpportunity, "deal_reg_number"
-            )
+            # One number from lead create to closure: reuse the lead's DR as the
+            # opportunity number; quotes / OVF / tracking hang off that same code.
+            dr_number = (lead.dr_number or lead.lead_code or "").strip()
+            if not dr_number.startswith("DR-"):
+                dr_number = self._numbers.next_deal_reg_number(lead.company_id)
+                self._repo.update(ctx, lead_id, dr_number=dr_number)
             opp_fields["opportunity_code"] = dr_number
             opp_fields["deal_reg_number"] = dr_number
             cloud_variant = cloud_variant_from_lead(lead)
@@ -780,6 +831,12 @@ class LeadService:
         opportunity = opp_svc.create(ctx, **opp_fields)
         if lead.company_account_id is not None:
             self._copy_lead_attachments_to_opportunity(ctx, lead, opportunity.id)
+            # Ensure post-doc Transitions are ready (skip Deal Reg when DR already exists).
+            from modules.crm.service.blueprint_service import OpportunityBlueprintService
+
+            opportunity = OpportunityBlueprintService(self._db)._reconcile_post_lead_docs(
+                ctx, opportunity
+            )
         now = datetime.now(timezone.utc)
         if lead.company_account_id is None:
             self._engine.apply_convert(lead)

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Building2, FileInput, FileText, ListOrdered, MapPin, Paperclip, Plus, Scale, Trash2 } from "lucide-react";
+import { ArrowLeft, Building2, FileInput, FileText, ListOrdered, MapPin, Plus, Scale, Trash2 } from "lucide-react";
 
 import { CrmErrorBanner, CrmIconBadge, CrmListPanel, CrmPage, CrmSection } from "@/components/crm/crm-ui";
 import { CrmSessionEmployeeField } from "@/components/crm/sales/crm-session-employee-field";
@@ -44,6 +44,7 @@ import {
   listCrmMemberOptions,
   listQuoteLines,
   peekNextQuoteNumber,
+  quoteLineMarkupPct,
   updateQuote,
   updateQuoteLine,
   type Contact,
@@ -163,7 +164,6 @@ export function QuoteFormPage({
   const [form, setForm] = useState<QuoteDraft>(EMPTY_FORM);
   const [lines, setLines] = useState<LineDraft[]>([]);
   const [initialLineIds, setInitialLineIds] = useState<string[]>([]);
-  const [boqFiles, setBoqFiles] = useState<File[]>([]);
   const [copyAddressAction, setCopyAddressAction] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -241,7 +241,9 @@ export function QuoteFormPage({
               qty: String(line.qty ?? 1),
               unit_cost: String(line.unit_cost ?? 0),
               unit_sell: String(line.unit_cost ?? 0),
-              margin_pct: String(line.margin_pct ?? 0),
+              margin_pct: String(
+                quoteLineMarkupPct(line.unit_cost, line.unit_sell, line.margin_pct),
+              ),
               gst_pct: String(line.gst_pct ?? 0),
               vendorFile: null,
             }))
@@ -569,7 +571,6 @@ export function QuoteFormPage({
       if (!line.unit_sell.trim() || Number(line.unit_sell) <= 0) missing.push(`${rowLabel}: Unit Price`);
       if (!line.margin_pct.trim()) missing.push(`${rowLabel}: Margin %`);
       if (!line.gst_pct.trim()) missing.push(`${rowLabel}: GST %`);
-      if (!line.vendorFile && !line.serverId) missing.push(`${rowLabel}: Vendor Quote Attach`);
     }
     if (missing.length > 0) {
       setMandateMessage(missingRequiredMessage(missing));
@@ -594,14 +595,11 @@ export function QuoteFormPage({
               : addQuoteLine(saved.id, linePayload(line)),
           ),
         );
-        const files = [
-          ...boqFiles.map((file) => ({ file, category: "boq" as const })),
-          ...lines.flatMap((line) =>
-            line.vendorFile
-              ? [{ file: line.vendorFile, category: "vendor_quote" as const }]
-              : [],
-          ),
-        ];
+        const files = lines.flatMap((line) =>
+          line.vendorFile
+            ? [{ file: line.vendorFile, category: "vendor_quote" as const }]
+            : [],
+        );
         await Promise.all(files.map(({ file, category }) => uploadFile(saved.id, file, category)));
         router.push(`/crm/quotes/${saved.id}`);
         return;
@@ -613,14 +611,11 @@ export function QuoteFormPage({
         ...quotePayload(),
       });
       await Promise.all(lines.map((line) => addQuoteLine(created.id, linePayload(line))));
-      const files = [
-        ...boqFiles.map((file) => ({ file, category: "boq" as const })),
-        ...lines.flatMap((line) =>
-          line.vendorFile
-            ? [{ file: line.vendorFile, category: "vendor_quote" as const }]
-            : [],
-        ),
-      ];
+      const files = lines.flatMap((line) =>
+        line.vendorFile
+          ? [{ file: line.vendorFile, category: "vendor_quote" as const }]
+          : [],
+      );
       await Promise.all(files.map(({ file, category }) => uploadFile(created.id, file, category)));
       router.push(`/crm/quotes/${created.id}`);
     } catch (err) {
@@ -738,50 +733,6 @@ export function QuoteFormPage({
               onChange={(e) => setField("terms", e.target.value)}
               className="min-h-[180px]"
             />
-            <p className="text-[11px] text-muted-foreground">
-              Pre-filled with the General Terms &amp; Conditions (price validity, GST extra, lead time,
-              ±2% currency clause). Edit only what differs for this customer.
-            </p>
-          </FinanceField>
-          <FinanceField label="Freight Charges (₹)">
-            <Input type="number" min={0} value={form.freight} onChange={(e) => setField("freight", e.target.value)} />
-          </FinanceField>
-          <FinanceField label="BOQ Attachment (multiple)">
-            <div className="flex min-w-0 flex-col gap-1.5">
-              <div className="flex min-w-0 items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 cursor-pointer"
-                  onClick={() => document.getElementById("quote-boq-file")?.click()}
-                >
-                  <Paperclip className="size-3.5" /> Choose files
-                </Button>
-                <input
-                  id="quote-boq-file"
-                  type="file"
-                  multiple
-                  className="hidden"
-                  tabIndex={-1}
-                  onChange={(e) => setBoqFiles(Array.from(e.target.files ?? []))}
-                />
-                <span className="min-w-0 truncate text-xs text-muted-foreground">
-                  {boqFiles.length === 0
-                    ? "No files selected"
-                    : `${boqFiles.length} file${boqFiles.length === 1 ? "" : "s"} selected`}
-                </span>
-              </div>
-              {boqFiles.length > 0 ? (
-                <ul className="space-y-0.5 text-[11px] text-muted-foreground">
-                  {boqFiles.map((file) => (
-                    <li key={file.name} className="truncate">
-                      {file.name}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
           </FinanceField>
           <FinanceField label="AMC/Warranty">
             <FinanceSelect
@@ -925,7 +876,6 @@ export function QuoteFormPage({
                   "GST %",
                   "Total GST",
                   "Total Amount incl. GST",
-                  "Vendor Quote Attach",
                   "",
                 ].map((label) => (
                   <th key={label || "actions"} className="whitespace-nowrap px-2 py-2">
@@ -1016,36 +966,6 @@ export function QuoteFormPage({
                     <td className="whitespace-nowrap px-2 py-2 font-medium tabular-nums">
                       {formatInrPrecise(rowTotal?.withGst ?? 0)}
                     </td>
-                    <td className="max-w-[11rem] px-2 py-2">
-                      <div className="relative max-w-[11rem]">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="xs"
-                          title={line.vendorFile?.name ?? "Choose file"}
-                          className="h-8 max-w-full cursor-pointer justify-start gap-1 px-2"
-                          onClick={(event) => {
-                            const input = event.currentTarget
-                              .parentElement
-                              ?.querySelector<HTMLInputElement>('input[type="file"]');
-                            input?.click();
-                          }}
-                        >
-                          <Paperclip className="size-3 shrink-0" />
-                          <span className="min-w-0 truncate">
-                            {line.vendorFile?.name ?? "Choose file"}
-                          </span>
-                        </Button>
-                        <input
-                          type="file"
-                          className="hidden"
-                          tabIndex={-1}
-                          onChange={(e) =>
-                            setLine(line.key, "vendorFile", e.target.files?.[0] ?? null)
-                          }
-                        />
-                      </div>
-                    </td>
                     <td className="px-2 py-2">
                       <Button
                         type="button"
@@ -1080,7 +1000,7 @@ export function QuoteFormPage({
             <span className="tabular-nums text-foreground">{formatInrPrecise(totals.grandTotal)}</span>
           </div>
           <div className="flex items-baseline justify-between gap-6 border-t border-border/70 pt-3 font-medium text-foreground">
-            <span className="shrink-0">Grand Total including Freight</span>
+            <span className="shrink-0">Grand Total</span>
             <span className="tabular-nums">{formatInrPrecise(totals.grandWithFreight)}</span>
           </div>
         </div>

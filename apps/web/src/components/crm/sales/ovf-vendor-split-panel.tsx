@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Split, Trash2, TriangleAlert } from "lucide-react";
+import { Split, Trash2, TriangleAlert } from "lucide-react";
 
 import { CrmSection } from "@/components/crm/crm-ui";
 import { FinanceField } from "@/components/finance/journals/finance-form-field";
@@ -9,34 +9,29 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiClientError } from "@/services/api-client";
 import { splitOvfVendorLine, type OvfVendorSplit } from "@/services/crm-deal-controls-service";
-import { addOvfLine, formatInrPrecise, listOvfLines, type Ovf, type OvfLine } from "@/services/sales-crm-service";
+import { formatInrPrecise, listOvfLines, type Ovf, type OvfLine } from "@/services/sales-crm-service";
 
 const SELECT_CLASS =
   "h-9 w-full cursor-pointer rounded-lg border border-input bg-background px-2.5 text-[13px] transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
 
 type SplitDraft = { key: string; distributor_name: string; qty: string; unit_price: string };
 
-function newDraft(price = ""): SplitDraft {
-  return { key: crypto.randomUUID(), distributor_name: "", qty: "", unit_price: price };
-}
-
 type Props = {
   ovf: Ovf;
-  distributorOptions: string[];
+  /** Kept for API compatibility with the detail page; distributors come from Vendor PO rows. */
+  distributorOptions?: string[];
   onChanged: () => void;
 };
 
 /**
- * Break one Customer PO line across several distributors (e.g. 80 + 20), and
- * add supporting items bought outside the main PO (cables, SFPs). Totals and
- * margin recalculate on save.
+ * Break one Customer PO line across distributors already named on Vendor PO Summary.
+ * Qty / unit purchase only — distributor names are not re-entered here.
  */
-export function OvfVendorSplitPanel({ ovf, distributorOptions, onChanged }: Props) {
+export function OvfVendorSplitPanel({ ovf, onChanged }: Props) {
   const editable = ovf.blueprint_state === "draft" && !ovf.locked && !ovf.shared_to_scm && !ovf.deal_won;
   const [lines, setLines] = useState<OvfLine[]>([]);
   const [customerLineId, setCustomerLineId] = useState("");
-  const [drafts, setDrafts] = useState<SplitDraft[]>([newDraft(), newDraft()]);
-  const [extra, setExtra] = useState({ product_name: "", distributor_name: "", qty: "", unit_price: "" });
+  const [drafts, setDrafts] = useState<SplitDraft[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -57,8 +52,9 @@ export function OvfVendorSplitPanel({ ovf, distributorOptions, onChanged }: Prop
 
   const customerLines = useMemo(() => lines.filter((ln) => ln.side === "customer_po"), [lines]);
   const selected = customerLines.find((ln) => ln.id === customerLineId) ?? null;
+  const lineQty = selected ? Math.max(0, Number(selected.qty) || 0) : 0;
   const splitQty = drafts.reduce((sum, d) => sum + (Number(d.qty) || 0), 0);
-  const remaining = selected ? Number(selected.qty) - splitQty : 0;
+  const remaining = lineQty - splitQty;
   const splitTotal = drafts.reduce((sum, d) => sum + (Number(d.qty) || 0) * (Number(d.unit_price) || 0), 0);
 
   if (!editable) return null;
@@ -67,13 +63,60 @@ export function OvfVendorSplitPanel({ ovf, distributorOptions, onChanged }: Prop
     setDrafts((rows) => rows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   }
 
+  function patchDraftQty(key: string, raw: string) {
+    if (raw.trim() === "") {
+      patchDraft(key, { qty: "" });
+      return;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      patchDraft(key, { qty: "0" });
+      return;
+    }
+    const others = drafts
+      .filter((row) => row.key !== key)
+      .reduce((sum, row) => sum + (Number(row.qty) || 0), 0);
+    const maxAllowed = Math.max(0, lineQty - others);
+    const capped = Math.min(parsed, maxAllowed);
+    const next = Number.isInteger(lineQty) ? String(Math.floor(capped)) : String(capped);
+    patchDraft(key, { qty: next });
+  }
+
+  function maxQtyForDraft(key: string): number {
+    const others = drafts
+      .filter((row) => row.key !== key)
+      .reduce((sum, row) => sum + (Number(row.qty) || 0), 0);
+    return Math.max(0, lineQty - others);
+  }
+
+  function vendorRowsForCustomerLine(customer: OvfLine): OvfLine[] {
+    const product = (customer.product_name || "").trim().toLowerCase();
+    return lines.filter((ln) => {
+      if (ln.side !== "vendor") return false;
+      if (ln.source_line_id === customer.id) return true;
+      if (ln.line_no === customer.line_no) return true;
+      return product.length > 0 && (ln.product_name || "").trim().toLowerCase() === product;
+    });
+  }
+
   function onSelectLine(id: string) {
     setCustomerLineId(id);
-    const vendorPrice = lines.find(
-      (ln) => ln.side === "vendor" && ln.line_no === customerLines.find((c) => c.id === id)?.line_no,
-    )?.unit_price;
-    const price = vendorPrice != null ? String(vendorPrice) : "";
-    setDrafts([newDraft(price), newDraft(price)]);
+    const customer = customerLines.find((c) => c.id === id);
+    if (!customer) {
+      setDrafts([]);
+      return;
+    }
+    const vendors = vendorRowsForCustomerLine(customer).filter((ln) =>
+      (ln.distributor_name || "").trim(),
+    );
+    setDrafts(
+      vendors.map((ln) => ({
+        key: ln.id,
+        distributor_name: (ln.distributor_name || "").trim(),
+        qty: String(Number(ln.qty) || ""),
+        unit_price: String(Number(ln.unit_price) || ""),
+      })),
+    );
   }
 
   async function run(work: () => Promise<unknown>, message: string) {
@@ -99,7 +142,7 @@ export function OvfVendorSplitPanel({ ovf, distributorOptions, onChanged }: Prop
     remaining >= -1e-6;
 
   return (
-    <CrmSection title="Vendor PO Summary - Break & Supporting Items" icon={Split}>
+    <CrmSection title="Vendor PO Summary - Break by Distributor" icon={Split}>
       {error ? (
         <p className="mb-3 flex items-center gap-1.5 text-xs font-medium text-red-600" role="alert">
           <TriangleAlert className="size-3.5" /> {error}
@@ -121,7 +164,7 @@ export function OvfVendorSplitPanel({ ovf, distributorOptions, onChanged }: Prop
         {selected ? (
           <p className="self-end text-xs text-muted-foreground">
             {remaining >= 0
-              ? `${remaining} of ${Number(selected.qty)} still to place with a distributor.`
+              ? `${remaining} of ${lineQty} still to place with a distributor.`
               : `Over by ${Math.abs(remaining)} - reduce a split.`}
           </p>
         ) : null}
@@ -129,63 +172,59 @@ export function OvfVendorSplitPanel({ ovf, distributorOptions, onChanged }: Prop
 
       {selected ? (
         <div className="mt-3 space-y-2">
-          {drafts.map((d, idx) => (
-            <div key={d.key} className="grid items-end gap-2 sm:grid-cols-[1fr_120px_160px_auto]">
-              <FinanceField label={`Distributor ${idx + 1}`}>
-                <Input
-                  list="ovf-split-distributors"
-                  value={d.distributor_name}
-                  onChange={(e) => patchDraft(d.key, { distributor_name: e.target.value })}
-                  className="h-9 text-[13px]"
-                />
-              </FinanceField>
-              <FinanceField label="Qty">
-                <Input
-                  type="number"
-                  min={0}
-                  value={d.qty}
-                  onChange={(e) => patchDraft(d.key, { qty: e.target.value })}
-                  className="h-9 text-[13px]"
-                />
-              </FinanceField>
-              <FinanceField label="Unit purchase (₹)">
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={d.unit_price}
-                  onChange={(e) => patchDraft(d.key, { unit_price: e.target.value })}
-                  className="h-9 text-[13px]"
-                />
-              </FinanceField>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                aria-label={`Remove distributor ${idx + 1}`}
-                disabled={drafts.length <= 1}
-                className="size-9 cursor-pointer"
-                onClick={() => setDrafts((rows) => rows.filter((row) => row.key !== d.key))}
-              >
-                <Trash2 className="size-4" />
-              </Button>
-            </div>
-          ))}
-          <datalist id="ovf-split-distributors">
-            {distributorOptions.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
+          {drafts.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-border/80 bg-muted/30 px-3 py-3 text-xs text-muted-foreground">
+              Set <span className="font-medium text-foreground">Distributor Name</span> on the Vendor PO
+              Summary rows for this product first. Those distributors appear here so you only adjust qty and
+              unit purchase.
+            </p>
+          ) : (
+            drafts.map((d) => (
+              <div key={d.key} className="grid items-end gap-2 sm:grid-cols-[1fr_120px_160px_auto]">
+                <FinanceField label="Distributor">
+                  <Input value={d.distributor_name} readOnly className="h-9 cursor-default bg-muted/40 text-[13px]" />
+                </FinanceField>
+                <FinanceField label="Qty">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={maxQtyForDraft(d.key)}
+                    step={Number.isInteger(lineQty) ? 1 : "any"}
+                    value={d.qty}
+                    onChange={(e) => patchDraftQty(d.key, e.target.value)}
+                    className="h-9 text-[13px]"
+                    aria-describedby="ovf-split-qty-hint"
+                  />
+                </FinanceField>
+                <FinanceField label="Unit purchase (₹)">
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={d.unit_price}
+                    onChange={(e) => patchDraft(d.key, { unit_price: e.target.value })}
+                    className="h-9 text-[13px]"
+                  />
+                </FinanceField>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  aria-label={`Remove ${d.distributor_name}`}
+                  disabled={drafts.length <= 1}
+                  className="size-9 cursor-pointer"
+                  onClick={() => setDrafts((rows) => rows.filter((row) => row.key !== d.key))}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            ))
+          )}
+          <p id="ovf-split-qty-hint" className="text-[11px] text-muted-foreground">
+            Split quantities cannot exceed Customer PO Quantity ({lineQty}). Distributor names come from Vendor
+            PO Summary.
+          </p>
           <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="cursor-pointer"
-              onClick={() => setDrafts((rows) => [...rows, newDraft(rows[0]?.unit_price ?? "")])}
-            >
-              <Plus className="size-3.5" /> Add distributor
-            </Button>
             <Button
               type="button"
               size="sm"
@@ -215,68 +254,6 @@ export function OvfVendorSplitPanel({ ovf, distributorOptions, onChanged }: Prop
           </div>
         </div>
       ) : null}
-
-      <h3 className="mt-4 border-t border-border/70 pt-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-        Add Supporting Item (outside the main PO)
-      </h3>
-      <div className="mt-3 grid items-end gap-2 sm:grid-cols-[1fr_1fr_100px_140px_auto]">
-        <FinanceField label="Item">
-          <Input
-            value={extra.product_name}
-            placeholder="HDMI cable, 10G SFP..."
-            onChange={(e) => setExtra((x) => ({ ...x, product_name: e.target.value }))}
-            className="h-9 text-[13px]"
-          />
-        </FinanceField>
-        <FinanceField label="Supplier">
-          <Input
-            list="ovf-split-distributors"
-            value={extra.distributor_name}
-            onChange={(e) => setExtra((x) => ({ ...x, distributor_name: e.target.value }))}
-            className="h-9 text-[13px]"
-          />
-        </FinanceField>
-        <FinanceField label="Qty">
-          <Input
-            type="number"
-            min={0}
-            value={extra.qty}
-            onChange={(e) => setExtra((x) => ({ ...x, qty: e.target.value }))}
-            className="h-9 text-[13px]"
-          />
-        </FinanceField>
-        <FinanceField label="Unit cost (₹)">
-          <Input
-            type="number"
-            min={0}
-            step="0.01"
-            value={extra.unit_price}
-            onChange={(e) => setExtra((x) => ({ ...x, unit_price: e.target.value }))}
-            className="h-9 text-[13px]"
-          />
-        </FinanceField>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={busy || !extra.product_name.trim() || !(Number(extra.qty) > 0)}
-          className="h-9 cursor-pointer"
-          onClick={() =>
-            void run(async () => {
-              await addOvfLine(ovf.id, {
-                side: "vendor",
-                product_name: extra.product_name.trim(),
-                distributor_name: extra.distributor_name.trim() || null,
-                qty: Number(extra.qty),
-                unit_price: Number(extra.unit_price) || 0,
-              });
-              setExtra({ product_name: "", distributor_name: "", qty: "", unit_price: "" });
-            }, "Supporting item added - it reduces the margin.")
-          }
-        >
-          <Plus className="size-3.5" /> Add item
-        </Button>
-      </div>
     </CrmSection>
   );
 }

@@ -26,7 +26,6 @@ import {
 } from "@/components/crm/sales/crm-readonly-field";
 import { ApprovalBanner } from "@/components/crm/sales/approval-banner";
 import { CrmEntityRejectionAlert } from "@/components/crm/sales/crm-approval-inbox-listener";
-import { AttachmentsPanel } from "@/components/crm/sales/attachments-panel";
 import { BlueprintActions } from "@/components/crm/sales/blueprint-actions";
 import { resolveSalesStageLabel } from "@/lib/crm/sales-blueprint-stages";
 import { CrmDetailEditLink } from "@/components/crm/sales/crm-detail-edit-link";
@@ -43,16 +42,15 @@ import {
   applyQuoteAction,
   approveQuoteInternally,
   deleteQuote,
-  formatInr,
   fullName,
   getOpportunity,
   getOpportunityBlueprint,
   getQuote,
   getQuoteBlueprint,
   getQuoteMargin,
-  listAttachments,
   listContacts,
   listQuoteLines,
+  listQuotes,
   listOvfs,
   sendQuoteForApproval,
   type BlueprintActionPayload,
@@ -63,7 +61,6 @@ import {
   type Quote,
   type QuoteLine,
   type QuoteMarginSummary,
-  type Attachment,
 } from "@/services/sales-crm-service";
 
 function formatQuoteStage(stage: string): string {
@@ -81,8 +78,8 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
   const [oppBlueprint, setOppBlueprint] = useState<BlueprintState | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [existingOvf, setExistingOvf] = useState<Ovf | null>(null);
-  const [hasVendorQuote, setHasVendorQuote] = useState(false);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [siblingQuotes, setSiblingQuotes] = useState<Quote[]>([]);
+  const [opportunityOvfs, setOpportunityOvfs] = useState<Ovf[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ text: string; tone: "error" | "success" } | null>(null);
@@ -92,23 +89,21 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
     setLoading(true);
     setError(null);
     try {
-      const [quoteRow, bp, marginRow, lineRows, attachmentRows] = await Promise.all([
+      const [quoteRow, bp, marginRow, lineRows] = await Promise.all([
         getQuote(quoteId),
         getQuoteBlueprint(quoteId),
         getQuoteMargin(quoteId).catch(() => null),
         listQuoteLines(quoteId).catch(() => []),
-        listAttachments("quote", quoteId).catch(() => []),
       ]);
       setQuote(quoteRow);
       setBlueprint(bp);
       setMargin(marginRow);
       setLines(lineRows);
-      setAttachments(attachmentRows);
-      setHasVendorQuote(attachmentRows.some((row) => row.category === "vendor_quote"));
-      const [opp, ovfRows, oppBp] = await Promise.all([
+      const [opp, ovfRows, oppBp, siblingQuotes] = await Promise.all([
         getOpportunity(quoteRow.opportunity_id).catch(() => null),
         listOvfs({ opportunity_id: quoteRow.opportunity_id }).catch(() => []),
         getOpportunityBlueprint(quoteRow.opportunity_id).catch(() => null),
+        listQuotes({ opportunity_id: quoteRow.opportunity_id }).catch(() => []),
       ]);
       setOpportunity(opp);
       setOppBlueprint(oppBp);
@@ -117,11 +112,10 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
           ? await listContacts(opp.company_account_id).catch(() => [] as Contact[])
           : [],
       );
-      // Split quotes each carry their own OVF.
-      setExistingOvf(
-        ovfRows.find((row) => row.quote_id === quoteRow.id) ??
-          (quoteRow.parent_quote_id ? null : ovfRows[0] ?? null),
-      );
+      // One OVF per opportunity (covers all accepted split quotes).
+      setExistingOvf(ovfRows[0] ?? null);
+      setSiblingQuotes(siblingQuotes);
+      setOpportunityOvfs(ovfRows);
     } catch (err) {
       setQuote(null);
       setError(err instanceof ApiClientError ? err.message : "Failed to load quote");
@@ -140,8 +134,24 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
     setError(null);
     setBanner(null);
     try {
-      if (action === "create_ovf") {
-        router.push(`/crm/quotes/${quoteId}/ovf/new`);
+      if (action === "create_ovf" || action.startsWith("create_ovf:")) {
+        const parentsWithChildren = new Set(
+          siblingQuotes.map((q) => q.parent_quote_id).filter((id): id is string => Boolean(id)),
+        );
+        const splitSource = siblingQuotes.find((q) => parentsWithChildren.has(q.id)) ?? null;
+        const childSources = siblingQuotes.filter(
+          (q) => q.quote_stage === "accepted" && !parentsWithChildren.has(q.id),
+        );
+        const anchor = splitSource ?? childSources[0] ?? quote;
+        if (!anchor || opportunityOvfs.length > 0 || childSources.length === 0) {
+          throw new ApiClientError(
+            opportunityOvfs.length > 0
+              ? "An OVF already exists for this opportunity. Open that OVF to continue."
+              : "No accepted quote is available for OVF.",
+            409,
+          );
+        }
+        router.push(`/crm/quotes/${anchor.id}/ovf/new`);
         return;
       }
       const oppActions = new Set([
@@ -183,27 +193,9 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
         await applyQuoteAction(quoteId, action, payload);
       }
 
-      if (action === "send_to_customer" && quote) {
-        const lineRows = lines.length > 0 ? lines : await listQuoteLines(quoteId).catch(() => []);
-        try {
-          await downloadQuoteExport(quote, lineRows);
-        } catch {
-          /* stage update already succeeded — PDF download is best-effort */
-        }
-        const to = (quote.entity_email || "").trim();
-        if (to) {
-          const subject = encodeURIComponent(
-            `Quotation ${quote.quote_no}${quote.subject ? ` — ${quote.subject}` : ""}`,
-          );
-          const body = encodeURIComponent(
-            `Dear Customer,\n\nPlease find attached quotation ${quote.quote_no}.\n\nRegards`,
-          );
-          window.open(`mailto:${to}?subject=${subject}&body=${body}`, "_blank", "noopener,noreferrer");
-        }
+      if (action === "send_to_customer") {
         setBanner({
-          text: to
-            ? "Quote marked as sent. PDF downloaded and email draft opened."
-            : "Quote marked as sent to customer. PDF downloaded — add Entity Email to open a mail draft next time.",
+          text: "Quote marked as sent to customer.",
           tone: "success",
         });
       }
@@ -241,23 +233,36 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
   if (!quote || !blueprint) return null;
 
   const readOnlyLines = quote.locked || ["accepted", "lost", "sent_to_customer", "negotiation", "follow_up"].includes(quote.quote_stage);
-  const nearingSubmit = blueprint.allowed_actions.includes("send_for_approval") && !hasVendorQuote;
   const contact =
     contacts.find((row) => row.id === quote.contact_id) ??
     contacts.find((row) => row.is_primary) ??
     null;
   const contactName = contact ? fullName(contact) : "-";
-  const boqAttachmentLabel =
-    attachments
-      .filter((row) => row.category === "boq")
-      .map((row) => row.file_name)
-      .join(", ") || "-";
 
+  const parentsWithChildren = new Set(
+    siblingQuotes.map((q) => q.parent_quote_id).filter((id): id is string => Boolean(id)),
+  );
+  const quotesForOvf = siblingQuotes.filter(
+    (q) => q.quote_stage === "accepted" && !parentsWithChildren.has(q.id),
+  );
+  const opportunityReadyForOvf =
+    Boolean(oppBlueprint?.allowed_actions.includes("create_ovf")) ||
+    ((oppBlueprint?.state === "ovf_ready" || opportunity?.blueprint_state === "ovf_ready") &&
+      Boolean(opportunity?.customer_po_approved));
   const canCreateOvf =
-    quote.quote_stage === "accepted" &&
-    !existingOvf &&
-    opportunity?.blueprint_state === "ovf_ready" &&
-    Boolean(opportunity.customer_po_approved);
+    opportunityReadyForOvf &&
+    quotesForOvf.length > 0 &&
+    opportunityOvfs.length === 0 &&
+    !blueprint.locked;
+  const createOvfActions = canCreateOvf ? ["create_ovf"] : [];
+  const createOvfLabels: Record<string, string> = canCreateOvf
+    ? {
+      create_ovf:
+        quotesForOvf.length > 1
+          ? `Create OVF · ${quotesForOvf.length} quotes`
+          : "Create OVF",
+    }
+    : {};
 
   const oppTransitionActions =
     quote.quote_stage === "accepted" && oppBlueprint
@@ -266,8 +271,7 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
           action !== "create_quote" &&
           action !== "create_ovf" &&
           action !== "quote_accepted" &&
-          !blueprint.allowed_actions.includes(action) &&
-          !(existingOvf && action === "create_ovf"),
+          !blueprint.allowed_actions.includes(action),
       )
       : [];
 
@@ -275,9 +279,9 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
     new Set([
       ...blueprint.allowed_actions,
       ...oppTransitionActions,
-      ...(canCreateOvf ? ["create_ovf"] : []),
+      ...createOvfActions,
     ]),
-  ).filter((action) => !(action === "create_ovf" && existingOvf));
+  );
 
   async function onPrintPreview() {
     const q = quote;
@@ -358,18 +362,9 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
       ) : null}
       {error ? <CrmErrorBanner>{error}</CrmErrorBanner> : null}
 
-      {nearingSubmit ? (
-        <CrmWarnBanner>
-          <span className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-            No vendor quote attached yet - attach it below before sending this quote for approval.
-          </span>
-        </CrmWarnBanner>
-      ) : null}
-
       <BlueprintActions
         allowedActions={blueprintActions}
-        locked={blueprint.locked && oppTransitionActions.length === 0}
+        locked={blueprint.locked && oppTransitionActions.length === 0 && createOvfActions.length === 0}
         entityType="quote"
         currentStageLabel={resolveSalesStageLabel({
           entityType: "quote",
@@ -378,6 +373,7 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
           quote,
         })}
         excludeActions={["approve_internally"]}
+        actionLabelOverrides={createOvfLabels}
         onAction={onBlueprintAction}
         disabled={busy}
       />
@@ -426,8 +422,6 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
       <CrmSection title="Terms and Conditions" icon={Scale}>
         <div className="grid min-w-0 grid-cols-1 gap-y-3">
           <CrmReadOnlyTextarea label="Terms and Conditions" value={textOrDash(quote.terms)} />
-          <CrmReadOnlyField label="Freight Charges (₹)" value={formatInr(quote.freight)} />
-          <CrmReadOnlyField label="BOQ Attachment (multiple)" value={boqAttachmentLabel} />
           <CrmReadOnlyField
             label="AMC/Warranty"
             value={
@@ -476,17 +470,6 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
       />
 
       <QuoteSplitPanel quote={quote} contacts={contacts} />
-
-      <AttachmentsPanel
-        entityType="quote"
-        entityId={quote.id}
-        branchId={quote.branch_id}
-        companyId={quote.company_id}
-        title="Vendor Quote & Supporting Documents"
-        categories={["vendor_quote", "customer_po", "other"]}
-        readOnly={quote.locked}
-        onChanged={(rows) => setHasVendorQuote(rows.some((r) => r.category === "vendor_quote"))}
-      />
     </CrmPage>
   );
 }

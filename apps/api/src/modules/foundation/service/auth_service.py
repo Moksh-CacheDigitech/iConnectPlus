@@ -46,6 +46,26 @@ class AuthService:
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> dict:
+        # Block well-known demo credentials unless explicitly allowed (VAPT 7.1.1).
+        demo_password = "Secure1!"
+        demo_emails = {
+            "admin@example.com",
+            "tenant.admin@example.com",
+        }
+        allow_demo = settings.allow_demo_login
+        if (
+            not allow_demo
+            and email.strip().lower() in demo_emails
+            and password == demo_password
+        ):
+            self._audit.log_security_event(
+                tenant_id=None,
+                event_type="auth.demo_login_blocked",
+                user_id=None,
+                ip_address=ip_address,
+            )
+            raise InvalidCredentialsException()
+
         user = self._users.get_active_by_email(email)
         if user is None or not PasswordHasher.verify_password(password, user.password_hash):
             if user is not None:
@@ -55,6 +75,13 @@ class AuthService:
                         minutes=settings.account_lockout_minutes
                     )
                     self._users.lock_account(user, locked_until)
+            raise InvalidCredentialsException()
+
+        if (
+            not allow_demo
+            and password == demo_password
+            and user.email.lower() in demo_emails
+        ):
             raise InvalidCredentialsException()
 
         if user.locked_until and user.locked_until > datetime.now(timezone.utc):
@@ -304,7 +331,13 @@ class AuthService:
             raise InvalidCredentialsException("Sign-in code expired or already used")
         return payload
 
-    def refresh(self, refresh_token: str) -> dict:
+    def refresh(
+        self,
+        refresh_token: str,
+        *,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict:
         payload = self._jwt.decode_token(refresh_token, expected_type="refresh")
         stored = self._sessions.get_refresh_token(refresh_token)
         if stored is None:
@@ -315,6 +348,22 @@ class AuthService:
         session = self._sessions.get_active(session_id)
         if session is None:
             raise UnauthorizedException("Session expired or revoked")
+
+        # Session-to-client binding (VAPT 7.1.6) — reject replay from mismatched clients.
+        if settings.session_bind_user_agent:
+            issued_ua = (session.user_agent or "").strip()
+            current_ua = (user_agent or "").strip()
+            if issued_ua and current_ua and issued_ua != current_ua:
+                self._sessions.revoke(session_id, revoked_by=user_id)
+                self._store.delete_session(session_id)
+                raise UnauthorizedException("Session binding mismatch — please sign in again")
+        if settings.session_bind_ip:
+            issued_ip = (session.ip_address or "").strip()
+            current_ip = (ip_address or "").strip()
+            if issued_ip and current_ip and issued_ip != current_ip:
+                self._sessions.revoke(session_id, revoked_by=user_id)
+                self._store.delete_session(session_id)
+                raise UnauthorizedException("Session binding mismatch — please sign in again")
 
         user_model = self._db.get(SecUser, user_id)
         if user_model is None:
@@ -344,6 +393,7 @@ class AuthService:
             "access_token": access,
             "refresh_token": new_refresh,
             "token_type": "bearer",
+            "session_id": str(session_id),
         }
 
     def logout(self, session_id: UUID, user_id: UUID, tenant_id: UUID) -> None:

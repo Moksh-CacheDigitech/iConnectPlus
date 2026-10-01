@@ -1,28 +1,64 @@
-/** Client-side auth token storage for API calls. */
+/** Client-side auth token helpers.
 
+Prefer HttpOnly cookies set by the API (VAPT: tokens must not live in localStorage).
+Bearer tokens in memory remain as a fallback for same-tab API calls and legacy clients.
+*/
 const ACCESS_TOKEN_KEY = "erp_access_token";
 const REFRESH_TOKEN_KEY = "erp_refresh_token";
 
+let memoryAccessToken: string | null = null;
+let memoryRefreshToken: string | null = null;
+
+function purgeLegacyWebStorage(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+    window.sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+    window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+  } catch {
+    // ignore quota / privacy mode
+  }
+}
+
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(ACCESS_TOKEN_KEY);
+  if (memoryAccessToken) return memoryAccessToken;
+  // Migrate once from legacy localStorage, then purge.
+  const legacy = window.localStorage.getItem(ACCESS_TOKEN_KEY);
+  if (legacy) {
+    memoryAccessToken = legacy;
+    purgeLegacyWebStorage();
+    return legacy;
+  }
+  return null;
 }
 
 export function getRefreshToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(REFRESH_TOKEN_KEY);
+  if (memoryRefreshToken) return memoryRefreshToken;
+  const legacy = window.localStorage.getItem(REFRESH_TOKEN_KEY);
+  if (legacy) {
+    memoryRefreshToken = legacy;
+    purgeLegacyWebStorage();
+    return legacy;
+  }
+  // Refresh may exist only as HttpOnly cookie — return null; refresh endpoint reads cookie.
+  return null;
 }
 
 export function setTokens(accessToken: string, refreshToken?: string) {
-  window.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  memoryAccessToken = accessToken;
   if (refreshToken) {
-    window.localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    memoryRefreshToken = refreshToken;
   }
+  purgeLegacyWebStorage();
 }
 
 export function clearTokens() {
-  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
-  window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+  memoryAccessToken = null;
+  memoryRefreshToken = null;
+  purgeLegacyWebStorage();
 }
 
 export function isAuthenticated(): boolean {

@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { assertSafeUploadFile } from "@/lib/safe-attachment";
 import { ApiClientError } from "@/services/api-client";
 import {
   createAttachment,
@@ -133,6 +134,7 @@ export function OpportunityAttachmentsPanel({
     setSaving(true);
     setError(null);
     try {
+      assertSafeUploadFile(file);
       const content_base64 = await fileToBase64(file);
       await createAttachment({
         entity_type: "opportunity",

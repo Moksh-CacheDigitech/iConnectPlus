@@ -1,5 +1,5 @@
 import { clearTokens, getAccessToken, getRefreshToken, setTokens } from "@/lib/auth";
-import { getApiUrl, resolveApiUrl } from "@/utils/env";
+import { env, getApiUrl, resolveApiUrl, setApiUrl } from "@/utils/env";
 import type { ApiResponse, ErrorResponse, TokenData, UserProfile } from "@/types/api";
 
 export class ApiClientError extends Error {
@@ -32,6 +32,8 @@ type RequestOptions = Omit<RequestInit, "body"> & {
   query?: Record<string, string | number | boolean | null | undefined>;
   /** Internal: skip one refresh retry to avoid loops. */
   _retried?: boolean;
+  /** Internal: skip one API-base failover retry. */
+  _apiFailover?: boolean;
 };
 
 function buildUrl(
@@ -60,9 +62,17 @@ function ensureApiBase(): Promise<string> {
   return apiBaseReady;
 }
 
+async function failoverApiBase(): Promise<void> {
+  const before = getApiUrl();
+  const resolved = await resolveApiUrl(true);
+  if (resolved === before && env.apiUrlFallback !== before) {
+    setApiUrl(env.apiUrlFallback);
+  }
+  apiBaseReady = Promise.resolve(getApiUrl());
+}
+
 async function tryRefreshAccessToken(): Promise<boolean> {
   const refreshToken = getRefreshToken();
-  if (!refreshToken) return false;
 
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
@@ -74,7 +84,8 @@ async function tryRefreshAccessToken(): Promise<boolean> {
             "Content-Type": "application/json",
             Accept: "application/json",
           },
-          body: JSON.stringify({ refresh_token: refreshToken }),
+          body: JSON.stringify(refreshToken ? { refresh_token: refreshToken } : {}),
+          credentials: "include",
           cache: "no-store",
         });
         const payload = (await response.json()) as ApiResponse<TokenData> | ErrorResponse;
@@ -102,7 +113,7 @@ export async function apiClient<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<ApiResponse<T>> {
-  const { body, headers, auth = true, query, _retried, ...rest } = options;
+  const { body, headers, auth = true, query, _retried, _apiFailover, ...rest } = options;
   const token = auth ? getAccessToken() : null;
 
   await ensureApiBase();
@@ -118,11 +129,16 @@ export async function apiClient<T>(
         ...headers,
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      credentials: "include",
       cache: "no-store",
     });
   } catch {
+    if (!_apiFailover) {
+      await failoverApiBase();
+      return apiClient<T>(path, { ...options, _apiFailover: true });
+    }
     throw new ApiClientError(
-      "Cannot reach the API. Confirm the backend is running.",
+      "Cannot reach the API. Confirm the backend is running on port 8000.",
       0,
     );
   }
@@ -174,7 +190,7 @@ async function parseErrorMessage(response: Response): Promise<string> {
 export async function apiUpload<T>(
   path: string,
   formData: FormData,
-  options: { _retried?: boolean } = {},
+  options: { _retried?: boolean; _apiFailover?: boolean } = {},
 ): Promise<ApiResponse<T>> {
   const token = getAccessToken();
   await ensureApiBase();
@@ -190,8 +206,12 @@ export async function apiUpload<T>(
       cache: "no-store",
     });
   } catch {
+    if (!options._apiFailover) {
+      await failoverApiBase();
+      return apiUpload<T>(path, formData, { ...options, _apiFailover: true });
+    }
     throw new ApiClientError(
-      "Cannot reach the API. Confirm the backend is running.",
+      "Cannot reach the API. Confirm the backend is running on port 8000.",
       0,
     );
   }
@@ -229,7 +249,7 @@ export type BlobFetchResult =
 export async function apiGetBlob(
   path: string,
   query?: RequestOptions["query"],
-  options: { _retried?: boolean; baseUrl?: string; timeoutMs?: number } = {},
+  options: { _retried?: boolean; _apiFailover?: boolean; baseUrl?: string; timeoutMs?: number } = {},
 ): Promise<BlobFetchResult> {
   const token = getAccessToken();
   await ensureApiBase();
@@ -257,8 +277,12 @@ export async function apiGetBlob(
           0,
         );
       }
+      if (!options._apiFailover) {
+        await failoverApiBase();
+        return apiGetBlob(path, query, { ...options, _apiFailover: true });
+      }
       throw new ApiClientError(
-        "Cannot reach the API. Confirm the backend is running.",
+        "Cannot reach the API. Confirm the backend is running on port 8000.",
         0,
       );
     }
@@ -443,6 +467,7 @@ export async function downloadApiFile(
   query?: Record<string, string | number | boolean | null | undefined>,
   fallbackName = "export.bin",
   _retried = false,
+  _apiFailover = false,
 ): Promise<void> {
   const token = getAccessToken();
   await ensureApiBase();
@@ -457,8 +482,12 @@ export async function downloadApiFile(
       cache: "no-store",
     });
   } catch {
+    if (!_apiFailover) {
+      await failoverApiBase();
+      return downloadApiFile(path, query, fallbackName, _retried, true);
+    }
     throw new ApiClientError(
-      "Cannot reach the API. Confirm the backend is running.",
+      "Cannot reach the API. Confirm the backend is running on port 8000.",
       0,
     );
   }
@@ -466,7 +495,7 @@ export async function downloadApiFile(
   if (response.status === 401 && !_retried) {
     const refreshed = await tryRefreshAccessToken();
     if (refreshed) {
-      return downloadApiFile(path, query, fallbackName, true);
+      return downloadApiFile(path, query, fallbackName, true, _apiFailover);
     }
     clearTokens();
     throw new ApiClientError("Session expired. Please sign in again.", 401);

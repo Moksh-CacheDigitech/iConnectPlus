@@ -52,6 +52,8 @@ _REJECT_DOC_LABEL = {
     "approve_internally": "quote",
     "approve": "OVF",
     "provide_freight": "freight charges",
+    "provide_supporting_items": "supporting items",
+    "provide_service_visits": "service visits",
 }
 
 
@@ -276,6 +278,11 @@ class ApprovalTaskService:
         decision: str,
         remark: str | None = None,
         freight: object | None = None,
+        freight_medium: str | None = None,
+        freight_weight_kg: object | None = None,
+        freight_insurance: bool | None = None,
+        supporting_items: list | None = None,
+        service_plan: object | None = None,
         file_name: str | None = None,
         content_base64: str | None = None,
         content_type: str | None = None,
@@ -290,6 +297,12 @@ class ApprovalTaskService:
         if decision == "approved" and task.action == "provide_freight":
             if freight is None:
                 raise ConflictException("Freight amount is required to complete this task")
+        if decision == "approved" and task.action == "provide_supporting_items":
+            if not supporting_items:
+                raise ConflictException("Add at least one supporting item to complete this task")
+        if decision == "approved" and task.action == "provide_service_visits":
+            if service_plan is None:
+                raise ConflictException("A service plan is required to complete this task")
         if decision == "approved" and task.action in {
             "provide_boq_attachment",
             "provide_sow_attachment",
@@ -321,6 +334,11 @@ class ApprovalTaskService:
             decision,
             remark,
             freight=freight,
+            freight_medium=freight_medium,
+            freight_weight_kg=freight_weight_kg,
+            freight_insurance=freight_insurance,
+            supporting_items=supporting_items,
+            service_plan=service_plan,
             file_name=file_name,
             content_base64=content_base64,
             content_type=content_type,
@@ -366,6 +384,11 @@ class ApprovalTaskService:
         remark: str | None = None,
         *,
         freight: object | None = None,
+        freight_medium: str | None = None,
+        freight_weight_kg: object | None = None,
+        freight_insurance: bool | None = None,
+        supporting_items: list | None = None,
+        service_plan: object | None = None,
         file_name: str | None = None,
         content_base64: str | None = None,
         content_type: str | None = None,
@@ -377,7 +400,14 @@ class ApprovalTaskService:
             from modules.crm.service.ovf_service import OvfService
             from modules.crm.service.crm_notification_service import notify_ovf_freight_provided
 
-            ovf = OvfService(self._db).apply_freight_from_scm(ctx, task.entity_id, freight=freight)
+            ovf = OvfService(self._db).apply_freight_from_scm(
+                ctx,
+                task.entity_id,
+                freight=freight,
+                medium=freight_medium,
+                weight_kg=freight_weight_kg,
+                insurance=freight_insurance,
+            )
             if task.requested_by:
                 amount = float(ovf.freight or 0)
                 freight_txt = f"{amount:,.2f}"
@@ -388,6 +418,73 @@ class ApprovalTaskService:
                     ovf_id=ovf.id,
                     ovf_no=ovf.ovf_no,
                     freight=freight_txt,
+                    created_by=ctx.user_id,
+                )
+            return
+
+        if task.action == "provide_supporting_items":
+            if decision != "approved":
+                return
+            from modules.crm.service.ovf_service import OvfService
+            from modules.crm.service.crm_notification_service import notify_crm_user
+
+            items_payload: list[dict] = []
+            for raw in supporting_items or []:
+                if hasattr(raw, "model_dump"):
+                    items_payload.append(raw.model_dump())
+                elif isinstance(raw, dict):
+                    items_payload.append(raw)
+            ovf = OvfService(self._db).apply_supporting_items_from_ops(
+                ctx, task.entity_id, items_payload
+            )
+            if task.requested_by:
+                notify_crm_user(
+                    self._db,
+                    tenant_id=ctx.tenant_id,
+                    recipient_user_id=task.requested_by,
+                    event_type="crm.ovf.supporting_items_provided",
+                    title=f"Supporting items ready - OVF {ovf.ovf_no}",
+                    body=(
+                        f"Operations submitted {len(items_payload)} supporting item(s) "
+                        f"for OVF {ovf.ovf_no}. Review them on the Create OVF page."
+                    ),
+                    entity_type="ovf",
+                    entity_id=ovf.id,
+                    href=f"/crm/ovf/{ovf.id}/edit",
+                    digest_key=f"ovf:{ovf.id}:supporting_items",
+                    created_by=ctx.user_id,
+                )
+            return
+
+        if task.action == "provide_service_visits":
+            if decision != "approved":
+                return
+            from modules.crm.service.ovf_service import OvfService
+            from modules.crm.service.crm_notification_service import notify_crm_user
+
+            plan_payload: dict = {}
+            if hasattr(service_plan, "model_dump"):
+                plan_payload = service_plan.model_dump()
+            elif isinstance(service_plan, dict):
+                plan_payload = service_plan
+            ovf = OvfService(self._db).apply_service_plan_from_ops(
+                ctx, task.entity_id, plan_payload
+            )
+            if task.requested_by:
+                notify_crm_user(
+                    self._db,
+                    tenant_id=ctx.tenant_id,
+                    recipient_user_id=task.requested_by,
+                    event_type="crm.ovf.service_visits_provided",
+                    title=f"Service visits planned - OVF {ovf.ovf_no}",
+                    body=(
+                        f"Operations set up a service visit plan for OVF {ovf.ovf_no}. "
+                        "Planned cost is included in Additional Charges."
+                    ),
+                    entity_type="ovf",
+                    entity_id=ovf.id,
+                    href=f"/crm/ovf/{ovf.id}",
+                    digest_key=f"ovf:{ovf.id}:service_visits",
                     created_by=ctx.user_id,
                 )
             return

@@ -13,15 +13,33 @@ import { cn } from "@/lib/utils";
 type LeadDistributorMultiSelectProps = {
   value: string[];
   onChange: (value: string[]) => void;
+  /** When set, replaces the built-in preset list (e.g. lead + row options). */
+  options?: readonly string[];
+  disabled?: boolean;
+  /** Denser trigger for table cells. */
+  compact?: boolean;
+  "aria-label"?: string;
 };
 
 type MenuCoords = {
   top: number;
   left: number;
   width: number;
+  maxHeight: number;
 };
 
-export function LeadDistributorMultiSelect({ value, onChange }: LeadDistributorMultiSelectProps) {
+const VIEWPORT_PAD = 8;
+const MENU_GAP = 4;
+const MENU_MAX_HEIGHT = 280;
+
+export function LeadDistributorMultiSelect({
+  value,
+  onChange,
+  options,
+  disabled = false,
+  compact = false,
+  "aria-label": ariaLabel = "Distributor name",
+}: LeadDistributorMultiSelectProps) {
   const triggerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
@@ -35,12 +53,23 @@ export function LeadDistributorMultiSelect({ value, onChange }: LeadDistributorM
 
   const selectedSet = useMemo(() => new Set(value), [value]);
 
+  const baseOptions = useMemo(() => {
+    if (options && options.length > 0) {
+      return Array.from(new Set(options.map((name) => name.trim()).filter(Boolean)));
+    }
+    return [...LEAD_DISTRIBUTOR_OPTIONS];
+  }, [options]);
+
   const allOptions = useMemo(() => {
-    const preset = new Set(LEAD_DISTRIBUTOR_OPTIONS);
-    const extras = customOptions.filter((name) => !preset.has(name));
-    const selectedCustom = value.filter((name) => !preset.has(name) && !extras.includes(name));
-    return [...LEAD_DISTRIBUTOR_OPTIONS, ...extras, ...selectedCustom];
-  }, [customOptions, value]);
+    const preset = new Set(baseOptions.map((name) => name.toLowerCase()));
+    const extras = customOptions.filter((name) => !preset.has(name.toLowerCase()));
+    const selectedCustom = value.filter(
+      (name) =>
+        !preset.has(name.toLowerCase()) &&
+        !extras.some((entry) => entry.toLowerCase() === name.toLowerCase()),
+    );
+    return [...baseOptions, ...extras, ...selectedCustom];
+  }, [baseOptions, customOptions, value]);
 
   const filteredOptions = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -59,18 +88,35 @@ export function LeadDistributorMultiSelect({ value, onChange }: LeadDistributorM
     const el = triggerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    setCoords({
-      top: rect.bottom + 4,
-      left: rect.left,
-      width: rect.width,
-    });
-  }, []);
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const minWidth = compact ? 220 : rect.width;
+    const width = Math.min(Math.max(rect.width, minWidth), vw - VIEWPORT_PAD * 2);
+
+    let left = rect.left;
+    if (left + width > vw - VIEWPORT_PAD) {
+      left = Math.max(VIEWPORT_PAD, vw - VIEWPORT_PAD - width);
+    }
+    if (left < VIEWPORT_PAD) left = VIEWPORT_PAD;
+
+    const spaceBelow = vh - rect.bottom - MENU_GAP - VIEWPORT_PAD;
+    const spaceAbove = rect.top - MENU_GAP - VIEWPORT_PAD;
+    const placeAbove = spaceBelow < 200 && spaceAbove > spaceBelow;
+    const available = Math.max(120, placeAbove ? spaceAbove : spaceBelow);
+    const maxHeight = Math.min(MENU_MAX_HEIGHT, available);
+    const top = placeAbove
+      ? Math.max(VIEWPORT_PAD, rect.top - MENU_GAP - maxHeight)
+      : rect.bottom + MENU_GAP;
+
+    setCoords({ top, left, width, maxHeight });
+  }, [compact]);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
   function openPicker() {
+    if (disabled) return;
     updatePosition();
     setOpen(true);
     setSearch("");
@@ -82,6 +128,7 @@ export function LeadDistributorMultiSelect({ value, onChange }: LeadDistributorM
   }
 
   function toggleOption(option: string) {
+    if (disabled) return;
     if (selectedSet.has(option)) {
       onChange(value.filter((name) => name !== option));
       return;
@@ -90,6 +137,7 @@ export function LeadDistributorMultiSelect({ value, onChange }: LeadDistributorM
   }
 
   function removeOption(option: string) {
+    if (disabled) return;
     onChange(value.filter((name) => name !== option));
   }
 
@@ -116,7 +164,8 @@ export function LeadDistributorMultiSelect({ value, onChange }: LeadDistributorM
     if (!exists) {
       setCustomOptions((rows) => [...rows, name]);
     }
-    const canonical = allOptions.find((option) => option.toLowerCase() === name.toLowerCase()) ?? name;
+    const canonical =
+      allOptions.find((option) => option.toLowerCase() === name.toLowerCase()) ?? name;
     if (!selectedSet.has(canonical)) {
       onChange([...value, canonical]);
     }
@@ -156,14 +205,15 @@ export function LeadDistributorMultiSelect({ value, onChange }: LeadDistributorM
     mounted && open && coords ? (
       <div
         ref={menuRef}
-        className="fixed z-[200] overflow-hidden rounded-lg border border-border bg-popover shadow-md"
+        className="fixed z-[200] flex flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-md"
         style={{
           top: coords.top,
           left: coords.left,
           width: coords.width,
+          maxHeight: coords.maxHeight,
         }}
       >
-        <div className="border-b border-border/80 p-2">
+        <div className="shrink-0 border-b border-border/80 p-2">
           <Input
             value={search}
             placeholder="Search distributor"
@@ -172,7 +222,7 @@ export function LeadDistributorMultiSelect({ value, onChange }: LeadDistributorM
             onMouseDown={(event) => event.stopPropagation()}
           />
         </div>
-        <ul role="listbox" aria-multiselectable="true" className="max-h-56 overflow-y-auto py-1">
+        <ul role="listbox" aria-multiselectable="true" className="min-h-0 flex-1 overflow-y-auto py-1">
           {filteredOptions.length === 0 ? (
             <li className="px-3 py-2 text-xs text-muted-foreground">No matches</li>
           ) : (
@@ -206,7 +256,7 @@ export function LeadDistributorMultiSelect({ value, onChange }: LeadDistributorM
             })
           )}
         </ul>
-        <div className="border-t border-border/80 p-1">
+        <div className="shrink-0 border-t border-border/80 p-1">
           <button
             type="button"
             className="flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-primary transition-colors duration-200 hover:bg-muted/80"
@@ -222,14 +272,25 @@ export function LeadDistributorMultiSelect({ value, onChange }: LeadDistributorM
 
   return (
     <>
-      <div className="space-y-2">
+      <div className={cn("space-y-2", compact && "space-y-1.5")}>
         <div ref={triggerRef} className="relative">
           <button
             type="button"
-            className="flex h-8 w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors hover:bg-muted/20 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            disabled={disabled}
+            aria-label={ariaLabel}
+            className={cn(
+              "flex w-full cursor-pointer items-center justify-between gap-2 border bg-white px-2.5 shadow-none outline-none transition-colors duration-200",
+              "focus-visible:border-sky-400 focus-visible:ring-1 focus-visible:ring-sky-300",
+              compact
+                ? "h-9 rounded-[4px] border-[#cfd7e3] text-[13px]"
+                : "h-8 rounded-lg border-input text-sm hover:bg-muted/20 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+              disabled && "cursor-default bg-[#f8fafc] opacity-70",
+              value.length === 0 && "text-muted-foreground",
+            )}
             aria-haspopup="listbox"
             aria-expanded={open}
             onClick={() => {
+              if (disabled) return;
               if (open) closePicker();
               else openPicker();
             }}
@@ -252,17 +313,19 @@ export function LeadDistributorMultiSelect({ value, onChange }: LeadDistributorM
             {value.map((option) => (
               <span
                 key={option}
-                className="inline-flex items-center gap-1 rounded-md border border-border/80 bg-muted/30 px-2 py-0.5 text-xs text-foreground"
+                className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/80 bg-muted/30 px-2 py-0.5 text-xs text-foreground"
               >
-                {option}
-                <button
-                  type="button"
-                  className="cursor-pointer rounded p-0.5 text-muted-foreground transition-colors duration-150 hover:text-foreground"
-                  aria-label={`Remove ${option}`}
-                  onClick={() => removeOption(option)}
-                >
-                  <X className="size-3" aria-hidden />
-                </button>
+                <span className="min-w-0 truncate">{option}</span>
+                {!disabled ? (
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded p-0.5 text-muted-foreground transition-colors duration-150 hover:text-foreground"
+                    aria-label={`Remove ${option}`}
+                    onClick={() => removeOption(option)}
+                  >
+                    <X className="size-3" aria-hidden />
+                  </button>
+                ) : null}
               </span>
             ))}
           </div>

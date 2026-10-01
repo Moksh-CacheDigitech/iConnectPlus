@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from core.redis import SessionStore
 from database.session import get_db
+from modules.foundation.auth_cookies import clear_auth_cookies, set_auth_cookies
 from modules.foundation.dependencies import get_client_ip, get_current_user, get_tenant_context
 from security.public_routes import optional_authentication
 from modules.foundation.domain.erp_modules import resolve_session_user_type
@@ -35,6 +36,14 @@ from modules.foundation.service.user_service import UserService
 from shared.schemas import APIResponse
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+def _apply_auth_cookies(response: Response, result: dict) -> None:
+    set_auth_cookies(
+        response,
+        access_token=result.get("access_token"),
+        refresh_token=result.get("refresh_token"),
+    )
 
 
 @router.get("/microsoft/config", response_model=APIResponse[MicrosoftLoginConfigResponse])
@@ -119,6 +128,7 @@ def microsoft_callback(
 def microsoft_exchange(
     body: MicrosoftExchangeRequest,
     db: Annotated[Session, Depends(get_db)],
+    response: Response,
 ) -> APIResponse[TokenResponse]:
     service = AuthService(db)
     payload = service.redeem_microsoft_exchange(body.code)
@@ -129,6 +139,7 @@ def microsoft_exchange(
         "session_id": payload.get("session_id"),
         "redirect_to": payload.get("return_to"),
     }
+    _apply_auth_cookies(response, token_payload)
     return APIResponse(
         message="Microsoft sign-in successful",
         data=TokenResponse(**token_payload),
@@ -140,6 +151,7 @@ def login(
     body: LoginRequest,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    response: Response,
 ) -> APIResponse[TokenResponse]:
     service = AuthService(db)
     result = service.login(
@@ -149,6 +161,8 @@ def login(
         user_agent=request.headers.get("User-Agent"),
     )
     db.commit()
+    if result.get("access_token"):
+        _apply_auth_cookies(response, result)
     return APIResponse(message="Login successful", data=TokenResponse(**result))
 
 
@@ -157,6 +171,7 @@ def verify_mfa(
     body: MfaVerifyRequest,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    response: Response,
 ) -> APIResponse[TokenResponse]:
     service = AuthService(db)
     result = service.verify_mfa(
@@ -166,17 +181,32 @@ def verify_mfa(
         user_agent=request.headers.get("User-Agent"),
     )
     db.commit()
+    _apply_auth_cookies(response, result)
     return APIResponse(message="MFA verified", data=TokenResponse(**result))
 
 
 @router.post("/refresh", response_model=APIResponse[TokenResponse])
 def refresh(
     body: RefreshRequest,
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
+    response: Response,
 ) -> APIResponse[TokenResponse]:
+    from modules.foundation.auth_cookies import REFRESH_COOKIE
+
+    refresh_token = body.refresh_token or request.cookies.get(REFRESH_COOKIE)
+    if not refresh_token:
+        from core.exceptions import UnauthorizedException
+
+        raise UnauthorizedException("Missing refresh token")
     service = AuthService(db)
-    result = service.refresh(body.refresh_token)
+    result = service.refresh(
+        refresh_token,
+        ip_address=get_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+    )
     db.commit()
+    _apply_auth_cookies(response, result)
     return APIResponse(message="Token refreshed", data=TokenResponse(**result))
 
 
@@ -184,11 +214,13 @@ def refresh(
 def logout(
     ctx: Annotated[TenantContext, Depends(get_tenant_context)],
     db: Annotated[Session, Depends(get_db)],
+    response: Response,
 ) -> APIResponse[None]:
     service = AuthService(db)
     assert ctx.session_id is not None
     service.logout(ctx.session_id, ctx.user_id, ctx.tenant_id)
     db.commit()
+    clear_auth_cookies(response)
     return APIResponse(message="Logged out", data=None)
 
 

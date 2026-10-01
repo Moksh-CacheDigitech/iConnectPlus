@@ -31,12 +31,17 @@ async def lifespan(application: FastAPI):
 def create_app() -> FastAPI:
     # Never enable Starlette debug error pages in the served app - they leak stack traces
     # (AppScan Integer Overflow / Application Error findings). Use logs instead.
+    # Disable interactive API docs outside development (VAPT: OpenAPI/Swagger exposure).
+    docs_enabled = settings.is_development
     application = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
         description=APP_DESCRIPTION,
         debug=False,
         lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
     )
 
     application.add_middleware(RequestContextMiddleware)

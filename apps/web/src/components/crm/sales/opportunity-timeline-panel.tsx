@@ -85,7 +85,7 @@ const CURRENT_STATE_TITLES = new Set([
   "BOQ/SOW Studied",
   "Deal Registration",
   "Deal Registration Submitted",
-  "OEM Quotation Received",
+  "Vendor Quotation Received",
   "Vendor Quote Attached",
   "Quote Created",
   "Quote Sent for Approval",

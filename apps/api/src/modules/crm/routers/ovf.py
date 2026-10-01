@@ -15,6 +15,8 @@ from modules.crm.schemas import (
     OvfExpenseDecisionRequest,
     OvfExpenseResponse,
     OvfFreightRequest,
+    OvfSupportingItemsRequest,
+    OvfServiceVisitsRequest,
     OvfFullPaymentRequest,
     OvfInvoiceStatusResponse,
     OvfInvoiceSubmissionRequest,
@@ -242,6 +244,34 @@ def request_ovf_freight(
     return APIResponse(
         message="Freight requested from SCM",
         data=OvfService(db).request_freight_from_scm(ctx, ovf_id, **details),
+    )
+
+
+@ovf_router.post("/{ovf_id}/request-supporting-items", response_model=APIResponse[OvfResponse])
+def request_ovf_supporting_items(
+    ovf_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:update"))],
+    db: Annotated[Session, Depends(get_db)],
+    body: OvfSupportingItemsRequest | None = None,
+):
+    remarks = body.remarks if body is not None else None
+    return APIResponse(
+        message="Supporting items requested from Operations",
+        data=OvfService(db).request_supporting_items_from_ops(ctx, ovf_id, remarks=remarks),
+    )
+
+
+@ovf_router.post("/{ovf_id}/request-service-visits", response_model=APIResponse[OvfResponse])
+def request_ovf_service_visits(
+    ovf_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.ovf:update"))],
+    db: Annotated[Session, Depends(get_db)],
+    body: OvfServiceVisitsRequest | None = None,
+):
+    remarks = body.remarks if body is not None else None
+    return APIResponse(
+        message="Service visits requested from Operations",
+        data=OvfService(db).request_service_visits_from_ops(ctx, ovf_id, remarks=remarks),
     )
 
 

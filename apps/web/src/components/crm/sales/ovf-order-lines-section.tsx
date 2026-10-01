@@ -1,14 +1,21 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LeadDistributorMultiSelect } from "@/components/crm/sales/lead-distributor-multi-select";
+import {
+  formatLeadDistributorNames,
+  LEAD_DISTRIBUTOR_OPTIONS,
+  parseLeadDistributorNames,
+} from "@/lib/crm/lead-distributor-options";
 import { cn } from "@/lib/utils";
 import {
   formatInrPrecise,
+  openAttachmentInNewTab,
   type OvfLine,
   type OvfLineFormInput,
   type QuoteLine,
@@ -20,6 +27,10 @@ export type ChargeRowFile = {
   attachmentId?: string;
   fileName: string;
   file: File | null;
+  /** When set, save copies this existing CRM file onto the OVF (no re-upload). */
+  sourceFilePath?: string | null;
+  sourceContentType?: string | null;
+  copyOnSave?: boolean;
 };
 
 export type CustomerChargeRow = {
@@ -41,6 +52,8 @@ export type VendorChargeRow = {
   key: string;
   serverId?: string;
   fromQuote?: boolean;
+  /** Split-quote number when this vendor row came from a child quote. */
+  quote_no: string;
   product_name: string;
   description: string;
   qty: string;
@@ -54,6 +67,60 @@ export type VendorChargeRow = {
   contact_number: string;
   quoteFiles: ChargeRowFile[];
 };
+
+/** Persist split-quote provenance on vendor OVF lines without a schema column. */
+const VENDOR_QUOTE_NO_PREFIX = /^\[quote:([^\]]+)\]\s*/;
+/** Ops-provided supporting items (outside the main PO) — tagged without a schema column. */
+const SUPPORTING_ITEM_PREFIX = /^\[supporting\]\s*/;
+/** Service-visit costs (outside Vendor PO) — tagged without a schema column. */
+const SERVICE_ITEM_PREFIX = /^\[service\]\s*/;
+
+export function isSupportingOvfLine(line: { description?: string | null }): boolean {
+  return SUPPORTING_ITEM_PREFIX.test(line.description ?? "");
+}
+
+export function isServiceOvfLine(line: {
+  description?: string | null;
+  product_name?: string | null;
+}): boolean {
+  if (SERVICE_ITEM_PREFIX.test(line.description ?? "")) return true;
+  const name = (line.product_name ?? "").trim().toLowerCase();
+  if (name.includes(" visits - ")) return true;
+  if (name.startsWith("service consumables")) return true;
+  return false;
+}
+
+export function isAdditionalChargeOvfLine(line: {
+  description?: string | null;
+  product_name?: string | null;
+}): boolean {
+  return isSupportingOvfLine(line) || isServiceOvfLine(line);
+}
+
+export function stripSupportingMarker(description: string | null | undefined): string {
+  return (description ?? "").replace(SUPPORTING_ITEM_PREFIX, "").trim();
+}
+
+export function stripServiceMarker(description: string | null | undefined): string {
+  return (description ?? "").replace(SERVICE_ITEM_PREFIX, "").trim();
+}
+
+export function encodeVendorQuoteNo(quoteNo: string, description: string): string | null {
+  const clean = description.replace(VENDOR_QUOTE_NO_PREFIX, "").trim();
+  const tag = quoteNo.trim();
+  if (!tag) return clean || null;
+  return clean ? `[quote:${tag}] ${clean}` : `[quote:${tag}]`;
+}
+
+export function parseVendorQuoteNo(description: string | null | undefined): {
+  quote_no: string;
+  description: string;
+} {
+  const raw = description ?? "";
+  const match = raw.match(VENDOR_QUOTE_NO_PREFIX);
+  if (!match) return { quote_no: "", description: raw.trim() };
+  return { quote_no: match[1]?.trim() ?? "", description: raw.replace(VENDOR_QUOTE_NO_PREFIX, "").trim() };
+}
 
 /** Sentinel while "Others" is selected but the free-text name is still empty. */
 export const DISTRIBUTOR_OTHERS_PENDING = "__others_pending__";
@@ -76,24 +143,34 @@ export function parseChargeLineFileName(fileName: string): { rowKey: string | nu
   return { rowKey: match[1], displayName: match[2]?.trim() || fileName };
 }
 
-function chargeRowFileFromAttachment(att: { id: string; file_name: string }): ChargeRowFile {
+function chargeRowFileFromAttachment(
+  att: { id: string; file_name: string; file_path?: string | null; content_type?: string | null },
+  options?: { copyOnSave?: boolean },
+): ChargeRowFile {
+  const copyOnSave = Boolean(options?.copyOnSave);
   const parsed = parseChargeLineFileName(att.file_name);
   return {
+    // Keep id so the file can be opened; copyOnSave still clones onto the OVF on save.
     attachmentId: att.id,
     fileName: parsed.displayName,
     file: null,
+    sourceFilePath: att.file_path ?? null,
+    sourceContentType: att.content_type ?? null,
+    copyOnSave,
   };
 }
 
 export function mergeCustomerRowsWithPoAttachments(
   rows: CustomerChargeRow[],
-  attachments: { id: string; file_name: string }[],
+  attachments: { id: string; file_name: string; file_path?: string | null; content_type?: string | null }[],
+  options?: { copyOnSave?: boolean },
 ): CustomerChargeRow[] {
+  const copyOnSave = Boolean(options?.copyOnSave);
   const byKey = new Map<string, ChargeRowFile[]>();
   const legacy: ChargeRowFile[] = [];
 
   for (const att of attachments) {
-    const file = chargeRowFileFromAttachment(att);
+    const file = chargeRowFileFromAttachment(att, { copyOnSave });
     const parsed = parseChargeLineFileName(att.file_name);
     if (parsed.rowKey) {
       const list = byKey.get(parsed.rowKey) ?? [];
@@ -127,13 +204,15 @@ export function mergeCustomerRowsWithPoAttachments(
 
 export function mergeVendorRowsWithQuoteAttachments(
   rows: VendorChargeRow[],
-  attachments: { id: string; file_name: string }[],
+  attachments: { id: string; file_name: string; file_path?: string | null; content_type?: string | null }[],
+  options?: { copyOnSave?: boolean },
 ): VendorChargeRow[] {
+  const copyOnSave = Boolean(options?.copyOnSave);
   const byKey = new Map<string, ChargeRowFile[]>();
   const legacy: ChargeRowFile[] = [];
 
   for (const att of attachments) {
-    const file = chargeRowFileFromAttachment(att);
+    const file = chargeRowFileFromAttachment(att, { copyOnSave });
     const parsed = parseChargeLineFileName(att.file_name);
     if (parsed.rowKey) {
       const list = byKey.get(parsed.rowKey) ?? [];
@@ -196,6 +275,7 @@ export function emptyVendorRow(): VendorChargeRow {
   return {
     key: newKey(),
     fromQuote: false,
+    quote_no: "",
     product_name: "",
     description: "",
     qty: "",
@@ -266,8 +346,11 @@ export function customerRowsFromQuoteLines(quoteLines: QuoteLine[]): CustomerCha
   return quoteLines.map((quoteLine) => customerFromQuote(quoteLine));
 }
 
-export function vendorRowsFromQuoteLines(quoteLines: QuoteLine[]): VendorChargeRow[] {
-  return quoteLines.map((quoteLine) => vendorFromQuote(quoteLine));
+export function vendorRowsFromQuoteLines(
+  quoteLines: QuoteLine[],
+  quoteNo?: string,
+): VendorChargeRow[] {
+  return quoteLines.map((quoteLine) => vendorFromQuote(quoteLine, undefined, quoteNo));
 }
 
 export function customerRowsFromOvfLines(
@@ -319,7 +402,7 @@ export function vendorRowsFromOvfLines(
 ): VendorChargeRow[] {
   const byNo = quoteByLineNo(quoteLines);
   const sorted = [...lines]
-    .filter((line) => line.side === "vendor")
+    .filter((line) => line.side === "vendor" && !isAdditionalChargeOvfLine(line))
     .sort((a, b) => Number(a.line_no) - Number(b.line_no) || a.product_name.localeCompare(b.product_name));
   return sorted.map((line) => {
     const qty = qtyAsInt(line.qty);
@@ -353,12 +436,17 @@ export function vendorRowsFromOvfLines(
       : legacyDistributor
         ? quoteProduct
         : lineProduct || quoteProduct;
+    const parsed = parseVendorQuoteNo(line.description);
+    const quoteDesc = quoteLine?.description
+      ? parseVendorQuoteNo(quoteLine.description).description
+      : "";
     return {
       key: line.id,
       serverId: line.id,
       fromQuote: false,
+      quote_no: parsed.quote_no,
       product_name: productName,
-      description: storedOrQuoteText(line.description, quoteLine?.description),
+      description: storedOrQuoteText(parsed.description, quoteDesc),
       qty,
       unit_price: unitPrice,
       total: money.total,
@@ -371,6 +459,110 @@ export function vendorRowsFromOvfLines(
       quoteFiles: [],
     } satisfies VendorChargeRow;
   });
+}
+
+export type SupportingItemRow = {
+  id: string;
+  product_name: string;
+  description: string;
+  distributor_name: string;
+  qty: string;
+  unit_price: string;
+  total: string;
+};
+
+export function supportingRowsFromOvfLines(lines: OvfLine[]): SupportingItemRow[] {
+  return [...lines]
+    .filter((line) => line.side === "vendor" && isSupportingOvfLine(line))
+    .sort((a, b) => Number(a.line_no) - Number(b.line_no) || a.product_name.localeCompare(b.product_name))
+    .map((line) => {
+      const qty = qtyAsInt(line.qty);
+      const unitPrice = moneyAsFixed(line.unit_price ?? 0);
+      const storedTotal = moneyAsFixed(line.line_total);
+      const total =
+        storedTotal !== ""
+          ? storedTotal
+          : moneyAsFixed((Number(qty) || 0) * (Number(unitPrice) || 0));
+      return {
+        id: line.id,
+        product_name: (line.product_name ?? "").trim(),
+        description: stripSupportingMarker(line.description),
+        distributor_name: (line.distributor_name ?? "").trim(),
+        qty,
+        unit_price: unitPrice,
+        total,
+      };
+    });
+}
+
+export type ServiceChargeRow = {
+  id: string;
+  product_name: string;
+  description: string;
+  distributor_name: string;
+  qty: string;
+  unit_price: string;
+  total: string;
+};
+
+export function serviceRowsFromOvfLines(lines: OvfLine[]): ServiceChargeRow[] {
+  return [...lines]
+    .filter((line) => line.side === "vendor" && isServiceOvfLine(line))
+    .sort((a, b) => Number(a.line_no) - Number(b.line_no) || a.product_name.localeCompare(b.product_name))
+    .map((line) => {
+      const qty = qtyAsInt(line.qty);
+      const unitPrice = moneyAsFixed(line.unit_price ?? 0);
+      const storedTotal = moneyAsFixed(line.line_total);
+      const total =
+        storedTotal !== ""
+          ? storedTotal
+          : moneyAsFixed((Number(qty) || 0) * (Number(unitPrice) || 0));
+      return {
+        id: line.id,
+        product_name: (line.product_name ?? "").trim(),
+        description: stripServiceMarker(line.description),
+        distributor_name: (line.distributor_name ?? "").trim(),
+        qty,
+        unit_price: unitPrice,
+        total,
+      };
+    });
+}
+
+export type AdditionalChargeVertical = {
+  key: string;
+  label: string;
+  amount: number;
+};
+
+/** One row per additional-charge vertical for the PO summaries area. */
+export function buildAdditionalChargeVerticals(input: {
+  supportingTotal: number;
+  serviceVisitsTotal: number;
+  /** Stored OVF additional_charges; used only when no vertical lines exist. */
+  recordedAdditional?: number | null;
+}): AdditionalChargeVertical[] {
+  const supporting = Number(input.supportingTotal) || 0;
+  const service = Number(input.serviceVisitsTotal) || 0;
+  const recorded = Number(input.recordedAdditional) || 0;
+  const rows: AdditionalChargeVertical[] = [];
+  if (supporting > 0) {
+    rows.push({ key: "supporting", label: "Supporting items", amount: supporting });
+  }
+  if (service > 0) {
+    rows.push({ key: "service_visits", label: "Service visits", amount: service });
+  }
+  const verticalSum = supporting + service;
+  if (verticalSum <= 0 && recorded > 0) {
+    rows.push({ key: "other", label: "Other additional charges", amount: recorded });
+  } else if (recorded > verticalSum + 0.0001) {
+    rows.push({
+      key: "other",
+      label: "Other additional charges",
+      amount: recorded - verticalSum,
+    });
+  }
+  return rows;
 }
 
 export function customerFromQuote(quoteLine: QuoteLine, ovfLine?: OvfLine): CustomerChargeRow {
@@ -394,17 +586,24 @@ export function customerFromQuote(quoteLine: QuoteLine, ovfLine?: OvfLine): Cust
   };
 }
 
-export function vendorFromQuote(quoteLine: QuoteLine, ovfLine?: OvfLine): VendorChargeRow {
+export function vendorFromQuote(
+  quoteLine: QuoteLine,
+  ovfLine?: OvfLine,
+  quoteNo?: string,
+): VendorChargeRow {
   const qty = qtyAsInt(ovfLine?.qty ?? quoteLine.qty);
   const unitPrice = moneyAsFixed(ovfLine?.unit_price ?? quoteLine.unit_cost ?? 0);
   const gstPct = String(quoteLine.gst_pct || GST_PCT);
   const money = moneyFromQtyPrice(qty, unitPrice, gstPct);
+  const parsedStored = parseVendorQuoteNo(ovfLine?.description);
+  const parsedQuote = parseVendorQuoteNo(quoteLine.description);
   return {
     key: ovfLine?.id ?? `quote-vendor-${quoteLine.id}`,
     serverId: ovfLine?.id,
     fromQuote: true,
+    quote_no: (quoteNo ?? parsedStored.quote_no).trim(),
     product_name: storedOrQuoteText(ovfLine?.product_name, quoteLine.product_name),
-    description: storedOrQuoteText(ovfLine?.description, quoteLine.description),
+    description: storedOrQuoteText(parsedStored.description, parsedQuote.description),
     qty,
     unit_price: unitPrice,
     total: money.total,
@@ -442,7 +641,7 @@ function vendorLinePayload(row: VendorChargeRow): OvfLineFormInput {
   const distributor = normalizeDistributorName(row.vendor_name);
   return {
     product_name: row.product_name.trim() || distributor,
-    description: row.description.trim() || null,
+    description: encodeVendorQuoteNo(row.quote_no, row.description),
     distributor_name: distributor || null,
     contact_person: row.contact_person.trim() || null,
     contact_number: row.contact_number.trim() || null,
@@ -503,32 +702,12 @@ export function computeOvfMargins(input: {
   };
 }
 
-function chargeRowHasFile(files: ChargeRowFile[] | undefined): boolean {
-  return (files ?? []).some((file) => file.fileName.trim() || file.file);
-}
-
-function chargeTableHasFile<T extends { poFiles?: ChargeRowFile[]; quoteFiles?: ChargeRowFile[] }>(
-  rows: T[],
-  field: "poFiles" | "quoteFiles",
-): boolean {
-  return rows.some((row) => chargeRowHasFile(row[field]));
-}
-
 export function validateChargeAttachments(
-  customerRows: CustomerChargeRow[],
+  _customerRows: CustomerChargeRow[],
   vendorRows: VendorChargeRow[],
 ): string | null {
-  const hasCustomerProductRows = customerRows.some((row) => row.product_name.trim());
-  if (hasCustomerProductRows && !chargeTableHasFile(customerRows, "poFiles")) {
-    return "Add PO * is required for the Customer PO Summary (upload at least one file on any product row).";
-  }
-
-  const hasVendorProductRows = vendorRows.some(
-    (row) => row.product_name.trim() || normalizeDistributorName(row.vendor_name) || row.vendor_name.trim() === DISTRIBUTOR_OTHERS_PENDING,
-  );
-  if (hasVendorProductRows && !chargeTableHasFile(vendorRows, "quoteFiles")) {
-    return "Add Quote * is required for the Vendor PO Summary (upload at least one file on any product row).";
-  }
+  // Customer PO / vendor quote files are carried from the opportunity / quote
+  // (view-only on the OVF form).
 
   for (const row of vendorRows) {
     const hasContent =
@@ -541,6 +720,14 @@ export function validateChargeAttachments(
   }
 
   return null;
+}
+
+function fieldWidthCh(value: string, type?: string): number {
+  const raw = value.trim().length;
+  if (type === "number") {
+    return Math.min(Math.max(raw + 2, 5), 16);
+  }
+  return Math.min(Math.max(raw + 2, 6), 42);
 }
 
 function ChargesField({
@@ -558,6 +745,7 @@ function ChargesField({
   className?: string;
   onChange?: (value: string) => void;
 }) {
+  const widthCh = fieldWidthCh(value || placeholder || "", type);
   return (
     <Input
       type={type}
@@ -566,8 +754,9 @@ function ChargesField({
       placeholder={placeholder}
       value={value}
       onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+      style={{ width: `${widthCh}ch` }}
       className={cn(
-        "h-9 w-full min-w-0 rounded-[4px] border-[#cfd7e3] bg-white px-2.5 text-[13px] shadow-none transition-colors duration-200",
+        "h-9 max-w-[28rem] min-w-0 rounded-[4px] border-[#cfd7e3] bg-white px-2.5 text-[13px] shadow-none transition-[width,colors] duration-200",
         "focus-visible:border-sky-400 focus-visible:ring-1 focus-visible:ring-sky-300",
         "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
         readOnly && "cursor-default bg-[#f8fafc] text-foreground",
@@ -613,11 +802,14 @@ function ChargesTableShell({
 }
 
 function thClass(extra = "") {
-  return cn("whitespace-nowrap px-2 py-2.5 text-left text-[12px] font-medium text-[#475569]", extra);
+  return cn(
+    "whitespace-nowrap px-2 py-2.5 text-left text-[12px] font-medium text-[#475569]",
+    extra,
+  );
 }
 
-function tdClass() {
-  return "px-2 py-2 align-middle";
+function tdClass(extra = "") {
+  return cn("w-auto whitespace-nowrap px-2 py-2 align-middle", extra);
 }
 
 function ChargesMultiFileUpload({
@@ -625,25 +817,30 @@ function ChargesMultiFileUpload({
   required,
   disabled,
   addLabel,
+  allowUpload = true,
   onFilesChange,
 }: {
   files: ChargeRowFile[];
   required?: boolean;
   disabled?: boolean;
   addLabel: string;
+  /** When false, only list existing files (no Choose files / remove). */
+  allowUpload?: boolean;
   onFilesChange?: (files: ChargeRowFile[]) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [openingKey, setOpeningKey] = useState<string | null>(null);
   const hasFiles = files.some((file) => file.fileName.trim());
-  const missing = !disabled && required && !hasFiles;
+  const canUpload = allowUpload && !disabled && Boolean(onFilesChange);
+  const missing = canUpload && required && !hasFiles;
 
   function removeAt(index: number) {
-    if (disabled || !onFilesChange) return;
+    if (!canUpload || !onFilesChange) return;
     onFilesChange(files.filter((_, fileIndex) => fileIndex !== index));
   }
 
   function addSelectedFiles(selected: FileList | null) {
-    if (disabled || !onFilesChange || !selected?.length) return;
+    if (!canUpload || !onFilesChange || !selected?.length) return;
     const next = [
       ...files,
       ...Array.from(selected).map((file) => ({ fileName: file.name, file })),
@@ -651,33 +848,75 @@ function ChargesMultiFileUpload({
     onFilesChange(next);
   }
 
-  if (disabled && !hasFiles) {
+  async function openFile(item: ChargeRowFile, index: number) {
+    const key = `${item.attachmentId ?? item.fileName}-${index}`;
+    setOpeningKey(key);
+    try {
+      if (item.attachmentId) {
+        await openAttachmentInNewTab(item.attachmentId);
+        return;
+      }
+      const remote = (item.sourceFilePath ?? "").trim();
+      if (/^https?:\/\//i.test(remote)) {
+        window.open(remote, "_blank", "noopener,noreferrer");
+        return;
+      }
+      if (item.file) {
+        const url = URL.createObjectURL(item.file);
+        window.open(url, "_blank", "noopener,noreferrer");
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }
+    } catch {
+      window.alert(`Could not open ${item.fileName || "file"}.`);
+    } finally {
+      setOpeningKey(null);
+    }
+  }
+
+  if (!hasFiles && !canUpload) {
     return <span className="text-[12px] text-muted-foreground">-</span>;
   }
 
   return (
-    <div className="min-w-[160px] space-y-1">
-      {files.map((item, index) => (
-        <div key={`${item.attachmentId ?? item.fileName}-${index}`} className="flex items-center gap-1">
-          <span
-            className="min-w-0 flex-1 truncate text-[12px] text-foreground"
-            title={item.fileName}
-          >
-            {item.fileName}
-          </span>
-          {!disabled && onFilesChange ? (
-            <button
-              type="button"
-              aria-label={`Remove ${item.fileName}`}
-              onClick={() => removeAt(index)}
-              className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-300"
-            >
-              <X className="size-3.5" />
-            </button>
-          ) : null}
-        </div>
-      ))}
-      {!disabled && onFilesChange ? (
+    <div className={cn("space-y-1", canUpload && "min-w-[140px]")}>
+      {files.map((item, index) => {
+        const key = `${item.attachmentId ?? item.fileName}-${index}`;
+        const openable = Boolean(
+          item.attachmentId ||
+          item.file ||
+          /^https?:\/\//i.test((item.sourceFilePath ?? "").trim()),
+        );
+        return (
+          <div key={key} className="flex items-center gap-1">
+            {openable ? (
+              <button
+                type="button"
+                title={`Open ${item.fileName}`}
+                disabled={openingKey === key}
+                onClick={() => void openFile(item, index)}
+                className="max-w-[20rem] cursor-pointer truncate text-left text-[12px] font-medium text-sky-700 underline-offset-2 transition-colors duration-200 hover:text-sky-900 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-300 disabled:cursor-wait disabled:opacity-70 dark:text-sky-300 dark:hover:text-sky-200"
+              >
+                {item.fileName}
+              </button>
+            ) : (
+              <span className="max-w-[20rem] truncate text-[12px] text-foreground" title={item.fileName}>
+                {item.fileName}
+              </span>
+            )}
+            {canUpload ? (
+              <button
+                type="button"
+                aria-label={`Remove ${item.fileName}`}
+                onClick={() => removeAt(index)}
+                className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-300"
+              >
+                <X className="size-3.5" />
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
+      {canUpload ? (
         <>
           <button
             type="button"
@@ -714,6 +953,13 @@ type OvfOrderLinesSectionProps = {
   onVendorRowsChange?: (rows: VendorChargeRow[]) => void;
   /** Distributor names selected on the lead - options for Distributor Name. */
   vendorNameOptions?: readonly string[];
+  /** Ops-provided supporting items (outside the main PO) — shown after Vendor PO. */
+  supportingRows?: SupportingItemRow[];
+  supportingDescription?: string;
+  /** Header action for the supporting-items block (e.g. Ask Operations). */
+  supportingHeaderRight?: ReactNode;
+  /** Additional charge verticals (supporting, service visits, other). */
+  additionalChargeRows?: AdditionalChargeVertical[];
   /** Fully lock the section (detail view / while saving). */
   disabled?: boolean;
   /**
@@ -729,6 +975,10 @@ export function OvfOrderLinesSection({
   onCustomerRowsChange,
   onVendorRowsChange,
   vendorNameOptions = [],
+  supportingRows,
+  supportingDescription,
+  supportingHeaderRight,
+  additionalChargeRows,
   disabled = false,
   readOnlyLines = false,
 }: OvfOrderLinesSectionProps) {
@@ -737,51 +987,17 @@ export function OvfOrderLinesSection({
   const distributorLocked = disabled || !onVendorRowsChange;
   const totalSaleValue = sumLineTotals(customerRows);
   const totalPurchaseValue = sumLineTotals(vendorRows);
-  const DISTRIBUTOR_OTHERS = "__others__";
   const vendorOptions = Array.from(
     new Set(
       [
+        ...LEAD_DISTRIBUTOR_OPTIONS,
         ...vendorNameOptions.map((name) => name.trim()).filter(Boolean),
-        ...vendorRows
-          .map((row) => normalizeDistributorName(row.vendor_name))
-          .filter(
-            (name) =>
-              name &&
-              !vendorNameOptions.some((opt) => opt.trim().toLowerCase() === name.toLowerCase()),
-          ),
-      ].filter(Boolean),
+        ...vendorRows.flatMap((row) => parseLeadDistributorNames(row.vendor_name)),
+      ]
+        .map((name) => name.trim())
+        .filter((name) => name && name.toLowerCase() !== "others"),
     ),
-  ).filter((name) => name.toLowerCase() !== "others");
-
-  function selectedDistributor(value: string): string {
-    const trimmed = value.trim();
-    if (!trimmed) return "";
-    if (trimmed === DISTRIBUTOR_OTHERS_PENDING) return DISTRIBUTOR_OTHERS;
-    const match = vendorOptions.find((name) => name.toLowerCase() === trimmed.toLowerCase());
-    if (match) return match;
-    // Custom / free-text distributor → show Others + text box
-    return DISTRIBUTOR_OTHERS;
-  }
-
-  function isOthersDistributor(value: string): boolean {
-    return selectedDistributor(value) === DISTRIBUTOR_OTHERS;
-  }
-
-  function othersDistributorText(value: string): string {
-    return normalizeDistributorName(value);
-  }
-
-  const hasCustomerProductRows = customerRows.some((row) => row.product_name.trim());
-  const hasVendorProductRows = vendorRows.some(
-    (row) =>
-      row.product_name.trim() ||
-      normalizeDistributorName(row.vendor_name) ||
-      row.vendor_name.trim() === DISTRIBUTOR_OTHERS_PENDING,
   );
-  const customerPoTableMissing =
-    !disabled && hasCustomerProductRows && !chargeTableHasFile(customerRows, "poFiles");
-  const vendorQuoteTableMissing =
-    !disabled && hasVendorProductRows && !chargeTableHasFile(vendorRows, "quoteFiles");
 
   function updateCustomerRow(key: string, patch: Partial<CustomerChargeRow>, recalc = false) {
     if (!onCustomerRowsChange || disabled) return;
@@ -861,20 +1077,18 @@ export function OvfOrderLinesSection({
             ) : null
           }
         >
-          <table className="w-full min-w-[1240px] border-collapse text-left">
+          <table className="w-max max-w-none border-collapse text-left">
             <thead>
               <tr className="bg-[#eef2f6]">
-                <th className={thClass("min-w-[160px]")}>Product Name</th>
-                <th className={thClass("min-w-[200px]")}>Description</th>
-                <th className={thClass("min-w-[88px]")}>Quantity</th>
-                <th className={thClass("min-w-[130px]")}>Unit Product Amt (₹)</th>
-                <th className={thClass("min-w-[110px]")}>Total.</th>
-                <th className={thClass("min-w-[90px]")}>GST ({GST_PCT}%)</th>
-                <th className={thClass("min-w-[120px]")}>Total GST ({GST_PCT}%)</th>
-                <th className={thClass("min-w-[150px]")}>Total Amount with GST</th>
-                <th className={thClass("min-w-[180px]")}>
-                  Add PO <span className="text-destructive">*</span>
-                </th>
+                <th className={thClass()}>Product Name</th>
+                <th className={thClass()}>Description</th>
+                <th className={thClass()}>Quantity</th>
+                <th className={thClass()}>Unit Product Amt (₹)</th>
+                <th className={thClass()}>Total.</th>
+                <th className={thClass()}>GST ({GST_PCT}%)</th>
+                <th className={thClass()}>Total GST ({GST_PCT}%)</th>
+                <th className={thClass()}>Total Amount with GST</th>
+                <th className={thClass()}>PO file</th>
                 {!linesLocked ? <th className={thClass("w-10")} aria-label="Remove row" /> : null}
               </tr>
             </thead>
@@ -961,14 +1175,9 @@ export function OvfOrderLinesSection({
                     <td className={tdClass()}>
                       <ChargesMultiFileUpload
                         files={row.poFiles}
-                        required={customerPoTableMissing && !chargeRowHasFile(row.poFiles)}
                         disabled={disabled}
+                        allowUpload={false}
                         addLabel="Choose files"
-                        onFilesChange={
-                          disabled || !onCustomerRowsChange
-                            ? undefined
-                            : (poFiles) => updateCustomerRow(row.key, { poFiles })
-                        }
                       />
                     </td>
                     {!linesLocked ? (
@@ -1010,31 +1219,30 @@ export function OvfOrderLinesSection({
             ) : null
           }
         >
-          <table className="w-full min-w-[1500px] border-collapse text-left">
+          <table className="w-max max-w-none border-collapse text-left">
             <thead>
               <tr className="bg-[#eef2f6]">
-                <th className={thClass("min-w-[160px]")}>Product Name</th>
-                <th className={thClass("min-w-[200px]")}>Description</th>
-                <th className={thClass("min-w-[88px]")}>Quantity.</th>
-                <th className={thClass("min-w-[130px]")}>Unit Purchase (₹)</th>
-                <th className={thClass("min-w-[110px]")}>Total</th>
-                <th className={thClass("min-w-[90px]")}>GST ({GST_PCT}%)</th>
-                <th className={thClass("min-w-[140px]")}>Total Amount in GST</th>
-                <th className={thClass("min-w-[150px]")}>Total Amount with GST</th>
-                <th className={thClass("min-w-[140px]")}>
+                <th className={thClass()}>Quote No</th>
+                <th className={thClass()}>Product Name</th>
+                <th className={thClass()}>Description</th>
+                <th className={thClass()}>Quantity.</th>
+                <th className={thClass()}>Unit Purchase (₹)</th>
+                <th className={thClass()}>Total</th>
+                <th className={thClass()}>GST ({GST_PCT}%)</th>
+                <th className={thClass()}>Total Amount in GST</th>
+                <th className={thClass()}>Total Amount with GST</th>
+                <th className={thClass()}>
                   Distributor Name <span className="text-destructive">*</span>
                 </th>
-                <th className={thClass("min-w-[130px]")}>Contact Person</th>
-                <th className={thClass("min-w-[130px]")}>Contact Number.</th>
-                <th className={thClass("min-w-[180px]")}>
-                  Add Quote <span className="text-destructive">*</span>
-                </th>
+                <th className={thClass()}>Contact Person</th>
+                <th className={thClass()}>Contact Number.</th>
+                <th className={thClass()}>Quote file</th>
               </tr>
             </thead>
             <tbody>
               {vendorRows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-3 py-6 text-center text-[12px] text-muted-foreground">
+                  <td colSpan={13} className="px-3 py-6 text-center text-[12px] text-muted-foreground">
                     {linesLocked
                       ? "No vendor charge rows."
                       : "No vendor charge rows. Click + Add row to create one."}
@@ -1043,6 +1251,13 @@ export function OvfOrderLinesSection({
               ) : (
                 vendorRows.map((row) => (
                   <tr key={row.key} className="border-t border-[#e8edf3]">
+                    <td className={tdClass()}>
+                      <ChargesField
+                        readOnly
+                        value={row.quote_no}
+                        aria-label="Quote number"
+                      />
+                    </td>
                     <td className={tdClass()}>
                       <ChargesField
                         readOnly={linesLocked}
@@ -1112,51 +1327,21 @@ export function OvfOrderLinesSection({
                       />
                     </td>
                     <td className={tdClass()}>
-                      <div className="flex min-w-[140px] flex-col gap-1.5">
-                        <select
+                      <div className="w-auto min-w-[10rem]">
+                        <LeadDistributorMultiSelect
+                          compact
                           disabled={distributorLocked}
-                          value={selectedDistributor(row.vendor_name)}
-                          onChange={(e) => {
-                            const next = e.target.value;
-                            if (next === DISTRIBUTOR_OTHERS) {
-                              const keep = isOthersDistributor(row.vendor_name)
-                                ? othersDistributorText(row.vendor_name)
-                                : "";
-                              updateVendorRow(row.key, {
-                                vendor_name: keep.trim() ? keep : DISTRIBUTOR_OTHERS_PENDING,
-                              });
-                              return;
-                            }
-                            updateVendorRow(row.key, { vendor_name: next });
-                          }}
-                          className={cn(
-                            "flex h-9 w-full cursor-pointer rounded-[4px] border border-[#cfd7e3] bg-white px-2.5 text-[13px] shadow-none outline-none transition-colors duration-200",
-                            "focus-visible:border-sky-400 focus-visible:ring-1 focus-visible:ring-sky-300",
-                            distributorLocked && "cursor-default bg-[#f8fafc] opacity-70",
-                            !selectedDistributor(row.vendor_name) && "text-muted-foreground",
-                          )}
+                          options={vendorOptions}
                           aria-label="Distributor name"
-                        >
-                          <option value="">Select distributor…</option>
-                          {vendorOptions.map((name) => (
-                            <option key={name} value={name}>
-                              {name}
-                            </option>
-                          ))}
-                          <option value={DISTRIBUTOR_OTHERS}>Others</option>
-                        </select>
-                        {isOthersDistributor(row.vendor_name) ? (
-                          <ChargesField
-                            readOnly={distributorLocked}
-                            value={othersDistributorText(row.vendor_name)}
-                            placeholder="Enter distributor name"
-                            onChange={(v) =>
-                              updateVendorRow(row.key, {
-                                vendor_name: v.trim() ? v : DISTRIBUTOR_OTHERS_PENDING,
-                              })
-                            }
-                          />
-                        ) : null}
+                          value={parseLeadDistributorNames(
+                            row.vendor_name === DISTRIBUTOR_OTHERS_PENDING ? "" : row.vendor_name,
+                          )}
+                          onChange={(names) =>
+                            updateVendorRow(row.key, {
+                              vendor_name: formatLeadDistributorNames(names),
+                            })
+                          }
+                        />
                       </div>
                     </td>
                     <td className={tdClass()}>
@@ -1176,14 +1361,9 @@ export function OvfOrderLinesSection({
                     <td className={tdClass()}>
                       <ChargesMultiFileUpload
                         files={row.quoteFiles}
-                        required={vendorQuoteTableMissing && !chargeRowHasFile(row.quoteFiles)}
                         disabled={disabled}
+                        allowUpload={false}
                         addLabel="Choose files"
-                        onFilesChange={
-                          disabled || !onVendorRowsChange
-                            ? undefined
-                            : (quoteFiles) => updateVendorRow(row.key, { quoteFiles })
-                        }
                       />
                     </td>
                   </tr>
@@ -1192,6 +1372,97 @@ export function OvfOrderLinesSection({
             </tbody>
           </table>
         </ChargesTableShell>
+
+        {supportingRows !== undefined ? (
+          <ChargesTableShell
+            title="Supporting items (outside the main PO)"
+            headerRight={supportingHeaderRight}
+            totalLabel="Supporting items total"
+            totalValue={formatInrPrecise(sumLineTotals(supportingRows))}
+          >
+            <table className="w-full min-w-[560px] border-collapse text-left">
+              <thead>
+                <tr className="bg-[#eef2f6]">
+                  <th className={thClass("w-[34%]")}>Item</th>
+                  <th className={thClass("w-[24%]")}>Distributor</th>
+                  <th className={thClass("w-[10%]")}>Qty</th>
+                  <th className={thClass("w-[16%] text-right")}>Unit purchase (₹)</th>
+                  <th className={thClass("w-[16%] text-right")}>Total (₹)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {supportingRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-6 text-center text-[13px] text-muted-foreground">
+                      No supporting items yet.
+                    </td>
+                  </tr>
+                ) : (
+                  supportingRows.map((row) => (
+                    <tr key={row.id} className="border-t border-[#e2e8f0]">
+                      <td className={tdClass()}>{row.product_name || "—"}</td>
+                      <td className={tdClass()}>{row.distributor_name || "—"}</td>
+                      <td className={tdClass("tabular-nums")}>{row.qty || "—"}</td>
+                      <td className={tdClass("text-right tabular-nums")}>
+                        {formatInrPrecise(Number(row.unit_price) || 0)}
+                      </td>
+                      <td className={tdClass("text-right tabular-nums")}>
+                        {formatInrPrecise(Number(row.total) || 0)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+            {supportingDescription?.trim() ? (
+              <div className="border-t border-[#e2e8f0] px-3 py-3">
+                <p className="mb-1 text-[11px] font-medium tracking-wide text-[#475569] uppercase">
+                  Description
+                </p>
+                <p className="whitespace-pre-wrap text-[13px] text-foreground">
+                  {supportingDescription.trim()}
+                </p>
+              </div>
+            ) : null}
+          </ChargesTableShell>
+        ) : null}
+
+        {additionalChargeRows !== undefined ? (
+          <ChargesTableShell
+            title="Additional Charges"
+            totalLabel="Additional charges total"
+            totalValue={formatInrPrecise(
+              additionalChargeRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0),
+            )}
+          >
+            <table className="w-full min-w-[420px] border-collapse text-left">
+              <thead>
+                <tr className="bg-[#eef2f6]">
+                  <th className={thClass("w-[70%]")}>Charge vertical</th>
+                  <th className={thClass("w-[30%] text-right")}>Amount (₹)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {additionalChargeRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={2} className="px-3 py-6 text-center text-[13px] text-muted-foreground">
+                      No additional charges yet.
+                    </td>
+                  </tr>
+                ) : (
+                  additionalChargeRows.map((row) => (
+                    <tr key={row.key} className="border-t border-[#e2e8f0]">
+                      <td className={tdClass()}>{row.label}</td>
+                      <td className={tdClass("text-right tabular-nums")}>
+                        {formatInrPrecise(row.amount)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </ChargesTableShell>
+        ) : null}
       </div>
     </section>
   );
@@ -1207,6 +1478,8 @@ type AttachmentUploadDeps = {
     category?: string;
     content_base64?: string | null;
     content_type?: string | null;
+    file_path?: string | null;
+    source?: "upload" | "link" | "google_drive" | "onedrive" | "dropbox" | "box";
   }) => Promise<unknown>;
   fileToBase64: (file: File) => Promise<string>;
 };
@@ -1222,17 +1495,32 @@ async function uploadChargeRowFiles(
 ) {
   if (!files?.length) return;
   for (const item of files) {
-    if (!item.file) continue;
-    await deps.createAttachment({
-      entity_type: "ovf",
-      entity_id: ovfId,
-      branch_id: branchId,
-      company_id: companyId,
-      file_name: encodeChargeLineFileName(lineKey, item.file.name),
-      category,
-      content_base64: await deps.fileToBase64(item.file),
-      content_type: item.file.type || "application/octet-stream",
-    });
+    if (item.file) {
+      await deps.createAttachment({
+        entity_type: "ovf",
+        entity_id: ovfId,
+        branch_id: branchId,
+        company_id: companyId,
+        file_name: encodeChargeLineFileName(lineKey, item.file.name),
+        category,
+        content_base64: await deps.fileToBase64(item.file),
+        content_type: item.file.type || "application/octet-stream",
+      });
+      continue;
+    }
+    if (item.copyOnSave && item.sourceFilePath) {
+      await deps.createAttachment({
+        entity_type: "ovf",
+        entity_id: ovfId,
+        branch_id: branchId,
+        company_id: companyId,
+        file_name: encodeChargeLineFileName(lineKey, item.fileName),
+        category,
+        file_path: item.sourceFilePath,
+        content_type: item.sourceContentType ?? "application/octet-stream",
+        source: "upload",
+      });
+    }
   }
 }
 
@@ -1255,7 +1543,7 @@ export async function persistOvfOrderLinesAfterCreate(
     .filter((line) => line.side === "customer_po")
     .sort((a, b) => Number(a.line_no) - Number(b.line_no));
   const vendorPool = existing
-    .filter((line) => line.side === "vendor")
+    .filter((line) => line.side === "vendor" && !isAdditionalChargeOvfLine(line))
     .sort((a, b) => Number(a.line_no) - Number(b.line_no));
 
   for (const row of customerRows) {
@@ -1289,7 +1577,7 @@ export async function persistOvfOrderLinesAfterCreate(
     .filter((line) => line.side === "customer_po")
     .sort((a, b) => Number(a.line_no) - Number(b.line_no));
   let vendorLinePool = savedLines
-    .filter((line) => line.side === "vendor")
+    .filter((line) => line.side === "vendor" && !isAdditionalChargeOvfLine(line))
     .sort((a, b) => Number(a.line_no) - Number(b.line_no));
 
   for (const row of customerRows) {

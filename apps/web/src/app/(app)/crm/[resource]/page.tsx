@@ -15,6 +15,7 @@ import { ProductsListPage } from "@/components/crm/sales/products-list-page";
 import { QuoteListPage } from "@/components/crm/sales/quote-list-page";
 import { ReportsListPage } from "@/components/crm/sales/reports-list-page";
 import { SalesPerformancePage } from "@/components/crm/sales/sales-performance-page";
+import { InventoryAgingPage } from "@/components/procurement/inventory-aging-page";
 import { ResourceListView } from "@/components/module/resource-list-view";
 import { getModule, getResource } from "@/config/modules";
 
@@ -46,6 +47,9 @@ export default async function CrmResourcePage({ params }: PageProps) {
       return <OvfListPage />;
     case "sales-performance":
       return <SalesPerformancePage />;
+    case "inventory-aging":
+    case "stock-aging":
+      return <InventoryAgingPage />;
     case "contacts":
       return <ContactsListPage />;
     case "products":

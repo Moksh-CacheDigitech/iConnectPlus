@@ -65,6 +65,8 @@ function formatLeadStatus(lead: SalesLead): string {
 type Props = {
   lead: SalesLead;
   company?: Company | null;
+  /** Head-office GSTIN from company GST registrations. */
+  companyGstin?: string | null;
   employees?: Option[];
   leadSources?: Option[];
   marketingEvents?: Option[];
@@ -77,6 +79,7 @@ type Props = {
 export function LeadDetailsCard({
   lead,
   company,
+  companyGstin,
   employees = [],
   leadSources = [],
   marketingEvents = [],
@@ -108,11 +111,9 @@ export function LeadDetailsCard({
     <div className="space-y-5">
       <CrmSection title={title} icon={UserPlus}>
         <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
+          <LeadReadOnlyField label="DR Number" value={textOrDash(lead.dr_number || lead.lead_code)} />
           <LeadReadOnlyField label="Company" value={companyName} />
-          <LeadReadOnlyField
-            label="Project Title *"
-            value={textOrDash(lead.project_title)}
-          />
+          <LeadReadOnlyField label="Project Title *" value={textOrDash(lead.project_title)} />
 
           {mergeFullName ? (
             <LeadReadOnlyField
@@ -169,12 +170,15 @@ export function LeadDetailsCard({
               lead.engagement_score != null ? `${lead.engagement_score}%` : textOrDash(lead.engagement_score)
             }
           />
-          <LeadReadOnlyField label="DR Number" value={textOrDash(lead.dr_number)} />
 
           {showHardwareSourcing ? (
             <LeadReadOnlyField
               label="Hardware Sourcing Channel *"
-              value={textOrDash(sourcingChannels.hardware)}
+              value={
+                sourcingChannels.hardware && sourcingChannels.hardware.length > 0
+                  ? sourcingChannels.hardware.join(", ")
+                  : "-"
+              }
             />
           ) : null}
           {showServiceSourcing ? (
@@ -219,6 +223,7 @@ export function LeadDetailsCard({
           <LeadReadOnlyField label="State" value={textOrDash(lead.state)} />
           <LeadReadOnlyField label="Zip Code" value={textOrDash(lead.zip)} />
           <LeadReadOnlyField label="Country" value={textOrDash(lead.country)} />
+          <LeadReadOnlyField label="GST Number" value={textOrDash(companyGstin)} />
         </div>
       </CrmSection>
 

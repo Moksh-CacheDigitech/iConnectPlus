@@ -543,7 +543,16 @@ class FollowupCreate(BaseModel):
     opportunity_id: UUID | None = None
     company_account_id: UUID | None = None
     customer_name: str | None = None
-    notes: str | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("customer_name", "notes", "followup_type")
+    @classmethod
+    def reject_followup_markup(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from shared.text_safety import assert_safe_plain_text
+
+        return assert_safe_plain_text(value, field="value")
 
 
 class FollowupResponse(OrmModel):
@@ -980,26 +989,44 @@ class CompanyResponse(OrmModel):
 class ContactCreate(BaseModel):
     company_account_id: UUID
     branch_id: UUID
-    first_name: str
-    last_name: str | None = None
-    email: str | None = None
-    phone: str | None = None
-    mobile: str | None = None
-    title: str | None = None
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
+    email: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=40)
+    mobile: str | None = Field(default=None, max_length=40)
+    title: str | None = Field(default=None, max_length=120)
     is_primary: bool = False
     owner_id: UUID | None = None
 
+    @field_validator("first_name", "last_name", "email", "phone", "mobile", "title")
+    @classmethod
+    def reject_contact_markup(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from shared.text_safety import assert_safe_plain_text
+
+        return assert_safe_plain_text(value, field="value")
+
 
 class ContactUpdate(BaseModel):
-    first_name: str | None = None
-    last_name: str | None = None
-    email: str | None = None
-    phone: str | None = None
-    mobile: str | None = None
-    title: str | None = None
+    first_name: str | None = Field(default=None, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
+    email: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=40)
+    mobile: str | None = Field(default=None, max_length=40)
+    title: str | None = Field(default=None, max_length=120)
     is_primary: bool | None = None
     status: str | None = None
     version: int | None = None
+
+    @field_validator("first_name", "last_name", "email", "phone", "mobile", "title", "status")
+    @classmethod
+    def reject_contact_markup(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from shared.text_safety import assert_safe_plain_text
+
+        return assert_safe_plain_text(value, field="value")
 
 
 class ContactResponse(OrmModel):
@@ -1622,6 +1649,31 @@ class OvfFreightRequest(BaseModel):
     remarks: str | None = None
 
 
+class OvfSupportingItemInput(BaseModel):
+    product_name: str = Field(min_length=1, max_length=255)
+    qty: Decimal = Field(gt=0)
+    unit_price: Decimal = Field(ge=0)
+    distributor_name: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+
+
+class OvfSupportingItemsRequest(BaseModel):
+    remarks: str | None = None
+
+
+class OvfServicePlanInput(BaseModel):
+    """My Jobs payload: create a per-visit service plan for an OVF."""
+
+    rate_contract_id: UUID
+    projected_visits: int = Field(gt=0)
+    consumables_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    description: str | None = None
+
+
+class OvfServiceVisitsRequest(BaseModel):
+    remarks: str | None = None
+
+
 class OvfDeliveryDatesUpdate(BaseModel):
     expected_delivery_date: date | None = None
     actual_delivery_date: date | None = None
@@ -1739,7 +1791,7 @@ class SalesPerformanceRow(BaseModel):
 
 
 class CompanyGstCreate(BaseModel):
-    gstin: str = Field(min_length=15, max_length=20)
+    gstin: str = Field(min_length=15, max_length=15, pattern=r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$")
     location_label: str | None = Field(default=None, max_length=255)
     billing_address: str | None = None
     shipping_address: str | None = None
@@ -2042,6 +2094,11 @@ class ApprovalTaskDecisionRequest(BaseModel):
     decision: str = Field(pattern="^(approved|rejected)$")
     remark: str | None = None
     freight: Decimal | None = None
+    freight_medium: str | None = None
+    freight_weight_kg: Decimal | None = None
+    freight_insurance: bool | None = None
+    supporting_items: list[OvfSupportingItemInput] | None = None
+    service_plan: OvfServicePlanInput | None = None
     file_name: str | None = None
     content_base64: str | None = None
     content_type: str | None = None

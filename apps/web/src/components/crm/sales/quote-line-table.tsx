@@ -12,6 +12,7 @@ import {
   addQuoteLine,
   deleteQuoteLine,
   formatInrPrecise,
+  quoteLineMarkupPct,
   updateQuoteLine,
   type QuoteLine,
 } from "@/services/sales-crm-service";
@@ -125,6 +126,7 @@ export function QuoteLineTable({
 
   function startEdit(line: QuoteLine) {
     setEditingId(line.id);
+    const markup = quoteLineMarkupPct(line.unit_cost, line.unit_sell, line.margin_pct);
     setEditDraft({
       product_name: line.product_name,
       hsn_sac: line.hsn_sac ?? "",
@@ -132,7 +134,7 @@ export function QuoteLineTable({
       qty: String(Math.round(Number(line.qty))),
       unit_cost: String(line.unit_cost),
       unit_sell: String(line.unit_cost),
-      margin_pct: String(line.margin_pct),
+      margin_pct: String(markup),
       gst_pct: String(line.gst_pct),
     });
   }
@@ -317,7 +319,9 @@ export function QuoteLineTable({
                     <td className="px-3 py-2 capitalize text-muted-foreground">{line.line_type}</td>
                     <td className="px-3 py-2">{line.qty}</td>
                     <td className="px-3 py-2">{formatInrPrecise(line.unit_cost)}</td>
-                    <td className="px-3 py-2">{line.margin_pct}%</td>
+                    <td className="px-3 py-2">
+                      {quoteLineMarkupPct(line.unit_cost, line.unit_sell, line.margin_pct)}%
+                    </td>
                     <td className="px-3 py-2">{line.gst_pct}%</td>
                     <td className="px-3 py-2 font-medium">{formatInrPrecise(line.line_total)}</td>
                     {!readOnly ? (

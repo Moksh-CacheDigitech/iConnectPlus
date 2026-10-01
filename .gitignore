@@ -15,6 +15,7 @@ apps/api/var/project-trackers/*
 apps/api/var/marketing-deliverables/*
 !apps/api/var/marketing-deliverables/.gitkeep
 apps/api/var/*.jsonl
+var/vm-sync/
 
 # Python
 __pycache__/

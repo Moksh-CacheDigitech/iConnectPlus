@@ -53,16 +53,21 @@ class QuoteMarginResult:
 
 
 def compute_line_margin(qty: Decimal, unit_cost: Decimal, unit_sell: Decimal) -> LineMargin:
+    """Margin % is markup on cost: (sell - cost) / cost × 100.
+
+    Matches the quote UI where Unit Price is cost and Margin % marks that
+    cost up to the customer sell price (cost × (1 + margin%/100)).
+    """
     qty = Decimal(str(qty))
     unit_cost = Decimal(str(unit_cost))
     unit_sell = Decimal(str(unit_sell))
     line_total = (qty * unit_sell).quantize(Decimal("0.0001"))
     total_cost = (qty * unit_cost).quantize(Decimal("0.0001"))
     margin_amount = (line_total - total_cost).quantize(Decimal("0.0001"))
-    if unit_sell == 0:
+    if total_cost == 0:
         margin_pct = Decimal("0")
     else:
-        margin_pct = (margin_amount / line_total * Decimal("100")).quantize(Decimal("0.001"))
+        margin_pct = (margin_amount / total_cost * Decimal("100")).quantize(Decimal("0.001"))
     return LineMargin(margin_pct=margin_pct, margin_amount=margin_amount, line_total=line_total)
 
 

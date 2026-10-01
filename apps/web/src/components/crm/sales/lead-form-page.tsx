@@ -58,6 +58,7 @@ import {
 import { useAuthUser } from "@/hooks/use-auth-user";
 import { ApiClientError, authService } from "@/services/api-client";
 import type { UserProfile } from "@/types/api";
+import { listCompanyGst } from "@/services/crm-deal-controls-service";
 import {
   createLeadFromCompany,
   getCompany,
@@ -68,6 +69,7 @@ import {
   listCrmMemberOptions,
   listSellingEntities,
   markLeadLost,
+  peekNextLeadDrNumber,
   updateSalesLead,
   type BlueprintState,
   type Company,
@@ -76,6 +78,7 @@ import {
   type SalesLead,
   type SellingEntity,
 } from "@/services/sales-crm-service";
+import { formatCrmCode } from "@/lib/crm/format-crm-code";
 
 const SALUTATIONS = ["Mr.", "Ms.", "Mrs.", "Dr."] as const;
 const ENGAGEMENT_SCORES = [25, 50, 75, 100] as const;
@@ -164,6 +167,7 @@ export function LeadFormPage({
   const isAdmin = isCrmModuleAdmin(adminModuleKeys, user?.userType);
   const isEdit = Boolean(leadId);
   const [company, setCompany] = useState<Company | null>(null);
+  const [companyGstin, setCompanyGstin] = useState("");
   const [existingLead, setExistingLead] = useState<SalesLead | null>(null);
   const [leadSources, setLeadSources] = useState<Option[]>([]);
   const [marketingEvents, setMarketingEvents] = useState<Option[]>([]);
@@ -179,6 +183,7 @@ export function LeadFormPage({
   const [entityPick, setEntityPick] = useState("");
   const [blueprint, setBlueprint] = useState<BlueprintState | null>(null);
   const [crmMembers, setCrmMembers] = useState<Option[]>([]);
+  const [nextDrNumber, setNextDrNumber] = useState("");
 
   const selectedOemNames = parseLeadOemNames(form.oem_name);
   const selectedDistributorNames = parseLeadDistributorNames(form.distributor_name);
@@ -189,8 +194,9 @@ export function LeadFormPage({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [companyRow, sources, events, meResponse, entities, leadRow, memberOptions] = await Promise.all([
+      const [companyRow, gstRows, sources, events, meResponse, entities, leadRow, memberOptions] = await Promise.all([
         getCompany(companyAccountId),
+        listCompanyGst(companyAccountId).catch(() => []),
         listLeadSourceOptions().catch(() => []),
         listMarketingEventOptions().catch(() => [] as Option[]),
         authService.me().catch(() => null),
@@ -200,12 +206,22 @@ export function LeadFormPage({
       ]);
       setCrmMembers(memberOptions);
       if (leadId) {
+        // May auto-convert when BOQ/SOW are done — then open opportunity Transitions.
         const bp = await getLeadBlueprint(leadId).catch(() => null);
+        const refreshedLead = await getSalesLead(leadId).catch(() => leadRow);
+        if (
+          refreshedLead?.converted_opportunity_id &&
+          (refreshedLead.blueprint_state === "converted" || bp?.state === "converted")
+        ) {
+          router.replace(`/crm/opportunities/${refreshedLead.converted_opportunity_id}`);
+          return;
+        }
         setBlueprint(bp);
+        setExistingLead(refreshedLead);
       } else {
         setBlueprint(null);
+        setExistingLead(leadRow);
       }
-      setExistingLead(leadRow);
       if (leadRow?.blueprint_state === "lost") {
         setError("Lost leads cannot be edited.");
       }
@@ -230,6 +246,9 @@ export function LeadFormPage({
               member.email?.trim().toLowerCase() === meUser?.email?.trim().toLowerCase(),
           )?.id ?? "";
       setCompany(companyRow);
+      setCompanyGstin(
+        (gstRows.find((row) => row.is_head_office) ?? gstRows[0])?.gstin?.trim() ?? "",
+      );
       setLeadSources(sortLeadSourcesByCompanyOrder(sources));
       setMarketingEvents(events);
       setEntityCatalog(entities);
@@ -330,12 +349,18 @@ export function LeadFormPage({
           notes: "",
         };
       });
+      if (leadRow) {
+        setNextDrNumber("");
+      } else {
+        const preview = await peekNextLeadDrNumber(companyRow.company_id).catch(() => "");
+        setNextDrNumber(preview);
+      }
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Failed to load company");
     } finally {
       setLoading(false);
     }
-  }, [companyAccountId, leadId]);
+  }, [companyAccountId, leadId, router]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -375,19 +400,33 @@ export function LeadFormPage({
   const showServiceSourcing = leadNeedsServiceSourcing(selectedProductTypes);
   const sourcingChannels = parseLeadSourcingChannels(form.deal_type);
 
-  function setSourcingChannel(kind: "hardware" | "service", value: string) {
+  function setSourcingChannel(kind: "hardware" | "service", value: string | string[]) {
     setForm((f) => {
       const types = parseLeadProductTypes(f.product_type);
       const next = { ...parseLeadSourcingChannels(f.deal_type) };
       if (kind === "hardware") {
-        if (value) next.hardware = value;
+        const selected = Array.isArray(value)
+          ? value
+          : value
+            ? [value]
+            : [];
+        if (selected.length > 0) next.hardware = selected;
         else delete next.hardware;
       } else {
-        if (value) next.service = value;
+        const text = Array.isArray(value) ? value[0] ?? "" : value;
+        if (text) next.service = text;
         else delete next.service;
       }
       return { ...f, deal_type: formatLeadSourcingChannels(next, types) };
     });
+  }
+
+  function toggleHardwareSourcingChannel(channel: string) {
+    const current = sourcingChannels.hardware ?? [];
+    const next = current.includes(channel)
+      ? current.filter((item) => item !== channel)
+      : [...current, channel];
+    setSourcingChannel("hardware", next);
   }
 
   function onOemNamesChange(names: string[]) {
@@ -466,7 +505,7 @@ export function LeadFormPage({
     }
     if (!form.requirement_type) missing.push("Requirement Type");
     if (!form.purchase_model) missing.push("Purchase Model");
-    if (showHardwareSourcing && !sourcingChannels.hardware?.trim()) {
+    if (showHardwareSourcing && !(sourcingChannels.hardware && sourcingChannels.hardware.length > 0)) {
       missing.push("Hardware Sourcing Channel");
     }
     if (showServiceSourcing && !sourcingChannels.service?.trim()) {
@@ -489,7 +528,7 @@ export function LeadFormPage({
     setSaving(true);
     setError(null);
     try {
-      const { owner_employee_id: _owner, ...leadBody } = form;
+      const { owner_employee_id: _owner, dr_number: _dr, new_dr_number: _newDr, ...leadBody } = form;
       const payload = {
         ...leadBody,
         assign_to_id: null,
@@ -586,10 +625,22 @@ export function LeadFormPage({
 
       <CrmSection title="Lead Information" icon={UserPlus}>
         <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
+          <FinanceField label="DR Number">
+            <Input
+              value={
+                isEdit
+                  ? formatCrmCode(existingLead?.dr_number || existingLead?.lead_code || form.dr_number)
+                  : formatCrmCode(nextDrNumber) || "Assigning…"
+              }
+              disabled
+              aria-readonly="true"
+              className="font-mono text-sm"
+            />
+          </FinanceField>
           <FinanceField label="Company">
             <Input value={company?.customer_name ?? ""} disabled aria-readonly="true" />
           </FinanceField>
-          <FinanceField label="Project Title *">
+          <FinanceField label="Project Title *" className="md:col-span-2">
             <Input value={form.project_title ?? ""} onChange={(e) => set("project_title", e.target.value)} />
           </FinanceField>
 
@@ -768,23 +819,31 @@ export function LeadFormPage({
               ))}
             </FinanceSelect>
           </FinanceField>
-          <FinanceField label="DR Number">
-            <Input value={form.dr_number ?? ""} onChange={(e) => set("dr_number", e.target.value)} />
-          </FinanceField>
-
           {showHardwareSourcing ? (
             <FinanceField label="Hardware Sourcing Channel *">
-              <FinanceSelect
-                value={sourcingChannels.hardware ?? ""}
-                onChange={(e) => setSourcingChannel("hardware", e.target.value)}
+              <div
+                role="group"
+                aria-label="Hardware sourcing channels"
+                className="flex flex-wrap gap-3 rounded-lg border border-input px-2.5 py-2"
               >
-                <option value="">None</option>
-                {HARDWARE_SOURCING_CHANNELS.map((channel) => (
-                  <option key={channel} value={channel}>
-                    {channel}
-                  </option>
-                ))}
-              </FinanceSelect>
+                {HARDWARE_SOURCING_CHANNELS.map((channel) => {
+                  const checked = (sourcingChannels.hardware ?? []).includes(channel);
+                  return (
+                    <label
+                      key={channel}
+                      className="inline-flex cursor-pointer items-center gap-2 text-sm transition-colors duration-150"
+                    >
+                      <input
+                        type="checkbox"
+                        className="size-4 cursor-pointer accent-primary"
+                        checked={checked}
+                        onChange={() => toggleHardwareSourcingChannel(channel)}
+                      />
+                      {channel}
+                    </label>
+                  );
+                })}
+              </div>
             </FinanceField>
           ) : null}
           {showServiceSourcing ? (
@@ -888,6 +947,14 @@ export function LeadFormPage({
           </FinanceField>
           <FinanceField label="Country">
             <Input value={form.country ?? ""} onChange={(e) => set("country", e.target.value)} />
+          </FinanceField>
+          <FinanceField label="GST Number">
+            <Input
+              value={companyGstin || "—"}
+              disabled
+              aria-readonly="true"
+              className="font-mono text-sm"
+            />
           </FinanceField>
         </div>
       </CrmSection>
@@ -1050,18 +1117,6 @@ export function LeadFormPage({
             />
           </FinanceField>
         </div>
-      </CrmSection>
-
-      <CrmSection title="BOQ & SOW Requirements" icon={Package}>
-        <p className="text-xs text-muted-foreground">
-          BOQ and SOW are mandatory for every hardware / services lead. When you save, the pre-sales
-          owners (CRM → Users → Default task owners) get a My Jobs task straight away. They have{" "}
-          <strong className="font-semibold text-foreground">1 hour</strong> to confirm whether they
-          can submit (with a reason if not) and{" "}
-          <strong className="font-semibold text-foreground">6 hours</strong> to attach the documents.
-          Misses are escalated to their manager. Convert to opportunity stays blocked until both are
-          attached. Cloud consumption leads skip this step.
-        </p>
       </CrmSection>
 
       <CrmSection title="Lead Remarks" icon={MessageSquareText}>

@@ -530,6 +530,17 @@ class QuoteService:
             raise ConflictException("Choose at least two quotes to split into")
         opp = self._get_opportunity(ctx, source.opportunity_id)
         sales_blueprint_engine.assert_not_locked(opp)
+        # One OVF covers the whole opportunity — split before raising it.
+        from modules.crm.repository.ovf_repository import OvfRepository
+
+        existing_ovfs = OvfRepository(self._db).list_ovfs(
+            ctx, source.company_id, opportunity_id=source.opportunity_id
+        )
+        if existing_ovfs:
+            raise ConflictException(
+                "This opportunity already has an OVF. Split the quote before "
+                "creating the OVF so all split quantities land on one form."
+            )
 
         source_lines = {ln.id: ln for ln in self._lines.list_for_quote(ctx, quote_id)}
         requested: dict[UUID, Decimal] = {}
@@ -577,6 +588,13 @@ class QuoteService:
                 deal_number=opp.deal_reg_number,
                 tag="Q",
             )
+            # Parent already cleared customer acceptance (and often PO/OVF-ready).
+            # Split children inherit that stage so the opportunity OVF can combine
+            # broken quantities without re-walking send/accept.
+            child_stage = "accepted" if source.quote_stage == "accepted" else "draft"
+            child_approval = (
+                "approved" if source.quote_stage == "accepted" else "not_required"
+            )
             child = self._repo.create(
                 ctx,
                 company_id=source.company_id,
@@ -584,8 +602,8 @@ class QuoteService:
                 opportunity_id=source.opportunity_id,
                 company_account_id=source.company_account_id,
                 quote_no=code,
-                quote_stage="draft",
-                approval_status="not_required",
+                quote_stage=child_stage,
+                approval_status=child_approval,
                 freight=Decimal("0"),
                 parent_quote_id=source.id,
                 **fields,
@@ -610,7 +628,14 @@ class QuoteService:
                     source_line_id=parent_line.id,
                 )
             self._recompute(ctx, child.id)
-            self._log(ctx, child, "draft", "draft", "split_from_quote", f"Split {index}/{len(splits)} of {source.quote_no}")
+            self._log(
+                ctx,
+                child,
+                child_stage,
+                child_stage,
+                "split_from_quote",
+                f"Split {index}/{len(splits)} of {source.quote_no}",
+            )
             created.append(self.get(ctx, child.id))
         self._log(
             ctx,
@@ -682,6 +707,7 @@ class QuoteService:
     ) -> CrmQuote:
         quote = self.get(ctx, quote_id)
         sales_blueprint_engine.assert_not_locked(quote)
+        self._recompute(ctx, quote_id)
         next_state = sales_blueprint_engine.transition("quote", quote.quote_stage, "send_for_approval")
 
         from modules.crm.service.approval_task_service import ApprovalTaskService
@@ -707,6 +733,7 @@ class QuoteService:
         """Approve directly when margin is healthy; otherwise requires ``force``
         (set only by the My Jobs management decision path)."""
         quote = self.get(ctx, quote_id)
+        self._recompute(ctx, quote_id)
         if not force:
             sales_blueprint_engine.assert_not_locked(quote)
             summary = self.margin_summary(ctx, quote_id)

@@ -33,14 +33,17 @@ def get_lead_blueprint(
     db: Annotated[Session, Depends(get_db)],
 ):
     lead = LeadService(db).get(ctx, lead_id)
+    # Leads that already have required docs attached (pre-auto-convert era) convert here.
+    lead = LeadService(db).maybe_auto_convert_after_docs(ctx, lead_id)
     state = lead.blueprint_state or "open"
     pending_docs = (bool(lead.requires_boq) and not bool(lead.boq_attached)) or (
         bool(lead.requires_sow) and not bool(lead.sow_attached)
     )
     locked = bool(lead.locked) or pending_docs
     actions = sales_blueprint_engine.allowed_actions("lead", state)
-    if locked:
-        # Convert stays blocked until BOQ/SOW are attached; lost remains available.
+    # BOQ/SOW sales leads auto-convert when attachments complete — hide manual convert.
+    # Cloud (no BOQ/SOW gate) may still convert manually.
+    if locked or bool(lead.requires_boq) or bool(lead.requires_sow):
         actions = [a for a in actions if a != "convert"]
     return APIResponse(
         message="OK",

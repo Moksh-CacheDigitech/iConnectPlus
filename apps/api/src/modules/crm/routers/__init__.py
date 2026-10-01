@@ -156,6 +156,17 @@ def list_leads(
     return APIResponse(message="OK", data=paginate(rows, pagination))
 
 
+@leads_router.get("/next-dr-number", response_model=APIResponse[dict[str, str]])
+def next_lead_dr_number(
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.lead:create"))],
+    db: Annotated[Session, Depends(get_db)],
+    company_id: UUID | None = None,
+):
+    """Preview the next DR number that will be assigned when a sales lead is created."""
+    number = LeadService(db).peek_next_dr_number(ctx, company_id)
+    return APIResponse(message="OK", data={"dr_number": number})
+
+
 @leads_router.post("", response_model=APIResponse[LeadResponse])
 def create_lead(
     body: LeadCreate,
