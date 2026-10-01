@@ -45,7 +45,7 @@ def test_allows_pdf_bytes() -> None:
     )
     assert name == "quote.pdf"
     assert media == "application/pdf"
-    assert content_disposition_type(name, media) == "inline"
+    assert content_disposition_type(name, media) == "attachment"
 
 
 def test_sanitize_strips_path_and_specials() -> None:

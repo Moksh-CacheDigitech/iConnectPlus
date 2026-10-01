@@ -37,26 +37,28 @@ class EmailParseResult(BaseModel):
 email_inbound_router = APIRouter(prefix="/email-inbound", tags=["Service - Email Inbound"])
 
 
-def _verify_webhook_secret(x_email_webhook_secret: str | None = Header(default=None)) -> None:
+def _verify_webhook_secret(
+    x_email_webhook_secret: Annotated[str | None, Header(alias="X-Email-Webhook-Secret")] = None,
+) -> None:
     secret = settings.email_inbound_webhook_secret
     if not secret:
         raise HTTPException(status_code=503, detail="Email webhook secret is not configured")
-    if x_email_webhook_secret != secret:
+    if not x_email_webhook_secret or x_email_webhook_secret != secret:
         raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
 
 @email_inbound_router.post(
     "/webhook",
     response_model=APIResponse[EmailToTicketResult],
-    dependencies=[],
+    dependencies=[Depends(_verify_webhook_secret)],
 )
 def inbound_email_webhook(
     body: InboundEmailPayload,
     db: Annotated[Session, Depends(get_db)],
-    x_email_webhook_secret: Annotated[str | None, Header()] = None,
+    x_email_webhook_secret: Annotated[str, Header(alias="X-Email-Webhook-Secret")],
 ):
-    """Public webhook - secured via X-Email-Webhook-Secret header."""
-    _verify_webhook_secret(x_email_webhook_secret)
+    """Public webhook — requires X-Email-Webhook-Secret (validated before body use)."""
+    _ = x_email_webhook_secret
     result = EmailToTicketService(db).process(body, source="webhook")
     db.commit()
     return APIResponse(message=result.message, data=result)

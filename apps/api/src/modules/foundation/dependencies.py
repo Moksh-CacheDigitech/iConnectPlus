@@ -41,6 +41,25 @@ def get_tenant_context(
     session = session_repo.get_active(session_id)
     if session is None:
         raise UnauthorizedException("Session expired or revoked")
+
+    # Access-token session binding on every request (VAPT 7.1.6).
+    from core.config import settings
+
+    if settings.access_bind_user_agent:
+        issued_ua = (session.user_agent or "").strip()
+        current_ua = (request.headers.get("User-Agent") or "").strip()
+        if issued_ua and current_ua and issued_ua != current_ua:
+            session_repo.revoke(session_id, revoked_by=UUID(payload["sub"]))
+            SessionStore().delete_session(session_id)
+            raise UnauthorizedException("Session binding mismatch — please sign in again")
+    if settings.access_bind_ip:
+        issued_ip = (session.ip_address or "").strip()
+        current_ip = get_client_ip(request) or ""
+        if issued_ip and current_ip and issued_ip != current_ip:
+            session_repo.revoke(session_id, revoked_by=UUID(payload["sub"]))
+            SessionStore().delete_session(session_id)
+            raise UnauthorizedException("Session binding mismatch — please sign in again")
+
     store = SessionStore()
     cached = store.get_session(session_id)
     if cached is None:

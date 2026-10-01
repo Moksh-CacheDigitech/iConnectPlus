@@ -43,6 +43,7 @@ BLOCKED_EXTENSIONS = frozenset(
 )
 
 # Business documents + images commonly used in CRM / procurement.
+# Archives excluded by default (VAPT: uninspected archive / malware surface).
 ALLOWED_EXTENSIONS = frozenset(
     {
         ".pdf",
@@ -66,18 +67,13 @@ ALLOWED_EXTENSIONS = frozenset(
         ".ods",
         ".odp",
         ".rtf",
-        ".zip",
-        ".7z",
-        ".rar",
         ".msg",
         ".eml",
     }
 )
 
-# Safe to render inline (PDF/images). Everything else forces download.
-INLINE_SAFE_EXTENSIONS = frozenset(
-    {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
-)
+# Never serve uploads inline — force download (VAPT stored XSS via attachments).
+INLINE_SAFE_EXTENSIONS = frozenset()
 
 BLOCKED_CONTENT_TYPES = frozenset(
     {
@@ -98,6 +94,8 @@ _MULTI_DOT_RE = re.compile(r"\.{2,}")
 
 DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 DEFAULT_MAX_ATTACHMENTS_PER_ENTITY = 50
+# Procurement PO commercial pack: Customer PO + Vendor Quote (VAPT two-slot policy).
+PO_MAX_ATTACHMENTS = 2
 
 
 class UnsafeUploadError(ValueError):
@@ -161,7 +159,7 @@ def validate_upload(
         )
     if ext not in ALLOWED_EXTENSIONS:
         raise UnsafeUploadError(
-            f"File type '{ext}' is not allowed. Allowed types include PDF, Office, images, and ZIP."
+            f"File type '{ext}' is not allowed. Allowed types include PDF, Office, and images."
         )
 
     media = (content_type or "").split(";")[0].strip().lower() or None
@@ -179,9 +177,24 @@ def validate_upload(
             raise UnsafeUploadError(
                 "File content looks like HTML/SVG and cannot be uploaded"
             )
+        # Antivirus (ClamAV) — VAPT 7.1.25
+        try:
+            from shared.antivirus import (
+                AntivirusUnavailableError,
+                MalwareDetectedError,
+                scan_bytes,
+            )
+
+            scan_bytes(raw)
+        except MalwareDetectedError as exc:
+            raise UnsafeUploadError(str(exc)) from exc
+        except AntivirusUnavailableError as exc:
+            raise UnsafeUploadError(str(exc)) from exc
 
     return safe_name, media
 
 
 def content_disposition_type(file_name: str, content_type: str | None = None) -> str:
-    return "inline" if is_inline_safe(file_name, content_type) else "attachment"
+    # Always force download — never inline-render user uploads (VAPT XSS).
+    _ = file_name, content_type
+    return "attachment"

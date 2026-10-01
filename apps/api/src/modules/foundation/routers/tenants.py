@@ -51,9 +51,14 @@ def create_tenant(
 @router.get("/{tenant_id}", response_model=APIResponse[TenantResponse])
 def get_tenant(
     tenant_id: UUID,
-    _: Annotated[TenantContext, Depends(require_permission("foundation.tenant:read"))],
+    ctx: Annotated[TenantContext, Depends(require_permission("foundation.tenant:read"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> APIResponse[TenantResponse]:
+    # Non-platform admins may only read their own tenant (VAPT cross-tenant enum).
+    if ctx.user_type not in {"super_admin", "platform_admin"} and tenant_id != ctx.tenant_id:
+        from core.exceptions import ForbiddenException
+
+        raise ForbiddenException("Access to other tenants is not permitted")
     tenant = TenantService(db).get_tenant(tenant_id)
     return APIResponse(message="Tenant retrieved", data=TenantResponse(**tenant.__dict__))
 
