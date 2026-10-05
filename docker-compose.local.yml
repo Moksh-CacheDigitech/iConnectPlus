@@ -1,6 +1,8 @@
-# Local Docker stack — Postgres / Redis / RabbitMQ / OpenSearch / API / Celery / Web
+# Local all-in-one stack — infra mirrors docker-compose.infra.yml + API / Celery / Web
 # Local-only (no VM). Sync DB from VM: powershell -File scripts/sync-from-vm.ps1 -SkipMinio
-# Host ports: API :8000 | Web :3000 | Postgres :5433 | Redis :6379 | RabbitMQ :5672/:15672 | OpenSearch :9200
+# Infra DNS: postgres / redis / rabbitmq / opensearch / clamav / minio
+# Host ports: API :8000 | Web :3000 | Postgres :5433 | Redis :6379 | RabbitMQ :5672/:15672
+#             OpenSearch :9200 | ClamAV :3310 | MinIO :9000/:9001
 
 services:
   postgres:
@@ -73,10 +75,31 @@ services:
       timeout: 10s
       retries: 10
 
+  clamav:
+    image: clamav/clamav:1.4
+    container_name: erp-clamav
+    restart: unless-stopped
+    environment:
+      CLAMAV_NO_FRESHCLAMD: "false"
+      CLAMD_STARTUP_TIMEOUT: "1800"
+    ports:
+      - "${CLAMAV_HOST_PORT:-3310}:3310"
+    volumes:
+      - erp_clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 3 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 300s
+
+  # Built from source — MinIO removed public Docker Hub / Quay images (Sep 2026).
   minio:
-    image: minio/minio:latest
+    build:
+      context: ./docker/minio
+      dockerfile: Dockerfile
+    image: enterprise-erp-minio:local
     container_name: erp-minio
-    profiles: ["minio"]
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
@@ -91,12 +114,15 @@ services:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 12
+      start_period: 20s
 
   minio-init:
-    image: minio/mc:latest
+    build:
+      context: ./docker/minio-mc
+      dockerfile: Dockerfile
+    image: enterprise-erp-minio-mc:local
     container_name: erp-minio-init
-    profiles: ["minio"]
     depends_on:
       minio:
         condition: service_healthy
@@ -124,23 +150,36 @@ services:
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DEBUG: ${DEBUG:-true}
-      # Compose network DNS — do not use host/VM localhost fallbacks inside containers.
+      # Compose network DNS — local services only (never VM host IPs).
       INFRA_FALLBACK_ENABLED: "false"
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-erp-postgres}:${POSTGRES_PASSWORD:-erp-postgres}@postgres:5432/${POSTGRES_DB:-erp}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-erp}:${RABBITMQ_PASSWORD:-erp_dev_password}@rabbitmq:5672//
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       OPENSEARCH_URL: http://opensearch:9200
-      # Fresh local Postgres hits an asset migration order bug; run alembic separately when needed.
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-false}
       CORS_ORIGINS: ${CORS_ORIGINS}
       CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-http://localhost:8000/api/v1/auth/microsoft/callback}
-      OBJECT_STORAGE_BACKEND: local
-      ASSET_STORAGE_BACKEND: local
+      # Local MinIO (built from source — public Hub/Quay images removed)
+      OBJECT_STORAGE_BACKEND: ${OBJECT_STORAGE_BACKEND:-s3}
+      ASSET_STORAGE_BACKEND: ${ASSET_STORAGE_BACKEND:-s3}
       ASSET_STORAGE_PATH: /app/var/asset-storage
-      S3_ENDPOINT_URL: ""
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-cache-erp-bucket}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-erp_minio}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-erp_minio_password}
+      CLAMAV_ENABLED: ${CLAMAV_ENABLED:-true}
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: ${CLAMAV_PORT:-3310}
+      CLAMAV_TIMEOUT_SECONDS: ${CLAMAV_TIMEOUT_SECONDS:-45}
+      CLAMAV_FAIL_OPEN: ${CLAMAV_FAIL_OPEN:-false}
+      ACCESS_BIND_USER_AGENT: ${ACCESS_BIND_USER_AGENT:-true}
+      ACCESS_BIND_IP: ${ACCESS_BIND_IP:-false}
+      REFRESH_REUSE_DETECTION: ${REFRESH_REUSE_DETECTION:-true}
+      JWT_PRIVILEGED_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_PRIVILEGED_ACCESS_TOKEN_EXPIRE_MINUTES:-15}
       SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
       REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
       SSL_CERT_DIR: /etc/ssl/certs
@@ -156,6 +195,12 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      clamav:
+        condition: service_started
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -186,10 +231,19 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       OPENSEARCH_URL: http://opensearch:9200
       RUN_MIGRATIONS: "false"
-      OBJECT_STORAGE_BACKEND: local
-      ASSET_STORAGE_BACKEND: local
+      OBJECT_STORAGE_BACKEND: ${OBJECT_STORAGE_BACKEND:-s3}
+      ASSET_STORAGE_BACKEND: ${ASSET_STORAGE_BACKEND:-s3}
       ASSET_STORAGE_PATH: /app/var/asset-storage
-      S3_ENDPOINT_URL: ""
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-cache-erp-bucket}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-erp_minio}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-erp_minio_password}
+      CLAMAV_ENABLED: ${CLAMAV_ENABLED:-true}
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: ${CLAMAV_PORT:-3310}
+      CLAMAV_TIMEOUT_SECONDS: ${CLAMAV_TIMEOUT_SECONDS:-45}
+      CLAMAV_FAIL_OPEN: ${CLAMAV_FAIL_OPEN:-false}
       SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
       REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
       SSL_CERT_DIR: /etc/ssl/certs
@@ -205,6 +259,10 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      clamav:
+        condition: service_started
+      minio:
+        condition: service_healthy
 
   web:
     build:
@@ -213,8 +271,8 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
         NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Connect Plus}
-        NEXT_PUBLIC_DEMO_EMAIL: ${NEXT_PUBLIC_DEMO_EMAIL:-admin@example.com}
-        NEXT_PUBLIC_DEMO_PASSWORD: ${NEXT_PUBLIC_DEMO_PASSWORD:-Secure1!}
+        NEXT_PUBLIC_DEMO_EMAIL: ${NEXT_PUBLIC_DEMO_EMAIL:-}
+        NEXT_PUBLIC_DEMO_PASSWORD: ${NEXT_PUBLIC_DEMO_PASSWORD:-}
         NEXT_PUBLIC_ELEVENLABS_AGENT_ID: ${NEXT_PUBLIC_ELEVENLABS_AGENT_ID:-}
         API_INTERNAL_URL: http://api:8000
     image: enterprise-erp-web:local
@@ -241,6 +299,8 @@ volumes:
     name: erp_opensearch_data
   erp_minio_data:
     name: erp_minio_data
+  erp_clamav_data:
+    name: erp_clamav_data
   erp_crm_uploads:
     name: erp_crm_uploads
   erp_asset_storage:

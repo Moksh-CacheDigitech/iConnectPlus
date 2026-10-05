@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { WelcomeSplash } from "@/components/auth/welcome-splash";
 import { AuthSessionProvider } from "@/hooks/use-auth-user";
-import { clearTokens, getAccessToken, isAuthenticated } from "@/lib/auth";
+import { clearTokens, getAccessToken, isAuthenticated, markSessionPresent } from "@/lib/auth";
 import {
   clearWelcomeSplash,
   peekWelcomeSplash,
@@ -45,6 +45,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
     async function resolveSession() {
       if (isAuthenticated() && getAccessToken()) {
+        markSessionPresent();
         if (!cancelled) {
           setAuthed(true);
           setChecking(false);
@@ -54,6 +55,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       // HttpOnly cookie session survives reload — probe /auth/me with credentials.
       try {
         await apiClient("/auth/me", { auth: true });
+        markSessionPresent();
         if (!cancelled) {
           setAuthed(true);
           setChecking(false);
@@ -82,18 +84,18 @@ export function AuthGate({ children }: { children: ReactNode }) {
     router.replace(`/login${next}`);
   }, [pathname, searchParams, router, mounted, checking, authed]);
 
-  // If tokens are cleared mid-session (401), send user back to login.
+  // If the cookie session dies mid-tab, send user back to login.
   useEffect(() => {
     if (!mounted || !authed) return;
     function onFocus() {
-      if (!getAccessToken()) {
-        void apiClient("/auth/me", { auth: true })
-          .then(() => undefined)
-          .catch(() => {
-            clearTokens();
-            setAuthed(false);
-          });
-      }
+      void apiClient("/auth/me", { auth: true })
+        .then(() => {
+          markSessionPresent();
+        })
+        .catch(() => {
+          clearTokens();
+          setAuthed(false);
+        });
     }
     window.addEventListener("focus", onFocus);
     return () => {

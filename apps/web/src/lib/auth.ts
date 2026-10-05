@@ -2,9 +2,12 @@
 
 Prefer HttpOnly cookies set by the API (VAPT: tokens must not live in localStorage).
 Bearer tokens in memory remain as a fallback for same-tab API calls and legacy clients.
+HttpOnly cookies are invisible to JS — use a session hint so UI knows a cookie session exists.
 */
 const ACCESS_TOKEN_KEY = "erp_access_token";
 const REFRESH_TOKEN_KEY = "erp_refresh_token";
+/** Non-secret flag: cookie session confirmed (HttpOnly tokens cannot be read by JS). */
+const SESSION_HINT_KEY = "erp_session_hint";
 
 let memoryAccessToken: string | null = null;
 let memoryRefreshToken: string | null = null;
@@ -19,6 +22,35 @@ function purgeLegacyWebStorage(): void {
   } catch {
     // ignore quota / privacy mode
   }
+}
+
+function dispatchAuthChange(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new Event("erp-auth-change"));
+  } catch {
+    // ignore
+  }
+}
+
+function hasSessionHint(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(SESSION_HINT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Mark that an HttpOnly cookie session was confirmed (e.g. /auth/me succeeded). */
+export function markSessionPresent(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(SESSION_HINT_KEY, "1");
+  } catch {
+    // ignore
+  }
+  dispatchAuthChange();
 }
 
 export function getAccessToken(): string | null {
@@ -53,16 +85,25 @@ export function setTokens(accessToken: string, refreshToken?: string) {
     memoryRefreshToken = refreshToken;
   }
   purgeLegacyWebStorage();
+  markSessionPresent();
 }
 
 export function clearTokens() {
   memoryAccessToken = null;
   memoryRefreshToken = null;
   purgeLegacyWebStorage();
+  if (typeof window !== "undefined") {
+    try {
+      window.sessionStorage.removeItem(SESSION_HINT_KEY);
+    } catch {
+      // ignore
+    }
+  }
+  dispatchAuthChange();
 }
 
 export function isAuthenticated(): boolean {
-  return Boolean(getAccessToken());
+  return Boolean(getAccessToken()) || hasSessionHint();
 }
 
 /** Send user to login with return URL (client-only). */
