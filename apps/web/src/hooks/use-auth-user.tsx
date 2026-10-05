@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { clearTokens, isAuthenticated, redirectToLogin } from "@/lib/auth";
+import { clearTokens, markSessionPresent, redirectToLogin } from "@/lib/auth";
 import { parseAuthMe, type AuthSessionUser } from "@/lib/auth-user";
 import { ApiClientError, authService } from "@/services/api-client";
 
@@ -88,17 +88,6 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     const loadId = ++loadIdRef.current;
 
-    if (!isAuthenticated()) {
-      if (loadId !== loadIdRef.current) return;
-      setState({
-        ...EMPTY,
-        loading: false,
-        status: "unauthenticated",
-        error: null,
-      });
-      return;
-    }
-
     setState((prev) => ({
       ...prev,
       // Avoid blanking the sidebar on background refresh after a good session.
@@ -108,6 +97,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     }));
 
     try {
+      // Always probe /auth/me — HttpOnly cookie sessions have no in-memory token after reload.
       const parsed = await fetchAuthMeWithRetry();
       if (loadId !== loadIdRef.current) return;
 
@@ -121,6 +111,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      markSessionPresent();
       setState({
         user: parsed.user,
         permissions: parsed.permissions,

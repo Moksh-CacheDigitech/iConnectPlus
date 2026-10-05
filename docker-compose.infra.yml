@@ -102,8 +102,12 @@ services:
       retries: 30
       start_period: 300s
 
+  # Built from source — MinIO removed public Docker Hub / Quay images (Sep 2026).
   minio:
-    image: quay.io/minio/minio:latest
+    build:
+      context: ./docker/minio
+      dockerfile: Dockerfile
+    image: enterprise-erp-minio:local
     container_name: erp-minio
     restart: unless-stopped
     networks: [erp-net]
@@ -120,10 +124,14 @@ services:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 12
+      start_period: 20s
 
   minio-init:
-    image: quay.io/minio/mc:latest
+    build:
+      context: ./docker/minio-mc
+      dockerfile: Dockerfile
+    image: enterprise-erp-minio-mc:local
     container_name: erp-minio-init
     networks: [erp-net]
     depends_on:
