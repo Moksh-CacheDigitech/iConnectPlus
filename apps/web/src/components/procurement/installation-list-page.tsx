@@ -4,10 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { RefreshCw, Wrench } from "lucide-react";
 
-import {
-  ProcurementListSearch,
-  ProcurementPageHeader,
-} from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
+import { ListSearch } from "@/components/shared/list-toolbar";
 import { procurementUi } from "@/components/procurement/procurement-ui";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -92,7 +90,7 @@ export function InstallationListPage() {
 
   return (
     <div className="space-y-4">
-      <ProcurementPageHeader
+      <PageHeader
         title="Installation"
         actions={
           <Button
@@ -113,12 +111,14 @@ export function InstallationListPage() {
         detail page. Sharing is not done from this list.
       </p>
 
-      <ProcurementListSearch
-        value={query}
-        onChange={setQuery}
-        placeholder="Search company PO, customer, challan / invoice…"
-        aria-label="Search installation queue"
-      />
+      <div className="flex justify-end">
+        <ListSearch
+          value={query}
+          onChange={setQuery}
+          placeholder="Search company PO, customer, challan / invoice…"
+          aria-label="Search installation queue"
+        />
+      </div>
 
       <div className={procurementUi.tableShell}>
         <div className="overflow-x-auto">

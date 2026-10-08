@@ -10,7 +10,7 @@ import {
   GrnReceiptHistoryDialog,
   type GrnReceiptPdfContext,
 } from "@/components/procurement/grn-receipt-history-dialog";
-import { ProcurementPageHeader } from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { procurementUi } from "@/components/procurement/procurement-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -243,7 +243,7 @@ export function GrnsListPage() {
 
   return (
     <div className={procurementUi.page}>
-      <ProcurementPageHeader
+      <PageHeader
         title="GRNs"
         actions={
           <div className="flex flex-wrap items-center gap-2">

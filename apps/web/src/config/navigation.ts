@@ -45,7 +45,7 @@ export type NavGroup = {
   items: NavItem[];
 };
 
-const iconMap: Record<ErpModule["icon"], LucideIcon> = {
+export const moduleIconMap: Record<ErpModule["icon"], LucideIcon> = {
   dashboard: LayoutDashboard,
   shield: Shield,
   mail: Mail,
@@ -113,7 +113,7 @@ export const navigation: NavGroup[] = [
         title: m.title,
         href: m.href,
         description: m.description,
-        icon: iconMap[m.icon],
+        icon: moduleIconMap[m.icon],
         inApp: IN_APP_NAV_GROUPS.has(group),
       }));
     // Operations sidebar: alphabetical by label (Analytics, Asset Management, …).

@@ -6,10 +6,8 @@ import { FileSpreadsheet, MapPinned, Receipt, RefreshCw } from "lucide-react";
 
 import { DeliveryStatusBillDialog } from "@/components/procurement/delivery-status-bill-dialog";
 import { DeliveryStatusOutcomeDialog } from "@/components/procurement/delivery-status-outcome-dialog";
-import {
-  ProcurementListSearch,
-  ProcurementPageHeader,
-} from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
+import { ListSearch } from "@/components/shared/list-toolbar";
 import { procurementUi } from "@/components/procurement/procurement-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -160,7 +158,7 @@ export function DeliveryStatusListPage() {
 
   return (
     <div className={procurementUi.page}>
-      <ProcurementPageHeader
+      <PageHeader
         title="Delivery status"
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -212,12 +210,14 @@ export function DeliveryStatusListPage() {
         </div>
       ) : null}
 
-      <ProcurementListSearch
-        value={query}
-        onChange={setQuery}
-        placeholder="Search PO, GRN, invoice, or bill status…"
-        aria-label="Search delivery status"
-      />
+      <div className="flex justify-end">
+        <ListSearch
+          value={query}
+          onChange={setQuery}
+          placeholder="Search PO, GRN, invoice, or bill status…"
+          aria-label="Search delivery status"
+        />
+      </div>
 
       <div className={procurementUi.tableShell}>
         <div className={procurementUi.tableScroll}>
@@ -353,7 +353,7 @@ export function DeliveryStatusListPage() {
           setDeliveryStatusFlash({ variant: "success", message });
           load();
         }}
-      />
+    />
     </div>
   );
 }

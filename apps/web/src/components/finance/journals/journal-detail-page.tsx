@@ -15,6 +15,7 @@ import { JournalHeaderEditor } from "@/components/finance/journals/journal-heade
 import { JournalLinesEditor } from "@/components/finance/journals/journal-lines-editor";
 import { JournalWorkflowActions } from "@/components/finance/journals/journal-workflow-actions";
 import { PageHeader } from "@/components/layout/page-header";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import { Button } from "@/components/ui/button";
 import { useUserDirectory } from "@/hooks/use-user-directory";
 import { ApiClientError, resourceService } from "@/services/api-client";
@@ -166,18 +167,7 @@ export function JournalDetailPage({ journalId }: { journalId: string }) {
         >
           <ArrowLeft className="size-3.5" /> Back to journals
         </Link>
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {error ?? "Journal not found"}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="ml-3 cursor-pointer"
-            onClick={() => void load()}
-          >
-            Retry
-          </Button>
-        </div>
+        <ErrorBanner onRetry={() => void load()}>{error ?? "Journal not found"}</ErrorBanner>
       </div>
     );
   }

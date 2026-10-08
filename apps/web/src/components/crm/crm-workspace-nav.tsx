@@ -1,16 +1,13 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Boxes,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
-  ChevronLeft,
-  ChevronRight,
   ClipboardList,
   Factory,
   FileSpreadsheet,
@@ -34,9 +31,7 @@ import {
   UserRound,
 } from "lucide-react";
 
-import { SidebarAccountSection } from "@/components/layout/sidebar-account-section";
-import { Button } from "@/components/ui/button";
-import { ModuleUsersNavTab } from "@/components/organization/module-users-nav-tab";
+import { ModuleSidebar, type ModuleNavItem } from "@/components/layout/module-sidebar";
 import {
   getCrmSidebarFocus,
   isCompanyDealWorkspacePath,
@@ -45,7 +40,6 @@ import {
   type CrmSidebarFocus,
 } from "@/lib/crm-sidebar-focus";
 import { canManageModuleUsers } from "@/lib/module-access";
-import { cn } from "@/lib/utils";
 import { useAuthUser } from "@/hooks/use-auth-user";
 
 type CrmNavItem = {
@@ -127,49 +121,16 @@ function isCrmNavActive(pathname: string, href: string): boolean {
   return false;
 }
 
-/** Horizontal tab strip (used when CRM shares the main app sidebar). */
-export function CrmWorkspaceNav() {
-  const pathname = usePathname();
-
-  return (
-    <div className="grid min-w-0 max-w-full grid-cols-1">
-      <nav
-        aria-label="CRM workspace"
-        className="erp-scroll min-w-0 overflow-x-auto overscroll-x-contain"
-      >
-        <ul className="flex w-max items-center gap-0.5 border-b border-border/70 pb-px">
-          {CRM_NAV.map((item) => {
-            const active = isCrmNavActive(pathname, item.href);
-            const Icon = item.icon;
-            return (
-              <li key={item.href} className="shrink-0">
-                <Link
-                  href={item.href}
-                  className={cn(
-                    "relative inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition-[color,background-color] duration-200",
-                    active
-                      ? "bg-muted/60 font-semibold text-foreground after:absolute after:inset-x-2 after:bottom-0.5 after:h-0.5 after:rounded-full after:bg-primary"
-                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-                  )}
-                >
-                  <Icon className="size-3.5 shrink-0" aria-hidden />
-                  {item.title}
-                </Link>
-              </li>
-            );
-          })}
-          <ModuleUsersNavTab moduleKey="crm" variant="pill" />
-        </ul>
-      </nav>
-    </div>
-  );
+function onCrmNavigate(item: ModuleNavItem) {
+  const focus = focusForHref(item.href);
+  if (focus) setCrmSidebarFocus(focus);
+  if (focus !== "opportunities") setCrmOpportunityContext(null);
 }
 
-/** Left sidebar chrome for standalone CRM tabs (replaces AppSidebar). */
+/** Left sidebar for the CRM workspace. */
 export function CrmSidebar() {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
-  const { signedIn, user, adminModuleKeys } = useAuthUser();
+  const { user, adminModuleKeys } = useAuthUser();
 
   const navItems = useMemo(() => {
     const items: CrmNavItem[] = [...CRM_NAV];
@@ -180,109 +141,16 @@ export function CrmSidebar() {
   }, [adminModuleKeys, user?.userType]);
 
   return (
-    <aside
-      data-erp-primary-sidebar
-      className={cn(
-        "sticky top-0 z-20 flex h-dvh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
-        collapsed ? "w-[72px]" : "w-[260px]",
-      )}
-    >
-      {signedIn ? (
-        <SidebarAccountSection collapsed={collapsed}>
-          <div className="flex items-center gap-2">
-            <Handshake className="size-3.5 shrink-0 text-sidebar-primary" aria-hidden />
-            <div className="min-w-0">
-              <p className="truncate text-xs font-semibold text-sidebar-foreground">Sales CRM</p>
-              <p className="truncate text-[10px] text-sidebar-foreground/55">
-                {navItems.length} workspace panes
-              </p>
-            </div>
-          </div>
-        </SidebarAccountSection>
-      ) : (
-        <div className={cn("px-4 py-4", collapsed && "px-2")}>
-          <div className={cn("flex items-center gap-3", collapsed && "justify-center")}>
-            <div className="flex size-9 items-center justify-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground shadow-[0_1px_3px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.25)] ring-1 ring-white/10">
-              <Handshake className="size-4" aria-hidden />
-            </div>
-            {!collapsed ? (
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold tracking-tight text-sidebar-foreground">
-                  Sales CRM
-                </p>
-                <p className="truncate text-[11px] text-sidebar-foreground/55">
-                  {navItems.length} workspace panes
-                </p>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      )}
-
-      <nav aria-label="CRM workspace" className="erp-scroll flex-1 overflow-y-auto px-2.5 py-2">
-        {!collapsed ? (
-          <p className="mb-2 px-2.5 text-[10px] font-semibold tracking-[0.14em] text-sidebar-foreground/40 uppercase">
-            Workspace
-          </p>
-        ) : null}
-        <ul className="space-y-0.5">
-          {navItems.map((item) => {
-            const active = isCrmNavActive(pathname, item.href);
-            const Icon = item.icon;
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  title={item.title}
-                  onClick={() => {
-                    const focus = focusForHref(item.href);
-                    if (focus) setCrmSidebarFocus(focus);
-                    if (focus !== "opportunities") setCrmOpportunityContext(null);
-                  }}
-                  className={cn(
-                    "group relative flex cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium transition-all duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.985]",
-                    active
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm ring-1 ring-white/10 backdrop-blur-xs"
-                      : "text-sidebar-foreground/75 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
-                    collapsed && "justify-center px-0",
-                  )}
-                >
-                  {active ? (
-                    <span className="absolute inset-y-2 left-0.5 w-1 rounded-full bg-sidebar-primary shadow-[0_0_8px_rgba(255,255,255,0.4)]" />
-                  ) : null}
-                  <Icon
-                    className={cn(
-                      "size-4 shrink-0 transition-transform duration-150 group-hover:scale-105",
-                      active
-                        ? "text-sidebar-primary"
-                        : "text-sidebar-foreground/50 group-hover:text-sidebar-foreground/80",
-                    )}
-                    aria-hidden
-                  />
-                  {!collapsed ? (
-                    <span className="min-w-0 flex-1 truncate font-medium">{item.title}</span>
-                  ) : (
-                    <span className="sr-only">{item.title}</span>
-                  )}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-
-      <div className="border-t border-sidebar-border p-2.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full cursor-pointer justify-center text-sidebar-foreground/70 transition-colors duration-200 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-          onClick={() => setCollapsed((v) => !v)}
-          aria-label={collapsed ? "Expand CRM sidebar" : "Collapse CRM sidebar"}
-        >
-          {collapsed ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
-          {!collapsed ? <span className="ml-1.5 text-xs">Collapse</span> : null}
-        </Button>
-      </div>
-    </aside>
+    <ModuleSidebar
+      moduleKey="crm"
+      title="Sales CRM"
+      subtitle={`${navItems.length} workspace panes`}
+      icon={Handshake}
+      aria-label="CRM workspace"
+      groups={[{ label: "Workspace", items: navItems }]}
+      isActive={(item) => isCrmNavActive(pathname, item.href)}
+      searchPlaceholder="Search CRM…"
+      onItemNavigate={onCrmNavigate}
+    />
   );
 }

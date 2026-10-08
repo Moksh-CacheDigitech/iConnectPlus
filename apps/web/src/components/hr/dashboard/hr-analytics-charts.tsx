@@ -23,9 +23,9 @@ import {
 import { cn } from "@/lib/utils";
 import type { LeaveTrendPoint, NamedCount, StackedAttendancePoint } from "@/types/hr-executive-dashboard";
 
-/** Premium chart palette - purple, teal, green, orange, blue, pink. */
+/** HR chart palette on the enterprise series colors. */
 export const HR_CHART_COLORS = [
-  "#9B5BB8",
+  "#0369A1",
   "#00BBAA",
   "#01BD7E",
   "#FF8904",
@@ -33,12 +33,12 @@ export const HR_CHART_COLORS = [
   "#FF2057",
 ] as const;
 
-const FUNNEL_COLORS = ["#9B5BB8", "#01BD7E", "#FFB020", "#155DFD", "#FF5C8A"];
+const FUNNEL_COLORS = ["#0F766E", "#01BD7E", "#FFB020", "#155DFD", "#FF5C8A"];
 
 const GENDER_COLORS: Record<string, string> = {
   Male: "#155DFD",
   Female: "#FF5C8A",
-  Other: "#9B5BB8",
+  Other: "#475569",
 };
 
 type FormatFn = (n: number) => string;
@@ -482,7 +482,7 @@ const STACK_KEYS = [
   { key: "absent", label: "Absent", color: "#FF5C8A" },
   { key: "leave", label: "Leave", color: "#FFB020" },
   { key: "halfDay", label: "Half Day", color: "#155DFD" },
-  { key: "late", label: "Late", color: "#9B5BB8" },
+  { key: "late", label: "Late", color: "#475569" },
 ] as const;
 
 export function PremiumStackedBarChart({
@@ -567,7 +567,7 @@ export function PremiumLineChart({
   title,
   subtitle,
   data,
-  color = "#9B5BB8",
+  color = "#0F766E",
 }: {
   title: string;
   subtitle?: string;
@@ -621,7 +621,7 @@ export function PremiumLineChart({
 }
 
 const LEAVE_LINES = [
-  { key: "casual", label: "Casual", color: "#9B5BB8" },
+  { key: "casual", label: "Casual", color: "#0F766E" },
   { key: "sick", label: "Sick", color: "#FFB020" },
   { key: "earned", label: "Earned", color: "#01BD7E" },
   { key: "unpaid", label: "Unpaid", color: "#155DFD" },

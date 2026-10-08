@@ -13,6 +13,7 @@ import {
   FinanceSelect,
 } from "@/components/finance/journals/finance-form-field";
 import { PageHeader } from "@/components/layout/page-header";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { isAuthenticated } from "@/lib/auth";
@@ -165,9 +166,7 @@ export function JournalListPage() {
       ) : null}
 
       {error ? (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {error}
-        </div>
+        <ErrorBanner>{error}</ErrorBanner>
       ) : null}
 
       <div className="grid gap-2 rounded-xl border border-border/80 bg-card p-3 shadow-sm sm:grid-cols-2 xl:grid-cols-5">

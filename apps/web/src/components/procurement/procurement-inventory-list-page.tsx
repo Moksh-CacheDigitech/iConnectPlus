@@ -12,10 +12,8 @@ import {
   INVENTORY_WITHOUT_PO,
   type InventoryImportDraftRow,
 } from "@/components/procurement/procurement-inventory-import-dialog";
-import {
-  ProcurementListSearch,
-  ProcurementPageHeader,
-} from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
+import { ListSearch } from "@/components/shared/list-toolbar";
 import { procurementUi } from "@/components/procurement/procurement-ui";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -179,7 +177,7 @@ export function ProcurementInventoryListPage() {
 
   return (
     <div className={procurementUi.page}>
-      <ProcurementPageHeader
+      <PageHeader
         title="Inventory"
         actions={
           <div className="flex flex-wrap gap-2">
@@ -250,12 +248,14 @@ export function ProcurementInventoryListPage() {
         </div>
       ) : null}
 
-      <ProcurementListSearch
-        value={query}
-        onChange={setQuery}
-        placeholder="Search by product…"
-        aria-label="Search inventory by product"
-      />
+      <div className="flex justify-end">
+        <ListSearch
+          value={query}
+          onChange={setQuery}
+          placeholder="Search by product…"
+          aria-label="Search inventory by product"
+        />
+      </div>
 
       {loading ? (
         <div className="space-y-3">
@@ -287,7 +287,7 @@ export function ProcurementInventoryListPage() {
               label="Stock value"
               value={formatInr(stockSummary.totalStockValue)}
               icon={IndianRupee}
-            />
+          />
           </div>
 
           <ProcurementInventoryCharts summary={stockSummary} />
@@ -469,7 +469,7 @@ export function ProcurementInventoryListPage() {
           if (!importBusy) setImportOpen(false);
         }}
         onConfirm={(draft) => void onConfirmImport(draft)}
-      />
+    />
     </div>
   );
 }

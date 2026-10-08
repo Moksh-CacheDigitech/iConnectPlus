@@ -13,7 +13,7 @@ import {
   Truck,
 } from "lucide-react";
 
-import { ProcurementPageHeader } from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import {
   ProcurementErrorBanner,
   ProcurementListPanel,
@@ -220,7 +220,7 @@ export function ProcurementTimelineListPage() {
 
   return (
     <ProcurementPage>
-      <ProcurementPageHeader
+      <PageHeader
         title="Timeline"
         description="Procurement steps for each OVF - from SCM handoff through GRN, delivery challan, dispatch, and delivery completion."
         actions={
@@ -352,7 +352,7 @@ export function OvfTimelineDetailPage({ ovfId }: { ovfId: string }) {
 
   return (
     <ProcurementPage>
-      <ProcurementPageHeader
+      <PageHeader
         title={data?.ovf_no ? `OVF ${data.ovf_no}` : "OVF timeline"}
         description={
           data

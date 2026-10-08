@@ -12,7 +12,7 @@ import {
   DeliveryBillTakenButton,
 } from "@/components/procurement/delivery-bill-taken-badge";
 import { DeliveryStatusBillDialog } from "@/components/procurement/delivery-status-bill-dialog";
-import { ProcurementPageHeader } from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { procurementUi } from "@/components/procurement/procurement-ui";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -113,7 +113,7 @@ export function DeliveryChallanListPage() {
 
   return (
     <div className={procurementUi.page}>
-      <ProcurementPageHeader
+      <PageHeader
         title="Delivery"
         actions={
           <div className="flex flex-wrap items-center gap-2">

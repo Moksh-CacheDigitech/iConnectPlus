@@ -67,7 +67,7 @@ const QUICK_ACTIONS = [
 ] as const;
 
 const EVENT_PILLS: Record<string, { label: string; className: string }> = {
-  birthday: { label: "Birthday", className: "bg-[#F4EDFB] text-[#9B5BB8]" },
+  birthday: { label: "Birthday", className: "bg-primary/10 text-primary" },
   anniversary: { label: "Work Anniversary", className: "bg-[#FFF4E5] text-[#FF8904]" },
 };
 
@@ -222,9 +222,9 @@ export function HrExecutiveDashboardPage() {
       value: stats?.totalEmployees,
       icon: Users,
       href: "/hr/workforce",
-      tint: "bg-[#F4EDFB]",
-      iconBg: "bg-[#9B5BB8]/15",
-      iconColor: "text-[#9B5BB8]",
+      tint: "bg-hrms-lavender",
+      iconBg: "bg-primary/15",
+      iconColor: "text-primary",
     },
     {
       label: "On leave today",
@@ -268,14 +268,6 @@ export function HrExecutiveDashboardPage() {
       <SetupToastHost />
 
       <div className="relative overflow-hidden rounded-2xl border border-border bg-card px-6 py-6 shadow-[var(--hrms-card-shadow)] sm:px-8 sm:py-7">
-        <div
-          className="pointer-events-none absolute -top-20 -right-8 size-56 rounded-full bg-[#9B5BB8]/15 blur-3xl"
-          aria-hidden
-        />
-        <div
-          className="pointer-events-none absolute -bottom-24 left-16 size-48 rounded-full bg-[#C4A5E0]/20 blur-3xl"
-          aria-hidden
-        />
         <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-[11px] font-semibold tracking-[0.16em] text-primary uppercase">
@@ -360,7 +352,7 @@ export function HrExecutiveDashboardPage() {
                     <Link
                       key={a.href + a.label}
                       href={a.href}
-                      className="flex min-h-[2.75rem] cursor-pointer items-center gap-2 rounded-xl bg-hrms-lavender px-3 py-2 transition-colors duration-150 hover:bg-[#E8D5F5]"
+                      className="flex min-h-[2.75rem] cursor-pointer items-center gap-2 rounded-xl bg-hrms-lavender px-3 py-2 transition-colors duration-150 hover:bg-primary/15"
                     >
                       <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-white text-primary shadow-sm">
                         <Icon className="size-3.5" />
@@ -578,7 +570,7 @@ function DashboardListBox({
         {headerHref && headerLabel ? (
           <Link
             href={headerHref}
-            className="shrink-0 rounded-full bg-hrms-lavender px-3 py-1 text-[11px] font-semibold text-primary transition-colors duration-150 hover:bg-[#E8D5F5]"
+            className="shrink-0 rounded-full bg-hrms-lavender px-3 py-1 text-[11px] font-semibold text-primary transition-colors duration-150 hover:bg-primary/15"
           >
             {headerLabel}
           </Link>

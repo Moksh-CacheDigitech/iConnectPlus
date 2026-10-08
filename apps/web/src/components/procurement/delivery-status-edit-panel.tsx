@@ -6,7 +6,7 @@ import { FileText, MapPinned, Package, Truck } from "lucide-react";
 
 import { DeliveryStatusBillDialog } from "@/components/procurement/delivery-status-bill-dialog";
 import { DeliveryStatusOutcomeDialog } from "@/components/procurement/delivery-status-outcome-dialog";
-import { ProcurementPageHeader } from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { procurementUi } from "@/components/procurement/procurement-ui";
 import {
   DeliveryStatusForm,
@@ -195,7 +195,7 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
   if (!challan) {
     return (
       <div className={procurementUi.page}>
-        <ProcurementPageHeader
+        <PageHeader
           title="Delivery status"
           backHref="/procurement/delivery-status"
           backLabel="Delivery status"
@@ -214,7 +214,7 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
 
   return (
     <div className={procurementUi.page}>
-      <ProcurementPageHeader
+      <PageHeader
         backHref="/procurement/delivery-status"
         backLabel="Delivery status"
         title={readOnly ? "Delivery status" : "Set dispatch"}

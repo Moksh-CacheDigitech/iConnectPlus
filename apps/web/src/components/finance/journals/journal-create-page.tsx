@@ -13,6 +13,7 @@ import {
   FinanceTextarea,
 } from "@/components/finance/journals/finance-form-field";
 import { PageHeader } from "@/components/layout/page-header";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes";
@@ -238,9 +239,7 @@ export function JournalCreatePage() {
       />
 
       {serverError ? (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {serverError}
-        </div>
+        <ErrorBanner>{serverError}</ErrorBanner>
       ) : null}
 
       <form className="space-y-4" onSubmit={handleSubmit(onSave)} noValidate>

@@ -13,6 +13,7 @@ All frontend UI/UX work for this ERP **must** use the **ui-ux-pro-max** skill. D
 1. **Read the skill:** `.cursor/skills/ui-ux-pro-max/SKILL.md`
 2. **Read the design system:**
    - `design-system/enterprise-erp-platform/MASTER.md`
+   - `design-system/enterprise-erp-platform/MODULE_UI_PLAN.md` (cross-module contract: left-sidebar shell, page templates, `components/shared`)
    - If building a named page, also check `design-system/enterprise-erp-platform/pages/[page].md` (overrides MASTER)
 3. **Run design searches when needed** (Windows: use `python`, not `python3`):
 
@@ -35,8 +36,13 @@ python .cursor/skills/ui-ux-pro-max/scripts/search.py "<query>" --domain ux
 When introducing a major new page pattern, persist an override:
 
 ```bash
-python .cursor/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system --persist -p "iConnect Plus" --page "<page-name>"
+python .cursor/skills/ui-ux-pro-max/scripts/search.py "<query>" --design-system --persist -p "Enterprise ERP Platform" --page "<page-name>"
+git checkout -- design-system/enterprise-erp-platform/MASTER.md
 ```
+
+- Run from the repo root only (running from `apps/web` creates a stray second design system).
+- `--persist` always regenerates `MASTER.md`; restore it with the `git checkout` above. The curated Master mirrors `globals.css` and must not be replaced by generated output.
+- Page overrides carry domain content only (KPIs, status colors, section order); they never change the left-sidebar shell, fonts, or primary palette.
 
 ## Pre-Delivery (Required)
 

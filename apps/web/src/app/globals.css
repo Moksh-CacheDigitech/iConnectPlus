@@ -46,6 +46,16 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* HR soft surfaces and status text, on the enterprise palette (no HRMS purple in the app shell). */
+  --color-hrms-lavender: var(--accent);
+  --color-hrms-mint: var(--color-emerald-50);
+  --color-hrms-peach: var(--color-amber-50);
+  --color-hrms-blue: var(--color-sky-50);
+  --color-hrms-pink: var(--color-red-50);
+  --color-hrms-success: var(--color-emerald-700);
+  --color-hrms-warning: var(--color-amber-700);
+  --color-hrms-danger: var(--color-red-700);
+  --color-hrms-info: var(--color-sky-700);
 }
 
 :root {
@@ -82,6 +92,7 @@
   --sidebar-accent-foreground: oklch(0.96 0.01 210);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.65 0.08 190);
+  --hrms-card-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.05);
 }
 
 .dark {
@@ -193,6 +204,21 @@
 
   .erp-scroll::-webkit-scrollbar-thumb:hover {
     background: oklch(0.65 0.03 220 / 80%);
+  }
+}
+
+/* Respect OS reduced-motion everywhere: pulses, spinners, and transitions settle instantly. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

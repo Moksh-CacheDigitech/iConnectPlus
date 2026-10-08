@@ -6,7 +6,7 @@ import { ClipboardList, FolderInput, MapPinned } from "lucide-react";
 
 import { FinanceField } from "@/components/finance/journals/finance-form-field";
 import { DeliverySectionCard } from "@/components/procurement/delivery-section-card";
-import { ProcurementPageHeader } from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { procurementUi } from "@/components/procurement/procurement-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -342,7 +342,7 @@ export function InstallationDetailPage({ challanId }: { challanId: string }) {
 
   return (
     <div className="space-y-4">
-      <ProcurementPageHeader
+      <PageHeader
         title="Installation details"
         backHref={installationListHref()}
         backLabel="Installation"

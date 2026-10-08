@@ -1,16 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, FolderKanban, Search } from "lucide-react";
+import { useMemo } from "react";
+import { FolderKanban } from "lucide-react";
 
-import { SidebarAccountSection } from "@/components/layout/sidebar-account-section";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { ModuleSidebar } from "@/components/layout/module-sidebar";
 import { useAuthUser } from "@/hooks/use-auth-user";
 import { filterProjectsNavGroups } from "@/lib/projects/project-module-nav";
-import { cn } from "@/lib/utils";
 
 export type ProjectsNavItem = {
   title: string;
@@ -59,265 +55,30 @@ function isProjectsNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function itemOrChildActive(pathname: string, item: ProjectsNavItem): boolean {
-  if (isProjectsNavActive(pathname, item.href)) return true;
-  return (item.children ?? []).some((child) => isProjectsNavActive(pathname, child.href));
-}
-
-/** Horizontal tab strip (used when Projects shares the main app sidebar). */
-export function ProjectsWorkspaceNav() {
-  const pathname = usePathname();
-  const { projectModuleAdmin } = useAuthUser();
-  const navItems = useMemo(
-    () =>
-      filterProjectsNavGroups(PROJECTS_NAV_GROUPS, projectModuleAdmin).flatMap((g) =>
-        g.items.flatMap((item) => [item, ...(item.children ?? [])]),
-      ),
-    [projectModuleAdmin],
-  );
-
-  return (
-    <div className="grid min-w-0 max-w-full grid-cols-1">
-      <nav
-        aria-label="Projects workspace"
-        className="erp-scroll min-w-0 overflow-x-auto overscroll-x-contain"
-      >
-        <ul className="flex w-max items-center gap-0.5 border-b border-border/70 pb-px">
-          {navItems.map((item) => {
-            const active = isProjectsNavActive(pathname, item.href);
-            return (
-              <li key={item.href} className="shrink-0">
-                <Link
-                  href={item.href}
-                  className={cn(
-                    "relative inline-flex h-8 cursor-pointer items-center rounded-lg px-2.5 text-xs font-medium transition-[color,background-color] duration-200",
-                    active
-                      ? "bg-muted/60 font-semibold text-foreground after:absolute after:inset-x-2 after:bottom-0.5 after:h-0.5 after:rounded-full after:bg-primary"
-                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-                  )}
-                >
-                  {item.title}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-    </div>
-  );
-}
-
-/** Left sidebar chrome for standalone Projects tabs (replaces AppSidebar). */
+/** Left sidebar for the Projects workspace. */
 export function ProjectsSidebar() {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
-  const [query, setQuery] = useState("");
-  const { signedIn, projectModuleAdmin } = useAuthUser();
-  const [openDropdowns, setOpenDropdowns] = useState<Record<string, boolean>>({});
+  const { projectModuleAdmin } = useAuthUser();
 
-  const filteredGroups = useMemo(() => {
-    const groups = filterProjectsNavGroups(PROJECTS_NAV_GROUPS, projectModuleAdmin);
-    const q = query.trim().toLowerCase();
-    if (!q) return groups;
-    return groups
-      .map((group) => ({
-        ...group,
-        items: group.items
-          .map((item) => {
-            const selfMatch = item.title.toLowerCase().includes(q);
-            const childMatches = (item.children ?? []).filter((c) =>
-              c.title.toLowerCase().includes(q),
-            );
-            if (selfMatch) return item;
-            if (childMatches.length > 0) return { ...item, children: childMatches };
-            return null;
-          })
-          .filter((item): item is ProjectsNavItem => item !== null),
-      }))
-      .filter((group) => group.items.length > 0);
-  }, [query, projectModuleAdmin]);
-
-  const paneCount = filteredGroups.reduce(
+  const groups = useMemo(
+    () => filterProjectsNavGroups(PROJECTS_NAV_GROUPS, projectModuleAdmin),
+    [projectModuleAdmin],
+  );
+  const paneCount = groups.reduce(
     (n, g) => n + g.items.reduce((m, item) => m + 1 + (item.children?.length ?? 0), 0),
     0,
   );
 
   return (
-    <aside
-      data-erp-primary-sidebar
-      className={cn(
-        "sticky top-0 z-20 flex h-dvh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
-        collapsed ? "w-[72px]" : "w-[260px]",
-      )}
-    >
-      {signedIn ? (
-        <SidebarAccountSection collapsed={collapsed}>
-          <div className="flex items-center gap-2">
-            <FolderKanban className="size-3.5 shrink-0 text-sidebar-primary" aria-hidden />
-            <div className="min-w-0">
-              <p className="truncate text-xs font-semibold text-sidebar-foreground">Project Delivery</p>
-              <p className="truncate text-[10px] text-sidebar-foreground/55">
-                Site installation · {paneCount} panes
-              </p>
-            </div>
-          </div>
-        </SidebarAccountSection>
-      ) : (
-        <div className={cn("flex items-center gap-3 px-4 py-5", collapsed && "justify-center px-2")}>
-          <div className="flex size-9 items-center justify-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground shadow-[0_1px_3px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.25)] ring-1 ring-white/10">
-            <FolderKanban className="size-4" aria-hidden />
-          </div>
-          {!collapsed ? (
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold tracking-tight text-sidebar-foreground">
-                Project Delivery
-              </p>
-              <p className="truncate text-[11px] text-sidebar-foreground/55">
-                Site installation · {paneCount} panes
-              </p>
-            </div>
-          ) : null}
-        </div>
-      )}
-
-      {!collapsed ? (
-        <div className="px-3 pb-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-sidebar-foreground/40" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search Projects…"
-              className="h-9 rounded-xl border-sidebar-border bg-white/5 pl-8 text-sidebar-foreground placeholder:text-sidebar-foreground/40 focus-visible:ring-1 focus-visible:ring-sidebar-primary/60 transition-all duration-150"
-              aria-label="Search Projects panes"
-            />
-          </div>
-        </div>
-      ) : null}
-
-      <nav aria-label="Projects workspace" className="erp-scroll flex-1 overflow-y-auto px-2.5 py-2">
-        {filteredGroups.map((group) => (
-          <div key={group.label} className="mb-3">
-            {!collapsed ? (
-              <p className="mb-2 px-2.5 text-[10px] font-semibold tracking-[0.14em] text-sidebar-foreground/40 uppercase">
-                {group.label}
-              </p>
-            ) : null}
-            <ul className="space-y-0.5">
-              {group.items.map((item) => {
-                const children = item.children ?? [];
-                const hasChildren = children.length > 0 && !collapsed;
-                const childActive = children.some((c) => isProjectsNavActive(pathname, c.href));
-                const active = isProjectsNavActive(pathname, item.href) && !childActive;
-                const dropdownOverride = openDropdowns[item.href];
-                const expandedByDefault =
-                  itemOrChildActive(pathname, item) || Boolean(query.trim());
-                const expanded =
-                  hasChildren &&
-                  (dropdownOverride === undefined ? expandedByDefault : dropdownOverride);
-
-                return (
-                  <li key={item.href}>
-                    <div
-                      className={cn(
-                        "group relative flex items-center gap-0.5 rounded-xl transition-all duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]",
-                        active || (hasChildren && childActive && !expanded)
-                          ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm ring-1 ring-white/10 backdrop-blur-xs"
-                          : "text-sidebar-foreground/75",
-                        collapsed && "justify-center",
-                      )}
-                    >
-                      {active || (hasChildren && childActive && !expanded) ? (
-                        <span className="absolute inset-y-2 left-0.5 w-1 rounded-full bg-sidebar-primary shadow-[0_0_8px_rgba(255,255,255,0.4)]" />
-                      ) : null}
-                      <Link
-                        href={item.href}
-                        title={item.title}
-                        className={cn(
-                          "flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium transition-colors duration-150",
-                          active || (hasChildren && childActive)
-                            ? "text-sidebar-accent-foreground"
-                            : "hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
-                          collapsed && "justify-center px-0",
-                        )}
-                      >
-                        {!collapsed ? (
-                          <span className="min-w-0 flex-1 truncate font-medium">{item.title}</span>
-                        ) : (
-                          <span className="text-[10px] font-semibold tracking-wide">
-                            {item.title.slice(0, 2).toUpperCase()}
-                          </span>
-                        )}
-                      </Link>
-                      {hasChildren ? (
-                        <button
-                          type="button"
-                          aria-label={expanded ? `Collapse ${item.title}` : `Expand ${item.title}`}
-                          aria-expanded={expanded}
-                          className="mr-1.5 flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-sidebar-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
-                          onClick={() =>
-                            setOpenDropdowns((prev) => {
-                              const current =
-                                prev[item.href] === undefined
-                                  ? itemOrChildActive(pathname, item)
-                                  : prev[item.href];
-                              return { ...prev, [item.href]: !current };
-                            })
-                          }
-                        >
-                          <ChevronDown
-                            className={cn(
-                              "size-3.5 transition-transform duration-200",
-                              expanded && "rotate-180",
-                            )}
-                            aria-hidden
-                          />
-                        </button>
-                      ) : null}
-                    </div>
-                    {hasChildren && expanded ? (
-                      <ul className="mt-0.5 ml-3 space-y-0.5 border-l border-sidebar-border/70 pl-2">
-                        {children.map((child) => {
-                          const childIsActive = isProjectsNavActive(pathname, child.href);
-                          return (
-                            <li key={child.href}>
-                              <Link
-                                href={child.href}
-                                title={child.title}
-                                className={cn(
-                                  "relative flex cursor-pointer items-center rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-all duration-150",
-                                  childIsActive
-                                    ? "bg-sidebar-accent/80 text-sidebar-accent-foreground"
-                                    : "text-sidebar-foreground/65 hover:bg-sidebar-accent/40 hover:text-sidebar-accent-foreground",
-                                )}
-                              >
-                                <span className="min-w-0 truncate">{child.title}</span>
-                              </Link>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
-      </nav>
-
-      <div className="border-t border-sidebar-border p-2.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full cursor-pointer justify-center text-sidebar-foreground/70 transition-colors duration-200 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-          onClick={() => setCollapsed((v) => !v)}
-          aria-label={collapsed ? "Expand Projects sidebar" : "Collapse Projects sidebar"}
-        >
-          {collapsed ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
-          {!collapsed ? <span className="ml-1.5 text-xs">Collapse</span> : null}
-        </Button>
-      </div>
-    </aside>
+    <ModuleSidebar
+      moduleKey="projects"
+      title="Project Delivery"
+      subtitle={`Site installation · ${paneCount} panes`}
+      icon={FolderKanban}
+      aria-label="Projects workspace"
+      groups={groups}
+      isActive={(item) => isProjectsNavActive(pathname, item.href)}
+      searchPlaceholder="Search Projects…"
+    />
   );
 }

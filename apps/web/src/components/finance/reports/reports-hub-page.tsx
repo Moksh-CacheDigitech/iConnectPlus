@@ -17,6 +17,7 @@ import {
 
 import { FinanceKpiCard } from "@/components/finance/finance-kpi-card";
 import { PageHeader } from "@/components/layout/page-header";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import { Button } from "@/components/ui/button";
 import { isAuthenticated } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -132,12 +133,7 @@ export function ReportsHubPage() {
       />
 
       {error ? (
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          <span>{error}</span>
-          <Button type="button" size="sm" variant="outline" className="h-8 cursor-pointer" onClick={() => void load()}>
-            Retry
-          </Button>
-        </div>
+        <ErrorBanner onRetry={() => void load()}>{error}</ErrorBanner>
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
