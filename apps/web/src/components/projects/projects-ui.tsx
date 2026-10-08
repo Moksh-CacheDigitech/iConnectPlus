@@ -1,32 +1,29 @@
 /**
- * Projects portal UI primitives.
- *
- * The dashboard shell primitives are shared verbatim with the CRM portal so
- * both portals stay visually identical; they are re-exported under `Projects*`
- * names so portal code reads in its own domain language.
+ * Projects names for the shared workspace kit (`components/shared`).
+ * New code should import from `components/shared` directly.
  */
 
 export {
-  CrmActivityTile as ProjectsActivityTile,
-  CrmCountBadge as ProjectsCountBadge,
-  CrmDetailGrid as ProjectsDetailGrid,
-  CrmDetailItem as ProjectsDetailItem,
-  CrmErrorBanner as ProjectsErrorBanner,
-  CrmHeadlineBand as ProjectsHeadlineBand,
-  CrmHeadlineStat as ProjectsHeadlineStat,
-  CrmIconBadge as ProjectsIconBadge,
-  CrmInfoBanner as ProjectsInfoBanner,
-  CrmKpiCard as ProjectsKpiCard,
-  CrmListPanel as ProjectsListPanel,
-  CrmMetric as ProjectsMetric,
-  CrmMetricStrip as ProjectsMetricStrip,
-  CrmPage as ProjectsPage,
-  CrmSection as ProjectsSection,
-  CrmViewAllLink as ProjectsViewAllLink,
-  CrmWarnBanner as ProjectsWarnBanner,
-} from "@/components/crm/crm-ui";
+  ActivityTile as ProjectsActivityTile,
+  CountBadge as ProjectsCountBadge,
+  DetailGrid as ProjectsDetailGrid,
+  DetailItem as ProjectsDetailItem,
+  HeadlineBand as ProjectsHeadlineBand,
+  HeadlineStat as ProjectsHeadlineStat,
+  IconBadge as ProjectsIconBadge,
+  InfoBanner as ProjectsInfoBanner,
+  ListPanel as ProjectsListPanel,
+  Metric as ProjectsMetric,
+  MetricStrip as ProjectsMetricStrip,
+  ViewAllLink as ProjectsViewAllLink,
+  WarnBanner as ProjectsWarnBanner,
+  WorkspacePage as ProjectsPage,
+  WorkspaceSection as ProjectsSection,
+} from "@/components/shared/workspace-ui";
 
-export { CrmListToolbar as ProjectsListToolbar } from "@/components/crm/sales/crm-list-toolbar";
+export { KpiCard as ProjectsKpiCard } from "@/components/shared/kpi-card";
+export { ErrorBanner as ProjectsErrorBanner } from "@/components/shared/error-banner";
+export { ListToolbar as ProjectsListToolbar } from "@/components/shared/list-toolbar";
 
 export {
   CrmPipelineBarChart as ProjectsCountBarChart,
@@ -36,9 +33,9 @@ export {
 } from "@/components/crm/crm-dashboard-charts";
 
 export {
-  CrmSortableTh as ProjectsSortableTh,
+  SortableTh as ProjectsSortableTh,
   sortRows,
   useTableSort,
   type SortDir,
   type SortValue,
-} from "@/components/crm/sales/crm-table-sort";
+} from "@/components/shared/table-sort";

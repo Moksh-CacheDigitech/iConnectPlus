@@ -11,6 +11,7 @@ import { PeriodEnterpriseTable } from "@/components/finance/fiscal/period-enterp
 import { FinanceKpiCard } from "@/components/finance/finance-kpi-card";
 import { FinanceField, FinanceSelect } from "@/components/finance/journals/finance-form-field";
 import { PageHeader } from "@/components/layout/page-header";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useFiscalTablePrefs } from "@/hooks/use-fiscal-table-prefs";
@@ -179,10 +180,7 @@ export function FiscalHubPage({ initialTab = "dashboard" }: Props) {
       </div>
 
       {error ? (
-        <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          <span>{error}</span>
-          <Button type="button" size="sm" variant="outline" className="h-8 cursor-pointer" onClick={() => void load()}>Retry</Button>
-        </div>
+        <ErrorBanner onRetry={() => void load()}>{error}</ErrorBanner>
       ) : null}
 
       {tab === "dashboard" ? (

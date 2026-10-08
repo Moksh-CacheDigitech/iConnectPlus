@@ -1,7 +1,7 @@
 /**
- * Premium Neo-Brutalist HRMS palette.
- * CSS tokens live on `.hrms-theme` (see globals.css); these constants are for
- * charts, KPI surfaces, and other JS-driven color picks.
+ * Legacy HRMS palette. The purple values are allowed only on the `.hrms-theme`
+ * candidate onboarding portal; authenticated HR pages use the enterprise tokens
+ * (`bg-hrms-*` / `text-hrms-*` map to them in globals.css).
  */
 
 export const HRMS_COLORS = {

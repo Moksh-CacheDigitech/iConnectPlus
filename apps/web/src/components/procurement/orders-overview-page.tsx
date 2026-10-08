@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FileSpreadsheet, RefreshCw } from "lucide-react";
 
-import { ProcurementPageHeader } from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { procurementUi } from "@/components/procurement/procurement-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -144,7 +144,7 @@ export function OrdersOverviewPage() {
 
   return (
     <div className={procurementUi.page}>
-      <ProcurementPageHeader
+      <PageHeader
         title="Purchase order overview"
         actions={
           <div className="flex flex-wrap items-center gap-2">

@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight, Pencil, Plus, RefreshCw } from "lucide-react
 
 import { ConfirmDialog } from "@/components/finance/journals/confirm-dialog";
 import { FinanceStatusBadge } from "@/components/finance/finance-status-badge";
-import { ProcurementPageHeader } from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { procurementUi } from "@/components/procurement/procurement-ui";
 import {
   buildVendorAddressEntriesFromForm,
@@ -248,7 +248,7 @@ export function VendorsListPage() {
 
   return (
     <div className={procurementUi.page}>
-      <ProcurementPageHeader
+      <PageHeader
         title="Vendors"
         actions={
           <div className="flex flex-wrap items-center gap-2">

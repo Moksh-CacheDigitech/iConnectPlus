@@ -25,6 +25,7 @@ import {
   FinanceSelect,
 } from "@/components/finance/journals/finance-form-field";
 import { PageHeader } from "@/components/layout/page-header";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useApTablePrefs } from "@/hooks/use-ap-table-prefs";
@@ -298,10 +299,7 @@ export function ApHubPage() {
       ) : null}
 
       {error ? (
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          <span>{error}</span>
-          <Button type="button" size="sm" variant="outline" className="h-8 cursor-pointer" onClick={refreshAll}>Retry</Button>
-        </div>
+        <ErrorBanner onRetry={refreshAll}>{error}</ErrorBanner>
       ) : null}
 
       {tab === "dashboard" ? (

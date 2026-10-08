@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Loader2, Mail, RefreshCw, TriangleAlert } from "lucide-react";
 
-import { ProcurementPageHeader } from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -123,7 +123,7 @@ export function CorrespondenceListPage() {
 
   return (
     <div className="space-y-4">
-      <ProcurementPageHeader
+      <PageHeader
         title="Mails"
         description="All order acknowledgement, ETD reminder, and delivery update mails across purchase orders."
         actions={

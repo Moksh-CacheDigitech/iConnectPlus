@@ -8,6 +8,8 @@ import { Inbox, RefreshCw } from "lucide-react";
 
 import { redirectToLogin } from "@/lib/auth";
 
+import { EmptyState } from "@/components/shared/empty-state";
+import { dataTableClasses } from "@/components/shared/table-classes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { hrmsPastelSurface } from "@/config/hrms-theme";
@@ -61,16 +63,14 @@ export function HrEmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center shadow-sm">
-      <div className="mb-3 flex size-10 items-center justify-center rounded-full bg-hrms-lavender">
-        <Inbox className="size-4 text-muted-foreground" />
-      </div>
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      {description ? (
-        <p className="mt-1 max-w-sm text-xs text-muted-foreground">{description}</p>
-      ) : null}
-      {action ? <div className="mt-4">{action}</div> : null}
-    </div>
+    <EmptyState
+      bordered
+      icon={Inbox}
+      title={title}
+      description={description ?? null}
+      action={action}
+      className="bg-card"
+    />
   );
 }
 
@@ -214,19 +214,13 @@ export function HrTable({
     return <HrEmptyState title={emptyTitle} description={emptyDescription} />;
   }
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-      <div className="erp-scroll overflow-x-auto">
-        <table className="w-full min-w-[640px] text-left text-sm">
-          <thead className="border-b border-border/70 bg-muted/40">
-            <tr>
+    <div className={dataTableClasses.shell}>
+      <div className={dataTableClasses.scroll}>
+        <table className={cn(dataTableClasses.table, "min-w-[640px]")}>
+          <thead>
+            <tr className={dataTableClasses.thead}>
               {columns.map((col) => (
-                <th
-                  key={col.key}
-                  className={cn(
-                    "px-3 py-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase",
-                    col.className,
-                  )}
-                >
+                <th key={col.key} scope="col" className={cn(dataTableClasses.th, col.className)}>
                   {col.label}
                 </th>
               ))}
@@ -234,12 +228,9 @@ export function HrTable({
           </thead>
           <tbody>
             {rows.map((row, idx) => (
-              <tr
-                key={String(row.__key ?? idx)}
-                className="border-b border-border/50 last:border-0 hover:bg-muted/30"
-              >
+              <tr key={String(row.__key ?? idx)} className={dataTableClasses.tr}>
                 {columns.map((col) => (
-                  <td key={col.key} className={cn("px-3 py-2.5 align-middle", col.className)}>
+                  <td key={col.key} className={cn(dataTableClasses.td, col.className)}>
                     {row[col.key] ?? "-"}
                   </td>
                 ))}

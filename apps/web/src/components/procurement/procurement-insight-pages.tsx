@@ -27,7 +27,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { ProcurementPageHeader } from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import {
   ProcurementErrorBanner,
   ProcurementPage,
@@ -386,7 +386,7 @@ export function ProcurementReportsPage() {
 
   return (
     <ProcurementPage>
-      <ProcurementPageHeader
+      <PageHeader
         title="Reports"
         actions={
           <Button
@@ -782,7 +782,7 @@ export function ProcurementAnalyticsPage() {
 
   return (
     <ProcurementPage>
-      <ProcurementPageHeader
+      <PageHeader
         title="Analytics"
         actions={
           <div className="flex flex-wrap gap-2">

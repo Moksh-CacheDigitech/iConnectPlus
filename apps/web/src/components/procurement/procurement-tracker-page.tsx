@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileSpreadsheet, RefreshCw, Upload } from "lucide-react";
 
-import { ProcurementPageHeader } from "@/components/procurement/procurement-page-header";
+import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatApiError } from "@/services/api-client";
@@ -135,7 +135,7 @@ export function ProcurementTrackerPage() {
 
   return (
     <div className="space-y-4">
-      <ProcurementPageHeader
+      <PageHeader
         title="Tracker upload"
         description="Upload Excel sheets as often as needed. New columns and rows are added to the extracted table; existing cells stay as they are."
         actions={

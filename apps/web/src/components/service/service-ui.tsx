@@ -1,22 +1,22 @@
-"use client";
-
 /**
- * Service module UI shells - same visual language as CRM (`crm-ui.tsx`).
+ * Service names for the shared workspace kit (`components/shared`).
+ * New code should import from `components/shared` directly.
  */
 export {
-  CRM_SECTION_TITLE as SERVICE_SECTION_TITLE,
-  CRM_TABLE_HEAD_CELL as SERVICE_TABLE_HEAD_CELL,
-  CRM_TABLE_HEAD_ROW as SERVICE_TABLE_HEAD_ROW,
-  CrmActivityTile as ServiceActivityTile,
-  CrmErrorBanner as ServiceErrorBanner,
-  CrmHeadlineBand as ServiceHeadlineBand,
-  CrmHeadlineStat as ServiceHeadlineStat,
-  CrmIconBadge as ServiceIconBadge,
-  CrmInfoBanner as ServiceInfoBanner,
-  CrmKpiCard as ServiceKpiCard,
-  CrmListPanel as ServiceListPanel,
-  CrmPage as ServicePage,
-  CrmSection as ServiceSection,
-  CrmViewAllLink as ServiceViewAllLink,
-  CrmWarnBanner as ServiceWarnBanner,
-} from "@/components/crm/crm-ui";
+  SECTION_TITLE as SERVICE_SECTION_TITLE,
+  TABLE_HEAD_CELL as SERVICE_TABLE_HEAD_CELL,
+  TABLE_HEAD_ROW as SERVICE_TABLE_HEAD_ROW,
+  ActivityTile as ServiceActivityTile,
+  HeadlineBand as ServiceHeadlineBand,
+  HeadlineStat as ServiceHeadlineStat,
+  IconBadge as ServiceIconBadge,
+  InfoBanner as ServiceInfoBanner,
+  ListPanel as ServiceListPanel,
+  ViewAllLink as ServiceViewAllLink,
+  WarnBanner as ServiceWarnBanner,
+  WorkspacePage as ServicePage,
+  WorkspaceSection as ServiceSection,
+} from "@/components/shared/workspace-ui";
+
+export { KpiCard as ServiceKpiCard } from "@/components/shared/kpi-card";
+export { ErrorBanner as ServiceErrorBanner } from "@/components/shared/error-banner";

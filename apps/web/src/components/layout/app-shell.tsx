@@ -3,16 +3,9 @@
 import type { ReactNode } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
-import { AssetsModuleSidebar } from "@/components/assets/assets-module-sidebar";
-import { CrmSidebar } from "@/components/crm/crm-workspace-nav";
 import { ElevenLabsConvaiWidget } from "@/components/elevenlabs/convai-widget";
-import { HrSidebar } from "@/components/hr/hr-sidebar";
-import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppTopbar } from "@/components/layout/app-topbar";
-import { MarketingSidebar } from "@/components/marketing/marketing-workspace-nav";
-import { ProcurementSidebar } from "@/components/procurement/procurement-workspace-nav";
-import { ProjectsSidebar } from "@/components/projects/projects-workspace-nav";
-import { ServiceSidebar } from "@/components/service/service-workspace-nav";
+import { ShellSidebar } from "@/components/layout/module-sidebar-registry";
 import { isHrPath } from "@/config/hr-nav";
 import { useStandaloneChrome } from "@/hooks/use-standalone-chrome";
 
@@ -20,45 +13,23 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-/** Primary application chrome: sidebar + topbar + content. */
+/** Primary application chrome: left sidebar + topbar + content. */
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const standalone = useStandaloneChrome();
   const hrMode = isHrPath(pathname);
-  const isCrm = pathname === "/crm" || pathname.startsWith("/crm/");
-  const isProjects = pathname === "/projects" || pathname.startsWith("/projects/");
-  const isProcurement =
-    pathname === "/procurement" || pathname.startsWith("/procurement/");
-  const isAssets = pathname === "/assets" || pathname.startsWith("/assets/");
-  const isService = pathname === "/service" || pathname.startsWith("/service/");
-  const isMarketing = pathname === "/marketing" || pathname.startsWith("/marketing/");
   /** QR scan focus mode — full portal without the assets dock (better on phones). */
   const qrScanMode =
     searchParams.get("from") === "qr" && pathname.startsWith("/assets/information-portal/");
-
   return (
     <div className="flex min-h-dvh w-full max-w-[100dvw] overflow-x-clip bg-background">
-      {hrMode ? (
-        <HrSidebar />
-      ) : standalone ? (
-        <>
-          {isCrm ? <CrmSidebar /> : null}
-          {isProjects ? <ProjectsSidebar /> : null}
-          {isProcurement ? <ProcurementSidebar /> : null}
-          {isAssets && !qrScanMode ? <AssetsModuleSidebar /> : null}
-          {isService ? <ServiceSidebar /> : null}
-          {isMarketing ? <MarketingSidebar /> : null}
-        </>
-      ) : (
-        <AppSidebar />
-      )}
+      <ShellSidebar pathname={pathname} standalone={standalone} hideSidebar={qrScanMode} />
       <div id="erp-workspace-main" className="flex min-w-0 flex-1 flex-col overflow-x-clip">
         <AppTopbar />
         <main
-          className={`min-w-0 flex-1 overflow-x-clip px-3 py-4 sm:px-6 sm:py-6 lg:px-8 ${
-            qrScanMode ? "pb-[max(1.5rem,env(safe-area-inset-bottom))]" : ""
-          }`}
+          className={`min-w-0 flex-1 overflow-x-clip px-3 py-4 sm:px-6 sm:py-6 lg:px-8 ${qrScanMode ? "pb-[max(1.5rem,env(safe-area-inset-bottom))]" : ""
+            }`}
         >
           <div className="mx-auto w-full min-w-0 max-w-[1400px] animate-in fade-in-50 slide-in-from-bottom-2 duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:animate-none">
             {children}
