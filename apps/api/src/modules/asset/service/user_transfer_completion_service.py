@@ -40,7 +40,7 @@ from modules.asset.service.document_number_service import DocumentNumberService
 from modules.asset.service.engines import AssetAssignmentEngine, AssetLocationEngine
 from modules.asset.service.transfer_validator import TransferValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 _USER_TRANSFER_VERIFICATION_KEY = "asset:user_transfer_verification:{tenant_id}:{asset_id}:{verification_id}"
 
@@ -59,7 +59,7 @@ class UserTransferCompletionService:
         self._assignment_engine = AssetAssignmentEngine()
         self._location_engine = AssetLocationEngine()
         self._operational = AssetOperationalStatusService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def assign_to_new_user(
         self,

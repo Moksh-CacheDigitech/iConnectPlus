@@ -55,8 +55,9 @@ from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.notification import NtfEvent
 from modules.foundation.repository.base import utcnow
 from modules.foundation.service.notification_href import sanitize_inbox_href
+from modules.ess.adapters.asset_adapter import EssAssetAdapter
+from modules.ess.adapters.hr_adapter import EssHrAdapter
 from modules.hr.domain.enums import HolidayCalendarStatus
-from modules.hr.models import HrRosterEntry, HrShift, HrShiftAssignment
 from modules.hr.service.attendance_correction_service import AttendanceCorrectionService
 from modules.hr.service.attendance_policy_service import AttendanceRuleService
 from modules.hr.service.attendance_service import AttendanceService
@@ -182,7 +183,6 @@ class EssService:
     def get_me(self, ctx: TenantContext) -> EssMeResponse:
         from modules.foundation.models.security import SecRole, SecUserRole, SecUser
         from modules.foundation.service.rbac_service import RBACService
-        from modules.master_data.models.employee import MasterEmployee
 
         emp = self.resolve_employee(ctx)
         role_codes = list(
@@ -197,15 +197,7 @@ class EssService:
             ).all()
         )
         perms = RBACService(self._db).get_user_permissions(ctx.user_id, ctx.tenant_id)
-        direct_reports = self._db.scalar(
-            select(MasterEmployee.id)
-            .where(
-                MasterEmployee.reporting_manager_id == emp.id,
-                MasterEmployee.is_deleted.is_(False),
-            )
-            .limit(1)
-        )
-        is_manager = direct_reports is not None
+        is_manager = bool(EssHrAdapter(self._db).list_direct_report_ids(manager_employee_id=emp.id))
         admin_roles = {"SUPER_ADMIN", "TENANT_ADMIN", "HR_MANAGER", "HR_ADMIN"}
         is_admin = bool(admin_roles.intersection(role_codes)) or "hr.leave:approve" in perms
         if is_admin:
@@ -452,47 +444,13 @@ class EssService:
                 return
         raise ConflictException("Punch location is outside the allowed geofence")
 
-    def _resolve_shift(self, ctx: TenantContext, emp: EmployeeEntity, day: date) -> HrShift | None:
+    def _resolve_shift(self, ctx: TenantContext, emp: EmployeeEntity, day: date):
         """Prefer published roster for the day; else active/approved shift assignment."""
-        roster = self._db.scalar(
-            select(HrRosterEntry).where(
-                HrRosterEntry.tenant_id == ctx.tenant_id,
-                HrRosterEntry.employee_id == emp.id,
-                HrRosterEntry.roster_date == day,
-                HrRosterEntry.is_deleted.is_(False),
-                HrRosterEntry.status == "published",
-            )
-        )
-        shift_id = roster.shift_id if roster else None
-        if shift_id is None:
-            assignment = self._db.scalar(
-                select(HrShiftAssignment)
-                .where(
-                    HrShiftAssignment.tenant_id == ctx.tenant_id,
-                    HrShiftAssignment.employee_id == emp.id,
-                    HrShiftAssignment.is_deleted.is_(False),
-                    HrShiftAssignment.status.in_(("active", "approved")),
-                    HrShiftAssignment.effective_from <= day,
-                    or_(
-                        HrShiftAssignment.effective_to.is_(None),
-                        HrShiftAssignment.effective_to >= day,
-                    ),
-                )
-                .order_by(HrShiftAssignment.effective_from.desc())
-            )
-            shift_id = assignment.shift_id if assignment else None
-        if shift_id is None:
-            return None
-        return self._db.scalar(
-            select(HrShift).where(
-                HrShift.id == shift_id,
-                HrShift.is_deleted.is_(False),
-            )
-        )
+        return EssHrAdapter(self._db).resolve_shift(ctx, employee_id=emp.id, day=day)
 
     @staticmethod
     def _shift_window(
-        shift: HrShift, day: date, tz: ZoneInfo
+        shift, day: date, tz: ZoneInfo
     ) -> tuple[datetime, datetime]:
         start = datetime.combine(day, shift.start_time, tzinfo=tz)
         end = datetime.combine(day, shift.end_time, tzinfo=tz)
@@ -501,7 +459,7 @@ class EssService:
         return start, end
 
     def _check_in_status_fields(
-        self, shift: HrShift | None, local_now: datetime, *, ctx: TenantContext | None = None, company_id: UUID | None = None
+        self, shift, local_now: datetime, *, ctx: TenantContext | None = None, company_id: UUID | None = None
     ) -> dict:
         if shift is None:
             return {"attendance_status": "present", "shift_id": None, "late_minutes": None}
@@ -537,7 +495,7 @@ class EssService:
 
     def _check_out_ot_fields(
         self,
-        shift: HrShift | None,
+        shift,
         local_now: datetime,
         current_status: str | None,
         *,
@@ -1259,16 +1217,9 @@ class EssService:
         return self.get_education_skills(ctx)
 
     def list_team_leave(self, ctx: TenantContext) -> list[EssTeamLeaveItem]:
-        from modules.master_data.models.employee import MasterEmployee
-
         emp = self.resolve_employee(ctx)
         reports = list(
-            self._db.scalars(
-                select(MasterEmployee).where(
-                    MasterEmployee.reporting_manager_id == emp.id,
-                    MasterEmployee.is_deleted.is_(False),
-                )
-            ).all()
+            EssHrAdapter(self._db).list_direct_reports(manager_employee_id=emp.id)
         )
         if not reports:
             return []
@@ -1298,36 +1249,22 @@ class EssService:
         return out
 
     def manager_approve_team_leave(self, ctx: TenantContext, row_id: UUID):
-        from modules.master_data.models.employee import MasterEmployee
-
         emp = self.resolve_employee(ctx)
         row = self._leave_requests.get(ctx, row_id)
         reports = {
             r.id
-            for r in self._db.scalars(
-                select(MasterEmployee).where(
-                    MasterEmployee.reporting_manager_id == emp.id,
-                    MasterEmployee.is_deleted.is_(False),
-                )
-            ).all()
+            for r in EssHrAdapter(self._db).list_direct_reports(manager_employee_id=emp.id)
         }
         if row.employee_id not in reports:
             raise ForbiddenException("Not a direct report leave request")
         return self._leave_requests.manager_approve(ctx, row_id, approver_employee_id=emp.id)
 
     def reject_team_leave(self, ctx: TenantContext, row_id: UUID):
-        from modules.master_data.models.employee import MasterEmployee
-
         emp = self.resolve_employee(ctx)
         row = self._leave_requests.get(ctx, row_id)
         reports = {
             r.id
-            for r in self._db.scalars(
-                select(MasterEmployee).where(
-                    MasterEmployee.reporting_manager_id == emp.id,
-                    MasterEmployee.is_deleted.is_(False),
-                )
-            ).all()
+            for r in EssHrAdapter(self._db).list_direct_reports(manager_employee_id=emp.id)
         }
         if row.employee_id not in reports:
             raise ForbiddenException("Not a direct report leave request")
@@ -1336,15 +1273,8 @@ class EssService:
     def _direct_reports(
         self, ctx: TenantContext, manager_employee_id: UUID
     ) -> tuple[set[UUID], dict]:
-        from modules.master_data.models.employee import MasterEmployee
-
         reports = list(
-            self._db.scalars(
-                select(MasterEmployee).where(
-                    MasterEmployee.reporting_manager_id == manager_employee_id,
-                    MasterEmployee.is_deleted.is_(False),
-                )
-            ).all()
+            EssHrAdapter(self._db).list_direct_reports(manager_employee_id=manager_employee_id)
         )
         ids = {r.id for r in reports}
         by_id = {r.id: r for r in reports}
@@ -1636,24 +1566,10 @@ class EssService:
         return out[:30]
 
     def list_assets(self, ctx: TenantContext) -> list[EssAssetItem]:
-        from modules.asset.models.asset import AstAsset
-        from modules.asset.models.asset_assignment import AstAssetAssignment
-
         emp = self.resolve_employee(ctx)
-        assignments = list(
-            self._db.scalars(
-                select(AstAssetAssignment).where(
-                    AstAssetAssignment.employee_id == emp.id,
-                    AstAssetAssignment.is_deleted.is_(False),
-                    AstAssetAssignment.status.in_(("active", "approved")),
-                )
-            ).all()
-        )
+        pairs = EssAssetAdapter(self._db).list_assigned_assets(employee_id=emp.id)
         out: list[EssAssetItem] = []
-        for asn in assignments:
-            asset = self._db.get(AstAsset, asn.asset_id)
-            if asset is None or getattr(asset, "is_deleted", False):
-                continue
+        for asset, asn in pairs:
             out.append(
                 EssAssetItem(
                     id=asset.id,

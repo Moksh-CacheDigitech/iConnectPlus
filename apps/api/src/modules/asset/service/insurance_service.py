@@ -16,7 +16,7 @@ from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.asset.service.engines import AssetInsuranceEngine
 from modules.asset.service.insurance_validator import InsuranceValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_AST_INSURANCE = "ast_asset_insurance"
 
@@ -26,7 +26,7 @@ class InsuranceService:
         self._repo = AssetInsuranceRepository(db)
         self._scope = AssetScopeValidator(db)
         self._engine = AssetInsuranceEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = InsuranceValidator(db)
 
     def search(

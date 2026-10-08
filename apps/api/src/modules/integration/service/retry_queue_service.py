@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.integration.domain.enums import IntegrationEntityType
 from modules.integration.models import IntRetryQueue
 from modules.integration.repository.retry_queue_repository import RetryQueueRepository
@@ -21,7 +21,7 @@ class RetryQueueService:
         self._scope = IntegrationScopeValidator(db)
         self._numbers = IntegrationNumberService(db)
         self._engine = RetryQueueEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

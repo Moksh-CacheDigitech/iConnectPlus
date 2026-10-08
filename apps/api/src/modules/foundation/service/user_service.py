@@ -19,7 +19,7 @@ from modules.foundation.repository.session_repository import SessionRepository
 from modules.foundation.repository.user_module_repository import UserModuleRepository
 from modules.foundation.repository.user_repository import UserRepository
 from modules.foundation.schemas import UserResponse
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.rbac_service import RBACService
 from security.password import PasswordHasher
 
@@ -29,7 +29,7 @@ class UserService:
         self._repo = UserRepository(db)
         self._modules = UserModuleRepository(db)
         self._sessions = SessionRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._rbac = RBACService(db)
 
     @staticmethod

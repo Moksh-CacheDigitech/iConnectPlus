@@ -1,26 +1,42 @@
 ---
-description: GitHub is primary; sync GitLab only when explicitly asked
+description: GitHub origin primary; iConnectPlus always synced; GitLab on demand
 alwaysApply: true
 ---
 
-# Git remotes — GitHub primary, GitLab on demand
+# Git remotes — GitHub primary, iConnectPlus mirror, GitLab on demand
 
 ## Remotes
 
 | Remote | URL | Role |
 |--------|-----|------|
-| `origin` | `https://github.com/ronanop/enterprise-erp.git` | **Primary** — default push target |
+| `origin` | `https://github.com/ronanop/enterprise-erp.git` | **Primary** — fetch + default push |
+| `iconnectplus` | `https://github.com/Moksh-CacheDigitech/iConnectPlus.git` | **Always-synced mirror** of origin |
 | `gitlab` | `https://172.16.200.77/cachedigitech/cache-erp-vapt-31-aug.git` | Mirror — update only on explicit request |
 
-GitHub is the source of truth. GitLab must be updated to match GitHub when syncing.
+GitHub `origin` is the source of truth. `iconnectplus` must stay matched to origin on every push.
+
+Local `origin` is configured with **two push URLs** (primary + iConnectPlus), so `git push origin …` updates both. The named `iconnectplus` remote remains available for explicit sync.
 
 ## When the user asks to push / push to git
 
-1. Push to **GitHub only** (`origin`).
-2. Do **not** push or sync GitLab unless they also asked to sync GitLab.
+1. Push to **origin** (this also syncs iConnectPlus via the extra push URL).
+2. If dual push URLs are missing or only one remote updated, also push the same ref to `iconnectplus`.
+3. Do **not** push or sync GitLab unless they also asked to sync GitLab.
 
 ```bash
 git push -u origin HEAD
+# Fallback if iconnectplus did not update with origin:
+git push iconnectplus HEAD:<branch>
+```
+
+## When the user asks to sync iconnectplus / keep iConnectPlus synced
+
+1. Ensure local matches what should be on origin (push to `origin` first if needed).
+2. Push the same refs to `iconnectplus`.
+
+```bash
+git push origin HEAD
+git push iconnectplus HEAD:<branch>
 ```
 
 ## When the user asks to sync gitlab
@@ -33,12 +49,13 @@ git push origin HEAD
 git push gitlab HEAD:<branch> --force-with-lease
 ```
 
-Prefer matching the current branch name on both remotes. Use `--force-with-lease` only when histories diverged and the user intends GitHub to overwrite GitLab.
+Prefer matching the current branch name on both remotes. Use `--force-with-lease` only when histories diverged and the user intends the source remote to overwrite the target.
 
 This GitLab host uses a self-signed cert. Local repo already has `http.https://172.16.200.77/.sslVerify=false`. Auth requires a GitLab username + PAT (or SSH key); do not prompt for passwords in non-interactive sessions — ask the user for a token/URL with credentials if push fails.
 
 ## Do not
 
+- Skip syncing `iconnectplus` when pushing to origin / "push to git"
 - Auto-sync GitLab on every GitHub push
-- Treat GitLab as primary or push-only-to-GitLab when the user said "push to git"
-- Sync the other direction (GitLab → GitHub) unless the user explicitly asks
+- Treat GitLab or iConnectPlus as primary fetch when the user said "push to git"
+- Sync the other direction (GitLab → GitHub, or iConnectPlus → origin) unless the user explicitly asks

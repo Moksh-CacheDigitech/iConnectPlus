@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
-from modules.foundation.service.notification_service import NotificationService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
+from modules.platform.compat.notify_facade import PlatformNotifyFacade
 from modules.organization.repository.company_repository import CompanyRepository
 from modules.organization.service.org_scope_validator import OrgScopeValidator
 
@@ -15,8 +15,8 @@ from modules.organization.service.org_scope_validator import OrgScopeValidator
 class CompanyService:
     def __init__(self, db: Session) -> None:
         self._repo = CompanyRepository(db)
-        self._audit = AuditService(db)
-        self._notifications = NotificationService(db)
+        self._audit = PlatformAuditFacade(db)
+        self._notifications = PlatformNotifyFacade(db)
         self._scope = OrgScopeValidator(db)
 
     def list_companies(self, ctx: TenantContext):

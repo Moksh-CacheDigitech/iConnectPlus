@@ -32,7 +32,7 @@ from modules.crm.service.crm_scope_validator import CrmScopeValidator
 from modules.crm.service.document_number_service import DocumentNumberService
 from modules.crm.service.engines import margin_engine, sales_blueprint_engine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.master_data.service.employee_service import EmployeeService
 
 
@@ -60,7 +60,7 @@ class QuoteService:
         self._numbers = DocumentNumberService(db)
         self._crm_admin = CrmModuleAdminService(db)
         self._visibility = CrmRecordVisibility(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     # -- reads -----------------------------------------------------------
     def peek_next_quote_no(

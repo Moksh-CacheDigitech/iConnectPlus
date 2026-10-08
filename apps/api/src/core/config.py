@@ -156,6 +156,16 @@ class Settings(BaseSettings):
         alias="ASSET_DC_CHALLAN_SCM_ALLOWED_HOSTS",
         description="Comma-separated allowlist for SCM document URL fetch (SSRF guard).",
     )
+    integration_outbound_allowed_hosts: str = Field(
+        default="",
+        alias="INTEGRATION_OUTBOUND_ALLOWED_HOSTS",
+        description="Comma-separated host allowlist for Integration Hub webhooks (required in production).",
+    )
+    integration_webhook_signing_secret: str = Field(
+        default="",
+        alias="INTEGRATION_WEBHOOK_SIGNING_SECRET",
+        description="HMAC-SHA256 key for X-ERP-Signature on outbound webhooks.",
+    )
 
     ess_login_captcha_enabled: bool = Field(
         default=False,
@@ -173,6 +183,8 @@ class Settings(BaseSettings):
     )
 
     jwt_secret_key: str = Field(default="change-me-in-production", alias="JWT_SECRET_KEY")
+    # Comma-separated; first key encrypts, all keys decrypt (prepend to rotate).
+    field_encryption_keys: str = Field(default="", alias="FIELD_ENCRYPTION_KEYS")
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
     # Long-lived by default so local/demo sessions are not cut short mid-work.
     # Override via env for production hardening.

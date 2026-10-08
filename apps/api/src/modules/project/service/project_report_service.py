@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.project.domain.enums import PrjEntityType
 from modules.project.models import PrjProjectReport
 from modules.project.repository.project_report_repository import ProjectReportRepository
@@ -22,7 +22,7 @@ class ProjectReportService:
         self._scope = ProjectScopeValidator(db)
         self._numbers = DocumentNumberService(db)
         self._engine = ProjectReportEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._assignment = ProjectAssignmentScope(db)
         self._db = db
 

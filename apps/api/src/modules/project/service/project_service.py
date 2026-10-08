@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
-from modules.master_data.models.employee import MasterEmployee
-from modules.master_data.models.party import MasterCustomer
+from modules.platform.compat.audit_facade import PlatformAuditFacade
+from modules.master_data.published import EmployeeRead
+from modules.master_data.published import CustomerRead
 from modules.project.adapters.master_data_port import ProjectMasterDataAdapter
 from modules.project.domain.enums import PrjEntityType, SiteInstallationStatus, SiteWorkflowStage
 from modules.project.models import PrjProject
@@ -35,7 +35,7 @@ class ProjectService:
         self._scope = ProjectScopeValidator(db)
         self._numbers = DocumentNumberService(db)
         self._engine = ProjectEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._master = ProjectMasterDataAdapter(db)
         self._db = db
         self._assignment = ProjectAssignmentScope(db)
@@ -167,13 +167,13 @@ class ProjectService:
         if not employee_ids:
             return {}
         stmt = select(
-            MasterEmployee.id,
-            MasterEmployee.first_name,
-            MasterEmployee.last_name,
+            EmployeeRead.id,
+            EmployeeRead.first_name,
+            EmployeeRead.last_name,
         ).where(
-            MasterEmployee.tenant_id == ctx.tenant_id,
-            MasterEmployee.is_deleted.is_(False),
-            MasterEmployee.id.in_(employee_ids),
+            EmployeeRead.tenant_id == ctx.tenant_id,
+            EmployeeRead.is_deleted.is_(False),
+            EmployeeRead.id.in_(employee_ids),
         )
         out: dict[UUID, str] = {}
         for emp_id, first, last in self._db.execute(stmt).all():
@@ -189,10 +189,10 @@ class ProjectService:
     ) -> dict[UUID, str]:
         if not customer_ids:
             return {}
-        stmt = select(MasterCustomer.id, MasterCustomer.customer_name).where(
-            MasterCustomer.tenant_id == ctx.tenant_id,
-            MasterCustomer.is_deleted.is_(False),
-            MasterCustomer.id.in_(customer_ids),
+        stmt = select(CustomerRead.id, CustomerRead.customer_name).where(
+            CustomerRead.tenant_id == ctx.tenant_id,
+            CustomerRead.is_deleted.is_(False),
+            CustomerRead.id.in_(customer_ids),
         )
         return {
             customer_id: (name or "").strip()

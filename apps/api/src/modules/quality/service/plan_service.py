@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.quality.domain.enums import ActiveInactive, PlanStatus, QmEntityType
 from modules.quality.models import (
     QmDefectType,
@@ -74,7 +74,7 @@ class InspectionPlanService:
         self._numbers = DocumentNumberService(db)
         self._engine = InspectionPlanEngine()
         self._scope = QmScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_plans(
         self, ctx: TenantContext, company_id: UUID | None = None, inspection_type: str | None = None

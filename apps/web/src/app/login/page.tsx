@@ -1,17 +1,17 @@
 import { Suspense } from "react";
 
-import { LoginGateClient } from "./login-gate-client";
+import LoginPage from "./login-page";
 
 export default function Page() {
   return (
     <Suspense
       fallback={
         <div className="flex min-h-dvh items-center justify-center text-sm text-muted-foreground">
-          Checking access…
+          Loading sign-in…
         </div>
       }
     >
-      <LoginGateClient />
+      <LoginPage />
     </Suspense>
   );
 }

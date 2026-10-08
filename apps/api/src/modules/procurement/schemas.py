@@ -1732,3 +1732,46 @@ class OvfTimelineEventRecordRequest(BaseModel):
 
 class WorkflowActionRequest(BaseModel):
     comments: str | None = None
+
+
+# --- Excel sheet trackers (workspace tab) ---
+
+
+class SheetTrackerColumn(BaseModel):
+    id: str
+    label: str
+
+
+class SheetTrackerMergeInfo(BaseModel):
+    added_columns: list[str] = Field(default_factory=list)
+    added_rows: int = 0
+    updated_rows: int = 0
+    file_name: str | None = None
+
+
+class SheetTrackerSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    last_file_name: str | None = None
+    column_count: int
+    row_count: int
+    last_upload_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    version: int
+    last_merge: SheetTrackerMergeInfo | None = None
+
+
+class SheetTrackerDetailResponse(SheetTrackerSummaryResponse):
+    columns: list[SheetTrackerColumn] = Field(default_factory=list)
+    rows: list[dict[str, str]] = Field(default_factory=list)
+
+
+class SheetTrackerUploadRequest(BaseModel):
+    file_name: str = Field(min_length=1, max_length=180)
+    content_base64: str = Field(min_length=1)
+    content_type: str | None = None
+    tracker_id: UUID | None = None
+    name: str | None = Field(default=None, max_length=180)

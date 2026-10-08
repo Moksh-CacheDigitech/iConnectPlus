@@ -65,7 +65,7 @@ from modules.asset.service.document_number_service import DocumentNumberService
 from modules.asset.storage import StorageBackend, get_storage
 from modules.asset.storage.http_fetch import SsrfBlockedError, download_document_bytes
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 logger = logging.getLogger(__name__)
 
@@ -189,14 +189,18 @@ class DcChallanService:
         self._numbers = DocumentNumberService(db)
         self._master = AssetMasterDataAdapter(db)
         self._scm = AssetScmAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._storage = storage if storage is not None else get_storage()
 
     def to_response(self, row: AstDcChallan) -> DcChallanResponse:
-        return to_dc_challan_response(row, self._docs.list_active(row.id))
+        return to_dc_challan_response(row, self._docs.list_active(row.id, tenant_id=row.tenant_id))
 
     def to_responses(self, rows: list[AstDcChallan]) -> list[DcChallanResponse]:
-        mapping = self._docs.map_active([row.id for row in rows])
+        if not rows:
+            return []
+        mapping = self._docs.map_active(
+            [row.id for row in rows], tenant_id=rows[0].tenant_id
+        )
         return [to_dc_challan_response(row, mapping.get(row.id, [])) for row in rows]
 
     def get(self, ctx: TenantContext, row_id: UUID) -> AstDcChallan:
@@ -627,7 +631,7 @@ class DcChallanService:
         except ValueError as exc:
             raise NotFoundException(DOCUMENT_NOT_FOUND) from exc
         row = self._require_challan_for_document(ctx, row_id)
-        doc = self._docs.get_active(row.id, kind)
+        doc = self._docs.get_active(row.id, kind, tenant_id=row.tenant_id)
         if doc is not None and doc.storage_key:
             suffix = extension_for_content_type(doc.content_type or "") or ""
             label = "scm-issued" if kind == DcChallanDocKind.SCM_ISSUED.value else "signed"
@@ -762,7 +766,7 @@ class DcChallanService:
         raise ForbiddenException(DOCUMENT_NOT_FOUND)
 
     def _has_signed_document(self, row: AstDcChallan) -> bool:
-        doc = self._docs.get_active(row.id, DcChallanDocKind.SIGNED.value)
+        doc = self._docs.get_active(row.id, DcChallanDocKind.SIGNED.value, tenant_id=row.tenant_id)
         if doc is not None:
             return True
         return bool(_blank(getattr(row, "signed_document_url", None)))
@@ -794,7 +798,7 @@ class DcChallanService:
         return updated or row
 
     def _push_scm_status(self, row: AstDcChallan, timestamp) -> None:
-        signed = self._docs.get_active(row.id, DcChallanDocKind.SIGNED.value)
+        signed = self._docs.get_active(row.id, DcChallanDocKind.SIGNED.value, tenant_id=row.tenant_id)
         meta = None
         if signed is not None:
             meta = {
@@ -828,7 +832,7 @@ class DcChallanService:
         self._require_documents_mutable(row)
         url = validate_dc_document_url(document_url) if document_url else None
         ref = _blank(scm_reference_number)
-        existing = self._docs.get_active(row.id, DcChallanDocKind.SCM_ISSUED.value)
+        existing = self._docs.get_active(row.id, DcChallanDocKind.SCM_ISSUED.value, tenant_id=row.tenant_id)
         already_received = row.status in DOCUMENT_REPLACE_STATUSES
 
         if already_received:
@@ -938,7 +942,7 @@ class DcChallanService:
             original_filename=original_filename,
         )
         checksum = hashlib.sha256(data).hexdigest()
-        existing = self._docs.get_active(row.id, kind)
+        existing = self._docs.get_active(row.id, kind, tenant_id=row.tenant_id)
         if existing is not None and existing.checksum_sha256 == checksum:
             return existing.storage_key or "", checksum
         if existing is not None and not allow_replace:

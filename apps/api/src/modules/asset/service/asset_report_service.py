@@ -28,7 +28,7 @@ from modules.asset.service.report_validator import (
     ReportValidator,
 )
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_AST_REPORT = "ast_asset_report"
 
@@ -39,7 +39,7 @@ class AssetReportService:
         self._scope = AssetScopeValidator(db)
         self._numbers = DocumentNumberService(db)
         self._engine = AssetReportEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = ReportValidator(db)
 
     def catalog(self) -> list[dict]:

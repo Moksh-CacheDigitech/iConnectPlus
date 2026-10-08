@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.master_data.models.reference import MasterCurrency
 from modules.master_data.repository.currency_repository import CurrencyRepository
 from modules.master_data.service.duplicate_checker_service import DuplicateCheckerService
@@ -17,7 +17,7 @@ from modules.master_data.service.master_scope_validator import MasterScopeValida
 class CurrencyService:
     def __init__(self, db: Session) -> None:
         self._repo = CurrencyRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._duplicates = DuplicateCheckerService(db)
         self._scope = MasterScopeValidator(db)
 

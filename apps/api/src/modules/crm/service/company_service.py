@@ -22,7 +22,7 @@ from modules.crm.service.crm_record_visibility import CrmRecordVisibility
 from modules.crm.service.crm_scope_validator import CrmScopeValidator
 from modules.crm.service.document_number_service import DocumentNumberService
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from shared.text_safety import assert_safe_plain_text, contains_unsafe_markup, scrub_unsafe_markup
 
 _COMPANY_TEXT_FIELDS = (
@@ -60,7 +60,7 @@ class CompanyService:
         self._repo = CompanyRepository(db)
         self._scope = CrmScopeValidator(db)
         self._numbers = DocumentNumberService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._crm_admin = CrmModuleAdminService(db)
         self._visibility = CrmRecordVisibility(db)
 

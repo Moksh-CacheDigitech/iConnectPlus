@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.helpdesk.adapters.finance_port import HelpdeskFinanceAdapter
 from modules.helpdesk.domain.enums import HdEntityType
 from modules.helpdesk.models import HdResolution
@@ -25,7 +25,7 @@ class ResolutionService:
         self._numbers = DocumentNumberService(db)
         self._engine = ResolutionEngine()
         self._finance = HelpdeskFinanceAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

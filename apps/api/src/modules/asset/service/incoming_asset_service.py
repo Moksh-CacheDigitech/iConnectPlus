@@ -27,7 +27,7 @@ from modules.asset.repository.incoming_asset_repository import (
 from modules.asset.schemas import IncomingAssetLineResponse, IncomingAssetUnitResponse
 from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY = "ast_incoming_asset_line"
 
@@ -97,7 +97,7 @@ class IncomingAssetService:
         self._repo = IncomingAssetRepository(db)
         self._scope = AssetScopeValidator(db)
         self._procurement = ProcurementReadPort(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def _sync_from_procurement(
         self,

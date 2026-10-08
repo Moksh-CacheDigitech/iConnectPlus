@@ -18,7 +18,7 @@ from modules.finance.service.finance_governance_service import FinanceGovernance
 from modules.finance.service.finance_scope_validator import FinanceScopeValidator
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class JournalService:
@@ -31,7 +31,7 @@ class JournalService:
         self._engine = JournalEngine()
         self._numbers = DocumentNumberService(db)
         self._governance = FinanceGovernanceService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_journals(
         self,
@@ -343,10 +343,17 @@ class JournalService:
         instance = self._governance.submit_for_approval(
             ctx, entity_name="fin_journal_header", entity_id=journal_id
         )
+        instance_id = instance.id
         journal.status = JournalStatus.SUBMITTED.value
         journal.workflow_status = WorkflowStatus.IN_PROGRESS.value
-        journal.workflow_instance_id = instance.id
-        self._repo.update_journal(ctx, journal_id, status=journal.status, workflow_status=journal.workflow_status, workflow_instance_id=instance.id)
+        journal.workflow_instance_id = instance_id
+        self._repo.update_journal(
+            ctx,
+            journal_id,
+            status=journal.status,
+            workflow_status=journal.workflow_status,
+            workflow_instance_id=instance_id,
+        )
         return instance
 
     def approve(self, ctx: TenantContext, journal_id: UUID):

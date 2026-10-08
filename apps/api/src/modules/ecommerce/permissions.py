@@ -1,6 +1,9 @@
 """E-Commerce permission constants per ERD_22 section 10."""
 
 ECOMMERCE_PERMISSIONS: list[tuple[str, str, str, str]] = [
+    ("ecommerce.payment:update", "ecommerce.payment", "update", "ecommerce"),
+    ("ecommerce.payment_txn:update", "ecommerce.payment_txn", "update", "ecommerce"),
+    ("ecommerce.return:update", "ecommerce.return", "update", "ecommerce"),
     ("ecommerce.store:read", "ecommerce.store", "read", "ecommerce"),
     ("ecommerce.store:create", "ecommerce.store", "create", "ecommerce"),
     ("ecommerce.store:update", "ecommerce.store", "update", "ecommerce"),

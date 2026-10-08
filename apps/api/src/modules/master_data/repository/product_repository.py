@@ -9,6 +9,7 @@ from modules.foundation.domain.value_objects import TenantContext
 from modules.master_data.domain.entities import ProductEntity
 from modules.master_data.models.product import MasterProduct
 from modules.master_data.repository.base import MasterScopedRepository, utcnow
+from modules.platform.optimistic import assert_version, bump_version
 
 
 class ProductRepository(MasterScopedRepository):
@@ -97,12 +98,14 @@ class ProductRepository(MasterScopedRepository):
         row = self.db.scalar(stmt)
         if row is None:
             return None
+        expected = fields.pop("expected_version", None)
+        assert_version(row, expected if isinstance(expected, int) else None)
         for key, value in fields.items():
             if hasattr(row, key) and value is not None:
                 setattr(row, key, value)
         row.updated_at = utcnow()
         row.updated_by = ctx.user_id
-        row.version += 1
+        bump_version(row)
         self.db.flush()
         return self._to_entity(row)
 

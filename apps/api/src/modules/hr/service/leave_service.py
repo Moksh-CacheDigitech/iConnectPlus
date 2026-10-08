@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.hr.adapters.master_data_port import HrMasterDataAdapter
 from modules.hr.domain.enums import HolidayCalendarStatus, HrEntityType, LeaveAdjustmentStatus, LeaveRequestStatus
 from modules.hr.domain.exceptions import InvalidLeaveAdjustmentState
@@ -92,7 +92,7 @@ class LeaveTypeService:
         self._repo = LeaveTypeRepository(db)
         self._scope = HrScopeValidator(db)
         self._engine = LeaveTypeEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -174,7 +174,7 @@ class LeaveBalanceService:
         self._scope = HrScopeValidator(db)
         self._master = HrMasterDataAdapter(db)
         self._engine = LeaveBalanceEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -581,7 +581,7 @@ class LeaveRequestService:
         self._engine = LeaveRequestEngine()
         self._balance_engine = LeaveBalanceEngine()
         self._master = HrMasterDataAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -783,7 +783,7 @@ class LeaveRequestService:
         updated = self._repo.update(ctx, row_id, status=row.status)
         try:
             from modules.hr.service.hr_notify import notify_employee, notify_users_with_permission
-            from modules.master_data.models.employee import MasterEmployee
+            from modules.master_data.published import EmployeeRead
 
             notify_employee(
                 self._db,
@@ -800,12 +800,12 @@ class LeaveRequestService:
             exclude: set[UUID] = set()
             if ctx.user_id:
                 exclude.add(ctx.user_id)
-            emp = self._db.get(MasterEmployee, row.employee_id)
+            emp = self._db.get(EmployeeRead, row.employee_id)
             if emp is not None:
                 if emp.user_id:
                     exclude.add(emp.user_id)
                 if emp.reporting_manager_id:
-                    mgr = self._db.get(MasterEmployee, emp.reporting_manager_id)
+                    mgr = self._db.get(EmployeeRead, emp.reporting_manager_id)
                     if mgr is not None and mgr.user_id:
                         exclude.add(mgr.user_id)
             notify_users_with_permission(
@@ -1007,7 +1007,7 @@ class LeaveAdjustmentService:
         self._scope = HrScopeValidator(db)
         self._master = HrMasterDataAdapter(db)
         self._balance_engine = LeaveBalanceEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from core.exceptions import NotFoundException, ValidationException
 from modules.foundation.domain.erp_modules import ERP_MODULE_KEY_SET
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.organization.domain.entities import DepartmentEntity
 from modules.organization.repository.department_module_repository import DepartmentModuleRepository
 from modules.organization.repository.hierarchy_repository import (
@@ -26,7 +26,7 @@ class DepartmentService:
     def __init__(self, db: Session) -> None:
         self._repo = DepartmentRepository(db)
         self._modules = DepartmentModuleRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._scope = OrgScopeValidator(db)
 
     @staticmethod
@@ -147,7 +147,7 @@ class DepartmentService:
 class BusinessUnitService:
     def __init__(self, db: Session) -> None:
         self._repo = BusinessUnitRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._scope = OrgScopeValidator(db)
 
     def list_units(self, ctx: TenantContext, *, branch_id: UUID | None = None):
@@ -169,7 +169,7 @@ class BusinessUnitService:
 class LocationService:
     def __init__(self, db: Session) -> None:
         self._repo = LocationRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._scope = OrgScopeValidator(db)
 
     def list_locations(
@@ -217,7 +217,7 @@ class LocationService:
 class CostCenterService:
     def __init__(self, db: Session) -> None:
         self._repo = CostCenterRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._scope = OrgScopeValidator(db)
 
     def list_cost_centers(self, ctx: TenantContext, *, company_id: UUID | None = None):
@@ -259,7 +259,7 @@ class CostCenterService:
 class ProfitCenterService:
     def __init__(self, db: Session) -> None:
         self._repo = ProfitCenterRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._scope = OrgScopeValidator(db)
 
     def list_profit_centers(self, ctx: TenantContext, *, company_id: UUID | None = None):

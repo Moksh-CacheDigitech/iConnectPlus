@@ -15,7 +15,7 @@ from modules.asset.nonit.access import (
 from modules.asset.nonit.repository_location import NonItLocationRepository
 from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 def _clean_optional(value: object | None, *, max_len: int | None = None) -> str | None:
@@ -34,7 +34,7 @@ class NonItLocationService:
         self._db = db
         self._repo = NonItLocationRepository(db)
         self._scope = AssetScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def _resolve_branch(self, ctx: TenantContext, company_id: UUID, branch_id: UUID | None) -> UUID:
         bid = branch_id or ctx.branch_id

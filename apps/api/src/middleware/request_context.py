@@ -58,6 +58,12 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
         request.state.request_id = request_id
         start = time.perf_counter()
+        try:
+            from modules.platform.observability import set_request_id
+
+            set_request_id(request_id)
+        except Exception:
+            pass
 
         try:
             response = await call_next(request)
@@ -134,6 +140,30 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
                 request=request,
             )
         duration_ms = (time.perf_counter() - start) * 1000
+        try:
+            from modules.platform.observability import log_path_metric
+            from modules.platform.slo import CRITICAL_PATH_SLOS
+
+            path = request.url.path
+            matched = None
+            if path.endswith("/auth/login") or "/foundation/auth/login" in path:
+                matched = "auth.login"
+            elif "/procurement/" in path and ("purchase-orders" in path or "/orders" in path):
+                matched = "procurement.pr_to_po"
+            elif "/procurement/" in path and ("grn" in path or "receipts" in path):
+                matched = "procurement.grn_post"
+            elif "/sales/" in path and "invoices" in path and request.method in {"POST", "PUT", "PATCH"}:
+                matched = "finance.invoice_post"
+            elif "/payroll/" in path and "runs" in path:
+                matched = "payroll.run"
+            if matched and any(s.path_key == matched for s in CRITICAL_PATH_SLOS):
+                log_path_metric(
+                    matched,
+                    latency_ms=duration_ms,
+                    success=response.status_code < 500,
+                )
+        except Exception:
+            pass
 
         logger.info(
             "request completed",

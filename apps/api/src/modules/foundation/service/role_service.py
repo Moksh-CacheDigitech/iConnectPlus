@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, NotFoundException
 from modules.foundation.repository.role_repository import PermissionRepository, RoleRepository
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.rbac_service import RBACService
 
 
@@ -14,7 +14,7 @@ class RoleService:
     def __init__(self, db: Session) -> None:
         self._repo = RoleRepository(db)
         self._permissions = PermissionRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._rbac = RBACService(db)
 
     def list_roles(self, tenant_id: UUID):

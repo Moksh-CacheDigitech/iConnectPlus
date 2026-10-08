@@ -10,7 +10,7 @@ from database.session import get_db
 from modules.foundation.dependencies import require_permission
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.schemas import AuditLogResponse
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from shared.schemas import APIResponse
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
@@ -21,7 +21,7 @@ def list_logs(
     ctx: Annotated[TenantContext, Depends(require_permission("foundation.audit:read"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> APIResponse[list[AuditLogResponse]]:
-    logs = AuditService(db).list_logs(tenant_id=ctx.tenant_id)
+    logs = PlatformAuditFacade(db).list_logs(tenant_id=ctx.tenant_id)
     return APIResponse(
         message="Audit logs retrieved",
         data=[AuditLogResponse(**log.__dict__) for log in logs],
@@ -34,7 +34,7 @@ def get_log(
     ctx: Annotated[TenantContext, Depends(require_permission("foundation.audit:read"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> APIResponse[AuditLogResponse]:
-    log = AuditService(db).get_log(log_id)
+    log = PlatformAuditFacade(db).get_log(log_id)
     if log is None or (log.tenant_id and log.tenant_id != ctx.tenant_id):
         from core.exceptions import NotFoundException
 
@@ -47,7 +47,7 @@ def list_events(
     ctx: Annotated[TenantContext, Depends(require_permission("foundation.audit:read"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> APIResponse[list]:
-    events = AuditService(db).list_events(tenant_id=ctx.tenant_id)
+    events = PlatformAuditFacade(db).list_events(tenant_id=ctx.tenant_id)
     return APIResponse(
         message="Audit events retrieved",
         data=[

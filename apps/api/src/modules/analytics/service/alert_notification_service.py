@@ -10,7 +10,7 @@ from modules.analytics.repository.alert_notification_repository import AlertNoti
 from modules.analytics.service.analytics_scope_validator import AnalyticsScopeValidator
 from modules.analytics.service.engines import AlertNotificationEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class AlertNotificationService:
@@ -18,7 +18,7 @@ class AlertNotificationService:
         self._repo = AlertNotificationRepository(db)
         self._scope = AnalyticsScopeValidator(db)
         self._engine = AlertNotificationEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

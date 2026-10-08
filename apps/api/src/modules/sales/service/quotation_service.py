@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from core.exceptions import NotFoundException
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.master_data.service.customer_service import CustomerService
 from modules.sales.domain.enums import QuotationStatus, SalesEntityType
 from modules.sales.domain.exceptions import InvalidDocumentState, SegregationOfDutiesError
@@ -28,7 +28,7 @@ class QuotationService:
         self._numbers = DocumentNumberService(db)
         self._governance = SalesGovernanceService(db)
         self._customers = CustomerService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_quotations(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -129,6 +129,7 @@ class QuotationService:
         instance = self._governance.submit_for_approval(
             ctx, entity_name="sales_quotation_header", entity_id=quotation_id
         )
+        instance_id = instance.id
         return self._repo.update_quotation(
             ctx,
             quotation_id,

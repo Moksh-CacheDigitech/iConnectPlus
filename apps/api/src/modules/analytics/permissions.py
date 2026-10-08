@@ -1,6 +1,8 @@
 """Analytics permission constants per ERD_20 section 14."""
 
 ANALYTICS_PERMISSIONS: list[tuple[str, str, str, str]] = [
+    ("analytics.export:update", "analytics.export", "update", "analytics"),
+    ("analytics.import:update", "analytics.import", "update", "analytics"),
     ("analytics.dashboard:read", "analytics.dashboard", "read", "analytics"),
     ("analytics.dashboard:create", "analytics.dashboard", "create", "analytics"),
     ("analytics.dashboard:update", "analytics.dashboard", "update", "analytics"),

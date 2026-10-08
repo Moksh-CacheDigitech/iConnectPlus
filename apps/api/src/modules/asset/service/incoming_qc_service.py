@@ -25,7 +25,7 @@ from modules.asset.schemas import (
 )
 from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY = "ast_incoming_asset_line"
 
@@ -109,7 +109,7 @@ class IncomingAssetQcService:
         self._db = db
         self._repo = IncomingAssetRepository(db)
         self._scope = AssetScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def search(
         self,

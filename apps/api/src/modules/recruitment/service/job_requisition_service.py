@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.recruitment.domain.enums import RecEntityType
 from modules.recruitment.models import RecJobRequisition
 from modules.recruitment.repository.job_requisition_repository import JobRequisitionRepository
@@ -22,7 +22,7 @@ class JobRequisitionService:
         self._scope = RecruitmentScopeValidator(db)
         self._numbers = DocumentNumberService(db)
         self._engine = JobRequisitionEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

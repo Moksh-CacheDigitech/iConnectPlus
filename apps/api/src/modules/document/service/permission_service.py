@@ -10,7 +10,7 @@ from modules.document.repository.document_permission_repository import DocumentP
 from modules.document.service.document_scope_validator import DocumentScopeValidator
 from modules.document.service.engines import DocumentPermissionEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class PermissionService:
@@ -18,7 +18,7 @@ class PermissionService:
         self._repo = DocumentPermissionRepository(db)
         self._scope = DocumentScopeValidator(db)
         self._engine = DocumentPermissionEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 from modules.finance.models.journal import FinJournalHeader, FinJournalLine
 from modules.finance.repository.base import FinanceScopedRepository, utcnow
 from modules.foundation.domain.value_objects import TenantContext
+from modules.platform.optimistic import assert_version, bump_version
 
 
 class JournalRepository(FinanceScopedRepository):
@@ -104,12 +105,14 @@ class JournalRepository(FinanceScopedRepository):
         row = self.get_journal_for_update(ctx, journal_id)
         if row is None:
             return None
+        expected = fields.pop("expected_version", None)
+        assert_version(row, expected if isinstance(expected, int) else None)
         for key, value in fields.items():
             if hasattr(row, key):
                 setattr(row, key, value)
         row.updated_at = utcnow()
         row.updated_by = ctx.user_id
-        row.version += 1
+        bump_version(row)
         self.db.flush()
         return row
 

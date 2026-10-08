@@ -19,7 +19,7 @@ from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.foundation.domain.erp_modules import MODULE_ROLE_ADMIN, MODULE_ROLE_MEMBER
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.repository.user_module_repository import UserModuleRepository
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.rbac_service import RBACService
 from modules.organization.models.company import OrgCompany
 
@@ -29,7 +29,7 @@ class DomainMembershipService:
         self._db = db
         self._repo = DomainMembershipRepository(db)
         self._scope = AssetScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._rbac = RBACService(db)
         self._modules = UserModuleRepository(db)
 

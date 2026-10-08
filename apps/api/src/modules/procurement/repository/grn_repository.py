@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from modules.foundation.domain.value_objects import TenantContext
+from modules.platform.optimistic import assert_version, bump_version
 from modules.procurement.models.grn import ProcGrnHeader, ProcGrnLine
 from modules.procurement.repository.base import ProcScopedRepository, utcnow
 
@@ -67,12 +68,14 @@ class GrnRepository(ProcScopedRepository):
         row = self.get_grn_for_update(ctx, grn_id)
         if row is None:
             return None
+        expected = fields.pop("expected_version", None)
+        assert_version(row, expected if isinstance(expected, int) else None)
         for key, value in fields.items():
             if hasattr(row, key):
                 setattr(row, key, value)
         row.updated_at = utcnow()
         row.updated_by = ctx.user_id
-        row.version += 1
+        bump_version(row)
         self.db.flush()
         return row
 

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from modules.finance.models.ledger import FinCustomerLedger, FinVendorLedger
 from modules.finance.repository.base import FinanceScopedRepository, utcnow
 from modules.foundation.domain.value_objects import TenantContext
-from modules.master_data.models.party import MasterCustomer, MasterVendor
+from modules.master_data.published import CustomerRead, VendorRead
 
 
 class SubLedgerRepository(FinanceScopedRepository):
@@ -65,12 +65,12 @@ class SubLedgerRepository(FinanceScopedRepository):
             )
         if search:
             q = f"%{search.strip()}%"
-            customer_ids = select(MasterCustomer.id).where(
-                MasterCustomer.tenant_id == ctx.tenant_id,
-                MasterCustomer.is_deleted.is_(False),
+            customer_ids = select(CustomerRead.id).where(
+                CustomerRead.tenant_id == ctx.tenant_id,
+                CustomerRead.is_deleted.is_(False),
                 or_(
-                    MasterCustomer.customer_code.ilike(q),
-                    MasterCustomer.customer_name.ilike(q),
+                    CustomerRead.customer_code.ilike(q),
+                    CustomerRead.customer_name.ilike(q),
                 ),
             )
             stmt = stmt.where(
@@ -103,13 +103,13 @@ class SubLedgerRepository(FinanceScopedRepository):
         )
         return self.db.scalar(stmt)
 
-    def get_customer_map(self, ctx: TenantContext, customer_ids: list[UUID]) -> dict[UUID, MasterCustomer]:
+    def get_customer_map(self, ctx: TenantContext, customer_ids: list[UUID]) -> dict[UUID, CustomerRead]:
         if not customer_ids:
             return {}
-        stmt = select(MasterCustomer).where(
-            MasterCustomer.tenant_id == ctx.tenant_id,
-            MasterCustomer.id.in_(customer_ids),
-            MasterCustomer.is_deleted.is_(False),
+        stmt = select(CustomerRead).where(
+            CustomerRead.tenant_id == ctx.tenant_id,
+            CustomerRead.id.in_(customer_ids),
+            CustomerRead.is_deleted.is_(False),
         )
         rows = list(self.db.scalars(stmt).all())
         return {r.id: r for r in rows}
@@ -204,12 +204,12 @@ class SubLedgerRepository(FinanceScopedRepository):
             )
         if search:
             q = f"%{search.strip()}%"
-            vendor_ids = select(MasterVendor.id).where(
-                MasterVendor.tenant_id == ctx.tenant_id,
-                MasterVendor.is_deleted.is_(False),
+            vendor_ids = select(VendorRead.id).where(
+                VendorRead.tenant_id == ctx.tenant_id,
+                VendorRead.is_deleted.is_(False),
                 or_(
-                    MasterVendor.vendor_code.ilike(q),
-                    MasterVendor.vendor_name.ilike(q),
+                    VendorRead.vendor_code.ilike(q),
+                    VendorRead.vendor_name.ilike(q),
                 ),
             )
             stmt = stmt.where(
@@ -242,13 +242,13 @@ class SubLedgerRepository(FinanceScopedRepository):
         )
         return self.db.scalar(stmt)
 
-    def get_vendor_map(self, ctx: TenantContext, vendor_ids: list[UUID]) -> dict[UUID, MasterVendor]:
+    def get_vendor_map(self, ctx: TenantContext, vendor_ids: list[UUID]) -> dict[UUID, VendorRead]:
         if not vendor_ids:
             return {}
-        stmt = select(MasterVendor).where(
-            MasterVendor.tenant_id == ctx.tenant_id,
-            MasterVendor.id.in_(vendor_ids),
-            MasterVendor.is_deleted.is_(False),
+        stmt = select(VendorRead).where(
+            VendorRead.tenant_id == ctx.tenant_id,
+            VendorRead.id.in_(vendor_ids),
+            VendorRead.is_deleted.is_(False),
         )
         rows = list(self.db.scalars(stmt).all())
         return {r.id: r for r in rows}

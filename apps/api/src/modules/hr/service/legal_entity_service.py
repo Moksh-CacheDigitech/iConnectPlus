@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.organization.models.company import OrgCompany
 from modules.organization.repository.company_repository import CompanyRepository
 from modules.organization.service.company_service import CompanyService
@@ -20,7 +20,7 @@ class HrLegalEntityService:
         self._db = db
         self._repo = CompanyRepository(db)
         self._companies = CompanyService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_entities(self, ctx: TenantContext):
         rows = self._db.scalars(

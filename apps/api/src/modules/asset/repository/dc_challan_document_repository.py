@@ -17,8 +17,9 @@ class DcChallanDocumentRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def list_active(self, dc_challan_id: UUID) -> list[AstDcChallanDocument]:
+    def list_active(self, dc_challan_id: UUID, *, tenant_id: UUID) -> list[AstDcChallanDocument]:
         stmt = select(AstDcChallanDocument).where(
+            AstDcChallanDocument.tenant_id == tenant_id,
             AstDcChallanDocument.dc_challan_id == dc_challan_id,
             AstDcChallanDocument.is_deleted.is_(False),
         )
@@ -28,11 +29,12 @@ class DcChallanDocumentRepository:
         return list(rows)
 
     def map_active(
-        self, dc_challan_ids: list[UUID]
+        self, dc_challan_ids: list[UUID], *, tenant_id: UUID
     ) -> dict[UUID, list[AstDcChallanDocument]]:
         if not dc_challan_ids:
             return {}
         stmt = select(AstDcChallanDocument).where(
+            AstDcChallanDocument.tenant_id == tenant_id,
             AstDcChallanDocument.dc_challan_id.in_(dc_challan_ids),
             AstDcChallanDocument.is_deleted.is_(False),
         )
@@ -45,9 +47,10 @@ class DcChallanDocumentRepository:
         return dict(grouped)
 
     def get_active(
-        self, dc_challan_id: UUID, doc_kind: str
+        self, dc_challan_id: UUID, doc_kind: str, *, tenant_id: UUID
     ) -> AstDcChallanDocument | None:
         stmt = select(AstDcChallanDocument).where(
+            AstDcChallanDocument.tenant_id == tenant_id,
             AstDcChallanDocument.dc_challan_id == dc_challan_id,
             AstDcChallanDocument.doc_kind == doc_kind,
             AstDcChallanDocument.is_deleted.is_(False),

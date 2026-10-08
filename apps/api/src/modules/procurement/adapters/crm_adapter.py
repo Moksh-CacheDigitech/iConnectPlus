@@ -258,3 +258,86 @@ class ProcurementCrmAdapter:
             line_index=line_index,
             distributor_name=distributor_name,
         )
+
+    def list_attachments(
+        self,
+        ctx: TenantContext,
+        *,
+        entity_filters: list[tuple[str, UUID]],
+        company_id: UUID | None = None,
+    ) -> list[Any]:
+        """Load CRM attachments for one or more (entity_type, entity_id) pairs."""
+        from sqlalchemy import or_, select
+
+        from modules.crm.models import CrmAttachment
+
+        if not entity_filters:
+            return []
+        clauses = [
+            (CrmAttachment.entity_type == et) & (CrmAttachment.entity_id == eid)
+            for et, eid in entity_filters
+        ]
+        stmt = select(CrmAttachment).where(
+            CrmAttachment.tenant_id == ctx.tenant_id,
+            CrmAttachment.is_deleted.is_(False),
+            or_(*clauses),
+        )
+        if company_id is not None:
+            stmt = stmt.where(CrmAttachment.company_id == company_id)
+        return list(self._db.scalars(stmt).all())
+
+    def get_attachment(self, ctx: TenantContext, attachment_id: UUID) -> Any | None:
+        from sqlalchemy import select
+
+        from modules.crm.models import CrmAttachment
+
+        return self._db.scalar(
+            select(CrmAttachment).where(
+                CrmAttachment.id == attachment_id,
+                CrmAttachment.tenant_id == ctx.tenant_id,
+                CrmAttachment.is_deleted.is_(False),
+            )
+        )
+
+    def find_ovf_id_for_sales_pack(
+        self, ctx: TenantContext, *, entity_type: str, entity_id: UUID
+    ) -> UUID | None:
+        from sqlalchemy import select
+
+        from modules.crm.models.ovf import CrmOvf
+
+        ovf_stmt = select(CrmOvf.id).where(
+            CrmOvf.tenant_id == ctx.tenant_id,
+            CrmOvf.is_deleted.is_(False),
+        )
+        if entity_type == "quote":
+            ovf_stmt = ovf_stmt.where(CrmOvf.quote_id == entity_id)
+        elif entity_type == "opportunity":
+            ovf_stmt = ovf_stmt.where(CrmOvf.opportunity_id == entity_id)
+        else:
+            return None
+        return self._db.scalar(ovf_stmt.limit(1))
+
+    def list_attachments_by_entity_ids(
+        self,
+        ctx: TenantContext,
+        *,
+        entity_type: str,
+        entity_ids: list[UUID],
+        branch_scoped: bool = True,
+    ) -> list[Any]:
+        if not entity_ids:
+            return []
+        from sqlalchemy import select
+
+        from modules.crm.models import CrmAttachment
+        from modules.crm.repository.attachment_repository import AttachmentRepository
+
+        repo = AttachmentRepository(self._db)
+        stmt = select(CrmAttachment).where(
+            CrmAttachment.entity_type == entity_type,
+            CrmAttachment.entity_id.in_(entity_ids),
+            CrmAttachment.is_deleted.is_(False),
+        )
+        stmt = repo.apply_crm_filter(stmt, CrmAttachment, ctx, branch_scoped=branch_scoped)
+        return list(self._db.scalars(stmt).all())

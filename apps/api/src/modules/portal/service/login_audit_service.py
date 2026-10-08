@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.portal.models import PtLoginAudit
 from modules.portal.repository.login_audit_repository import LoginAuditRepository
 from modules.portal.service.engines import LoginAuditEngine
@@ -18,7 +18,7 @@ class LoginAuditService:
         self._repo = LoginAuditRepository(db)
         self._scope = PortalScopeValidator(db)
         self._engine = LoginAuditEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, ForbiddenException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
-from modules.master_data.models.employee import MasterEmployee
+from modules.platform.compat.audit_facade import PlatformAuditFacade
+from modules.master_data.published import EmployeeRead
 from modules.project.domain.enums import (
     PrjEntityType,
     ProjectPhaseStatus,
@@ -55,7 +55,7 @@ class SiteInstallationService:
         self._tasks = ProjectTaskRepository(db)
         self._scope = ProjectScopeValidator(db)
         self._numbers = DocumentNumberService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._assignment = ProjectAssignmentScope(db)
         self._module_admin = ProjectModuleAdminService(db)
 
@@ -645,14 +645,14 @@ class SiteInstallationService:
         from sqlalchemy import select
 
         from modules.foundation.models.security import SecUser
-        from modules.master_data.models.employee import MasterEmployee
+        from modules.master_data.published import EmployeeRead
         from modules.project.service.project_module_admin import ProjectModuleAdminRecipient
 
         employee = self._db.scalar(
-            select(MasterEmployee).where(
-                MasterEmployee.id == employee_id,
-                MasterEmployee.tenant_id == ctx.tenant_id,
-                MasterEmployee.is_deleted.is_(False),
+            select(EmployeeRead).where(
+                EmployeeRead.id == employee_id,
+                EmployeeRead.tenant_id == ctx.tenant_id,
+                EmployeeRead.is_deleted.is_(False),
             )
         )
         if employee is None:
@@ -992,20 +992,20 @@ class SiteInstallationService:
     def _resolve_scm_head_employee_id(self, ctx: TenantContext) -> UUID | None:
         """Temporary SCM owner for testing - prefer known employee id, else email."""
         by_id = self._db.scalar(
-            select(MasterEmployee.id).where(
-                MasterEmployee.tenant_id == ctx.tenant_id,
-                MasterEmployee.is_deleted.is_(False),
-                MasterEmployee.id == SCM_HEAD_EMPLOYEE_ID,
+            select(EmployeeRead.id).where(
+                EmployeeRead.tenant_id == ctx.tenant_id,
+                EmployeeRead.is_deleted.is_(False),
+                EmployeeRead.id == SCM_HEAD_EMPLOYEE_ID,
             )
         )
         if by_id is not None:
             return by_id
         email = SCM_HEAD_EMAIL.strip().lower()
         return self._db.scalar(
-            select(MasterEmployee.id).where(
-                MasterEmployee.tenant_id == ctx.tenant_id,
-                MasterEmployee.is_deleted.is_(False),
-                func.lower(MasterEmployee.email) == email,
+            select(EmployeeRead.id).where(
+                EmployeeRead.tenant_id == ctx.tenant_id,
+                EmployeeRead.is_deleted.is_(False),
+                func.lower(EmployeeRead.email) == email,
             )
         )
 

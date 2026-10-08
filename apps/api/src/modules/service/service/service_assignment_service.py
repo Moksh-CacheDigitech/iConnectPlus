@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.service.domain.enums import SvcEntityType
 from modules.service.models import SvcServiceAssignment
 from modules.service.repository.service_assignment_repository import ServiceAssignmentRepository
@@ -21,7 +21,7 @@ class ServiceAssignmentService:
         self._scope = ServiceScopeValidator(db)
         self._numbers = DocumentNumberService(db)
         self._engine = ServiceAssignmentEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

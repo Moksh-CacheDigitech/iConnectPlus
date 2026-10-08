@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.hr.models.ess_policy import HrEssPolicy
 from modules.hr.service.hr_scope_validator import HrScopeValidator
 
@@ -19,7 +19,7 @@ class EssPolicyAdminService:
     def __init__(self, db: Session) -> None:
         self._db = db
         self._scope = HrScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

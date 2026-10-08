@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from database.base import Base
 from modules.integration.models.mixins import IntRowMixin
+from modules.platform.encrypted_types import EncryptedText
 
 
 class IntApiCredential(Base, *IntRowMixin):
@@ -44,7 +45,7 @@ class IntApiCredential(Base, *IntRowMixin):
         index=True,
     )
     credential_type: Mapped[str] = mapped_column(String(30), nullable=False)
-    secret_vault_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    secret_vault_ref: Mapped[str] = mapped_column(EncryptedText(), nullable=False)
     key_hint: Mapped[str | None] = mapped_column(String(100), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

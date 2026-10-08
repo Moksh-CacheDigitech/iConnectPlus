@@ -16,7 +16,7 @@ from modules.finance.repository.gl_repository import GLRepository
 from modules.finance.repository.tax_repository import TaxRepository
 from modules.finance.service.engines.journal_engine import JournalEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.master_data.models.reference import MasterTax
+from modules.master_data.published import TaxRead
 
 
 class PostingEngine:
@@ -102,7 +102,7 @@ class PostingEngine:
         journal: FinJournalHeader,
         line: FinJournalLine,
     ) -> None:
-        tax = self._db.get(MasterTax, line.tax_id)
+        tax = self._db.get(TaxRead, line.tax_id)
         if tax is None:
             return
         register_number = self._codes.next_code(

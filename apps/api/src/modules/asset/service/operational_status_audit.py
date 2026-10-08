@@ -8,7 +8,7 @@ from uuid import UUID
 from modules.asset.domain.operational_status_audit_events import OperationalStatusAuditEvent
 from modules.asset.domain.workflow_codes import ENTITY_AST_ASSET
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 _ACTION_AUDIT_EVENT: dict[str, str] = {
     "assign": OperationalStatusAuditEvent.OPERATIONAL_STATUS_CHANGED,

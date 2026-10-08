@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.manufacturing.domain.enums import MfgEntityType, ProductionOrderStatus, VarianceType
 from modules.manufacturing.domain.exceptions import InvalidBomState
 from modules.manufacturing.models.production_order import MfgProductionOrder
@@ -41,7 +41,7 @@ class ProductionOrderService:
         self._wip_engine = WipEngine()
         self._variance_engine = VarianceEngine()
         self._scope = MfgScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_orders(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

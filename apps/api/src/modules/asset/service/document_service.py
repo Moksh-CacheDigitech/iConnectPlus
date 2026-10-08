@@ -32,7 +32,7 @@ from modules.asset.service.document_validator import DocumentValidator
 from modules.asset.service.engines import AssetDocumentEngine
 from modules.asset.storage import StorageBackend, get_storage
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_AST_DOCUMENT = "ast_asset_document"
 
@@ -42,7 +42,7 @@ class DocumentService:
         self._repo = AssetDocumentRepository(db)
         self._scope = AssetScopeValidator(db)
         self._engine = AssetDocumentEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = DocumentValidator(db)
         self._storage = storage if storage is not None else get_storage()
 

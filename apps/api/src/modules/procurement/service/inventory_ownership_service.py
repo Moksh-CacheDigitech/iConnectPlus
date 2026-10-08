@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from core.exceptions import ConflictException, ForbiddenException, NotFoundException
 from modules.crm.service.engines.margin_engine import carrying_cost
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.notification_service import NotificationService
+from modules.platform.compat.notify_facade import PlatformNotifyFacade
 from modules.procurement.adapters.crm_adapter import ProcurementCrmAdapter
 from modules.procurement.adapters.master_data_adapter import ProcurementMasterDataAdapter
 from modules.procurement.models.inventory_import import ProcInventoryImportLine
@@ -435,22 +435,11 @@ class InventoryOwnershipService:
     def _notify(self, ctx: TenantContext, user_id: UUID | None, *, title: str, body: str, entity_id: UUID) -> None:
         if user_id is None:
             return
-        notif = NotificationService(self._db)
-        tpl = notif.get_or_create_template(
+        PlatformNotifyFacade(self._db).send(
             tenant_id=ctx.tenant_id,
             template_code="procurement.inventory_transfer",
-            template_name="Inventory transfer request",
-            channel="in_app",
-            subject_template="{{title}}",
-            body_template="{{body}}",
-            created_by=ctx.user_id,
-        )
-        notif.send(
-            tenant_id=ctx.tenant_id,
-            template_id=tpl.id,
             event_type="procurement.inventory_transfer",
             recipient_user_id=user_id,
-            recipient_address=None,
             payload_json={
                 "title": title,
                 "body": body,
@@ -459,6 +448,9 @@ class InventoryOwnershipService:
                 "href": "/procurement/inventory",
             },
             created_by=ctx.user_id,
+            channel="in_app",
+            idempotency_key=f"proc-inv-xfer:{entity_id}:{user_id}:{title}",
+            aggregate_id=entity_id,
         )
 
     # -- nightly ------------------------------------------------------------

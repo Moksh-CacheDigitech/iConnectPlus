@@ -50,7 +50,7 @@ from modules.asset.service.user_transfer_completion_service import (
 from modules.asset.service.workflow_governance_settings import asset_workflow_governance_enabled
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 _USER_TRANSFER_VERIFICATION_TTL_SECONDS = 60 * 60 * 8
 
@@ -69,7 +69,7 @@ class TransferService:
         self._org = AssetOrganizationAdapter(db)
         self._validator = TransferValidator(db)
         self._assignment_components = AssignmentComponentService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._db = db
 
     def search(
@@ -447,12 +447,13 @@ class TransferService:
             entity_id=row_id,
             recipient_user_id=row.created_by,
         )
+        instance_id = instance.id
         return self._repo.update(
             ctx,
             row_id,
             status=row.status,
             workflow_status=WorkflowStatus.IN_PROGRESS.value,
-            workflow_instance_id=instance.id,
+            workflow_instance_id=instance_id,
         )
 
     def approve(self, ctx: TenantContext, row_id: UUID, comments: str | None = None):

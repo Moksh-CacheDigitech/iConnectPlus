@@ -7,13 +7,13 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
-from modules.finance.domain.enums import JournalStatus, JournalType, SubLedgerDocumentType
-from modules.finance.repository.journal_repository import JournalRepository
+from modules.finance.domain.enums import SubLedgerDocumentType
 from modules.finance.service.customer_ledger_service import CustomerLedgerService
-from modules.finance.service.journal_service import JournalService
-from modules.finance.service.posting_service import PostingService
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.adapters.audit_adapter import AuditAdapter
+from modules.platform.adapters.finance_adapter import FinancePostingAdapter
+from modules.platform.dto import AuditIntent, JournalLineDraft, SystemJournalDraft
+from modules.platform.helpers.side_effects import enqueue_domain_event
 from modules.sales.domain.enums import InvoiceStatus, ReturnStatus
 from modules.sales.domain.exceptions import InvalidDocumentState
 from modules.sales.repository.credit_repository import CreditRepository
@@ -34,10 +34,8 @@ class SalesPostingService:
         self._invoice_engine = InvoiceEngine()
         self._scope = SalesScopeValidator(db)
         self._ar = CustomerLedgerService(db)
-        self._journals = JournalService(db)
-        self._journal_repo = JournalRepository(db)
-        self._posting = PostingService(db)
-        self._audit = AuditService(db)
+        self._finance = FinancePostingAdapter(db)
+        self._audit = AuditAdapter(db)
 
     def post_invoice(
         self,
@@ -80,44 +78,37 @@ class SalesPostingService:
             exchange_rate=float(invoice.exchange_rate),
         )
 
-        journal = self._journals.create_journal(
+        posting = self._finance.post_system_journal(
             ctx,
-            company_id=invoice.company_id,
-            branch_id=invoice.branch_id,
-            journal_date=invoice.document_date,
-            description=f"Sales invoice {invoice.document_number}",
-            journal_type=JournalType.SYSTEM.value,
-            currency_code=invoice.currency_code,
-            exchange_rate=float(invoice.exchange_rate),
-            period_id=invoice.period_id,
-            fiscal_year_id=invoice.fiscal_year_id,
+            SystemJournalDraft(
+                company_id=invoice.company_id,
+                branch_id=invoice.branch_id,
+                description=f"Sales invoice {invoice.document_number}",
+                lines=(
+                    JournalLineDraft(
+                        account_id=ar_account_id,
+                        debit_amount=Decimal(str(amount)),
+                        credit_amount=Decimal("0"),
+                        description=f"AR {invoice.document_number}",
+                        line_number=1,
+                    ),
+                    JournalLineDraft(
+                        account_id=revenue_id,
+                        debit_amount=Decimal("0"),
+                        credit_amount=Decimal(str(amount)),
+                        description=f"Revenue {invoice.document_number}",
+                        line_number=2,
+                    ),
+                ),
+                idempotency_key=f"sales.invoice.post:{invoice.id}",
+                journal_date=invoice.document_date,
+                fiscal_year_id=invoice.fiscal_year_id,
+                source_module="sales",
+                source_document_type="sales_invoice",
+                source_document_id=invoice.id,
+            ),
         )
-        self._journals.add_line(
-            ctx,
-            journal.id,
-            line_number=1,
-            account_id=ar_account_id,
-            debit_amount=amount,
-            credit_amount=0,
-            description=f"AR {invoice.document_number}",
-            customer_id=invoice.customer_id,
-        )
-        self._journals.add_line(
-            ctx,
-            journal.id,
-            line_number=2,
-            account_id=revenue_id,
-            debit_amount=0,
-            credit_amount=amount,
-            description=f"Revenue {invoice.document_number}",
-            customer_id=invoice.customer_id,
-        )
-        self._journal_repo.update_journal(
-            ctx,
-            journal.id,
-            status=JournalStatus.APPROVED.value,
-        )
-        self._posting.post_system_journal(ctx, journal.id)
+        journal_id = posting.journal_id
 
         credit = self._credits.get_by_customer(
             ctx, invoice.company_id, invoice.customer_id, branch_id=None
@@ -142,18 +133,31 @@ class SalesPostingService:
             invoice_id,
             status=InvoiceStatus.POSTED.value,
             finance_ledger_id=ar_entry.id,
-            finance_journal_id=journal.id,
+            finance_journal_id=journal_id,
             posting_status="posted",
             posted_at=now,
             posted_by=ctx.user_id,
             balance_due=amount,
         )
         self._audit.log_entity_change(
+            AuditIntent(
+                tenant_id=ctx.tenant_id,
+                entity_name="sales_invoice_header",
+                entity_id=invoice_id,
+                operation="post",
+                performed_by=ctx.user_id,
+                new_value={"journal_id": str(journal_id)},
+            )
+        )
+        enqueue_domain_event(
+            self._db,
             tenant_id=ctx.tenant_id,
-            entity_name="sales_invoice_header",
-            entity_id=invoice_id,
-            operation="post",
-            performed_by=ctx.user_id,
+            event_type="domain.finance.journal_posted",
+            aggregate_type="sales_invoice",
+            aggregate_id=invoice_id,
+            payload={"invoice_id": str(invoice_id), "journal_id": str(journal_id)},
+            idempotency_key=f"domain.finance.journal_posted:sales_invoice:{invoice_id}",
+            created_by=ctx.user_id,
         )
         return updated
 
@@ -193,45 +197,38 @@ class SalesPostingService:
             exchange_rate=float(header.exchange_rate),
         )
 
-        journal = self._journals.create_journal(
-            ctx,
-            company_id=header.company_id,
-            branch_id=header.branch_id,
-            journal_date=header.document_date,
-            description=f"Sales return {header.document_number}",
-            journal_type=JournalType.SYSTEM.value,
-            currency_code=header.currency_code,
-            exchange_rate=float(header.exchange_rate),
-            period_id=header.period_id,
-            fiscal_year_id=header.fiscal_year_id,
-        )
         # Reversal: Revenue Dr, AR Cr
-        self._journals.add_line(
+        posting = self._finance.post_system_journal(
             ctx,
-            journal.id,
-            line_number=1,
-            account_id=revenue_account_id,
-            debit_amount=amount,
-            credit_amount=0,
-            description=f"Return revenue {header.document_number}",
-            customer_id=header.customer_id,
+            SystemJournalDraft(
+                company_id=header.company_id,
+                branch_id=header.branch_id,
+                description=f"Sales return {header.document_number}",
+                lines=(
+                    JournalLineDraft(
+                        account_id=revenue_account_id,
+                        debit_amount=Decimal(str(amount)),
+                        credit_amount=Decimal("0"),
+                        description=f"Return revenue {header.document_number}",
+                        line_number=1,
+                    ),
+                    JournalLineDraft(
+                        account_id=ar_account_id,
+                        debit_amount=Decimal("0"),
+                        credit_amount=Decimal(str(amount)),
+                        description=f"AR credit {header.document_number}",
+                        line_number=2,
+                    ),
+                ),
+                idempotency_key=f"sales.return.post:{header.id}",
+                journal_date=header.document_date,
+                fiscal_year_id=header.fiscal_year_id,
+                source_module="sales",
+                source_document_type="sales_return",
+                source_document_id=header.id,
+            ),
         )
-        self._journals.add_line(
-            ctx,
-            journal.id,
-            line_number=2,
-            account_id=ar_account_id,
-            debit_amount=0,
-            credit_amount=amount,
-            description=f"AR credit {header.document_number}",
-            customer_id=header.customer_id,
-        )
-        self._journal_repo.update_journal(
-            ctx,
-            journal.id,
-            status=JournalStatus.APPROVED.value,
-        )
-        self._posting.post_system_journal(ctx, journal.id)
+        journal_id = posting.journal_id
 
         credit = self._credits.get_by_customer(
             ctx, header.company_id, header.customer_id, branch_id=None
@@ -256,15 +253,20 @@ class SalesPostingService:
             ctx,
             return_id,
             status=ReturnStatus.POSTED.value,
-            finance_journal_id=journal.id,
+            finance_journal_id=journal_id,
             posted_at=now,
         )
         self._audit.log_entity_change(
-            tenant_id=ctx.tenant_id,
-            entity_name="sales_return_header",
-            entity_id=return_id,
-            operation="post",
-            performed_by=ctx.user_id,
-            new_value={"finance_ledger_id": str(ar_entry.id)},
+            AuditIntent(
+                tenant_id=ctx.tenant_id,
+                entity_name="sales_return_header",
+                entity_id=return_id,
+                operation="post",
+                performed_by=ctx.user_id,
+                new_value={
+                    "finance_ledger_id": str(ar_entry.id),
+                    "journal_id": str(journal_id),
+                },
+            )
         )
         return updated

@@ -16,7 +16,7 @@ from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.asset.service.engines import AssetLocationEngine
 from modules.asset.service.location_validator import LocationValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_AST_ASSET_LOCATION = "ast_asset_location"
 
@@ -26,7 +26,7 @@ class LocationService:
         self._repo = AssetLocationRepository(db)
         self._scope = AssetScopeValidator(db)
         self._engine = AssetLocationEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = LocationValidator(db)
 
     def search(

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecUser
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.hr.service.hr_master_data_adapter import HrMasterDataAdapter
 
 
@@ -21,7 +21,7 @@ def force_ess_password_reset(db: Session, ctx: TenantContext, employee_id: UUID)
         raise NotFoundException("Login user not found")
     user.must_change_password = True
     user.updated_by = ctx.user_id
-    AuditService(db).log_security_event(
+    PlatformAuditFacade(db).log_security_event(
         tenant_id=ctx.tenant_id,
         event_type="auth.force_password_change",
         user_id=user.id,

@@ -11,7 +11,7 @@ from modules.foundation.domain.org_data_scope import (
     is_platform_admin,
 )
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.organization.repository.company_repository import CompanyRepository
 from modules.organization.repository.org_scope_repository import OrgScopeRepository
 from modules.organization.service.org_scope_validator import OrgScopeValidator
@@ -25,7 +25,7 @@ class OrgContextService:
         self._scopes = OrgScopeRepository(db)
         self._companies = CompanyRepository(db)
         self._validator = OrgScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._store = SessionStore()
 
     def get_context(self, ctx: TenantContext) -> dict:

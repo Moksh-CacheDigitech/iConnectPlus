@@ -1,5 +1,6 @@
 """CRM Celery tasks."""
 
+from modules.platform.celery_idempotent import system_job
 from workers.celery_app import celery_app
 
 
@@ -34,7 +35,7 @@ def _resolve_owner_user_id(db, tenant_id, owner_employee_id):
     from sqlalchemy import select
 
     from modules.foundation.models.security import SecUser
-    from modules.master_data.models.employee import MasterEmployee
+    from modules.master_data.published import EmployeeRead
 
     if owner_employee_id is None:
         return None
@@ -47,13 +48,14 @@ def _resolve_owner_user_id(db, tenant_id, owner_employee_id):
     )
     if user is not None:
         return user.id
-    emp = db.get(MasterEmployee, owner_employee_id)
+    emp = db.get(EmployeeRead, owner_employee_id)
     if emp is not None and emp.user_id is not None:
         return emp.user_id
     return None
 
 
 @celery_app.task(name="crm.stale_lead_alerts")
+@system_job("crm.stale_lead_alerts", window="day")
 def stale_lead_alerts() -> dict:
     """Notify lead owners every 5 idle days for unconverted, unworked leads."""
     from datetime import datetime, timedelta, timezone
@@ -141,6 +143,7 @@ def _system_contexts(db):
 
 
 @celery_app.task(name="crm.ovf_live_margin_refresh")
+@system_job("crm.ovf_live_margin_refresh", window="day")
 def ovf_live_margin_refresh() -> dict:
     """Re-price approved OVFs for overdue receivables, held stock and expenses."""
     from database.session import SessionLocal

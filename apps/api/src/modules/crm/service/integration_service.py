@@ -13,7 +13,7 @@ from modules.crm.repository.lead_repository import LeadRepository
 from modules.crm.repository.opportunity_repository import OpportunityRepository
 from modules.crm.service.engines import LeadEngine, OpportunityEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class CRMIntegrationService:
@@ -25,7 +25,7 @@ class CRMIntegrationService:
         self._sales = CrmSalesAdapter(db)
         self._lead_engine = LeadEngine()
         self._opp_engine = OpportunityEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def convert_lead_to_customer(
         self,

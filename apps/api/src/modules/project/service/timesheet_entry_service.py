@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.project.models import PrjTimesheetEntry
 from modules.project.repository.timesheet_entry_repository import TimesheetEntryRepository
 from modules.project.service.engines import TimesheetEntryEngine
@@ -19,7 +19,7 @@ class TimesheetEntryService:
         self._repo = TimesheetEntryRepository(db)
         self._scope = ProjectScopeValidator(db)
         self._engine = TimesheetEntryEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._assignment = ProjectAssignmentScope(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):

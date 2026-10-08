@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.inventory.adapters.procurement_adapter import ProcurementInventoryAdapter
 from modules.procurement.domain.enums import GrnStatus, ProcEntityType
 from modules.procurement.models.grn import ProcGrnHeader
@@ -30,7 +30,7 @@ class GrnService:
         self._engine = GrnEngine()
         self._numbers = DocumentNumberService(db)
         self._inventory = inventory_adapter or ProcurementInventoryAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_grns(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

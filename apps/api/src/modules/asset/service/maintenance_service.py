@@ -39,7 +39,7 @@ from modules.asset.service.service_history_service import ServiceHistoryService
 from modules.asset.service.workflow_governance_settings import asset_workflow_governance_enabled
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class MaintenanceService:
@@ -50,7 +50,7 @@ class MaintenanceService:
         self._scope = AssetScopeValidator(db)
         self._numbers = DocumentNumberService(db)
         self._engine = AssetMaintenanceEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._governance = AssetGovernanceService(db)
         self._validator = MaintenanceValidator(db)
         self._operational = AssetOperationalStatusService(db)

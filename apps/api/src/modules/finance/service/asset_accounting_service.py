@@ -12,7 +12,7 @@ from modules.finance.repository.asset_repository import AssetRepository
 from modules.finance.service.document_number_service import DocumentNumberService
 from modules.finance.service.finance_scope_validator import FinanceScopeValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class AssetAccountingService:
@@ -20,7 +20,7 @@ class AssetAccountingService:
         self._repo = AssetRepository(db)
         self._scope = FinanceScopeValidator(db)
         self._numbers = DocumentNumberService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_transactions(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

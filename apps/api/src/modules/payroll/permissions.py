@@ -1,6 +1,9 @@
 """Payroll permission constants per ERD_12 §14."""
 
 PAYROLL_PERMISSIONS: list[tuple[str, str, str, str]] = [
+    ("payroll.payslip:create", "payroll.payslip", "create", "payroll"),
+    ("payroll.posting:create", "payroll.posting", "create", "payroll"),
+    ("payroll.report:create", "payroll.report", "create", "payroll"),
     ("payroll.period:read", "payroll.period", "read", "payroll"),
     ("payroll.period:create", "payroll.period", "create", "payroll"),
     ("payroll.period:update", "payroll.period", "update", "payroll"),

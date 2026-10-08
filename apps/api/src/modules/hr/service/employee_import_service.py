@@ -15,7 +15,7 @@ from modules.hr.models import HrDesignationAssignment, HrEmployment
 from modules.hr.service.assignment_service import DesignationAssignmentService
 from modules.hr.service.designation_service import DesignationService
 from modules.hr.service.employment_service import EmploymentService
-from modules.master_data.models.employee import MasterEmployee
+from modules.master_data.published import EmployeeCommands, EmployeeRead
 from modules.master_data.service.employee_service import EmployeeService
 from modules.organization.models.branch import OrgBranch
 from modules.organization.models.company import OrgCompany
@@ -147,23 +147,21 @@ class EmployeeImportService:
         from datetime import datetime, timezone
 
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        stmt = select(MasterEmployee).where(
-            MasterEmployee.tenant_id == ctx.tenant_id,
-            MasterEmployee.is_deleted.is_(False),
+        stmt = select(EmployeeRead).where(
+            EmployeeRead.tenant_id == ctx.tenant_id,
+            EmployeeRead.is_deleted.is_(False),
         )
         if ctx.company_id and not has_module_wide_data_access(ctx, "hr"):
-            stmt = stmt.where(MasterEmployee.company_id == ctx.company_id)
+            stmt = stmt.where(EmployeeRead.company_id == ctx.company_id)
 
         rows = list(self._db.scalars(stmt).all())
+        commands = EmployeeCommands(self._db)
         deleted = 0
         for i, row in enumerate(rows):
-            row.is_deleted = True
-            row.deleted_at = datetime.now(timezone.utc)
-            row.deleted_by = ctx.user_id
             # Free unique (company_id, employee_code) and (company_id, email)
-            freed_code = f"{row.employee_code}-DEL-{stamp}-{i}"
-            row.employee_code = freed_code[:50]
-            row.email = f"deleted-{row.id.hex[:12]}-{stamp}@cleared.local"[:255]
+            commands.soft_delete_freeing_identity(
+                row.id, suffix=f"{stamp}-{i}", deleted_by=ctx.user_id
+            )
             deleted += 1
 
         self._db.flush()
@@ -272,11 +270,12 @@ class EmployeeImportService:
 
                     # Move company if Entity changed since last import
                     if existing.company_id != company.id:
-                        row = self._db.get(MasterEmployee, existing.id)
-                        if row is not None:
-                            row.company_id = company.id
-                            row.branch_id = branch_id
-                            self._db.flush()
+                        EmployeeCommands(self._db).move_company(
+                            existing.id,
+                            company_id=company.id,
+                            branch_id=branch_id,
+                            updated_by=ctx.user_id,
+                        )
 
                     self._employees.update_employee(
                         ctx,
@@ -470,11 +469,11 @@ class EmployeeImportService:
                 branch.updated_by = ctx.user_id
             self._db.flush()
 
-    def _find_by_code_any(self, ctx: TenantContext, emp_code: str) -> MasterEmployee | None:
-        stmt = select(MasterEmployee).where(
-            MasterEmployee.tenant_id == ctx.tenant_id,
-            MasterEmployee.is_deleted.is_(False),
-            MasterEmployee.employee_code.ilike(emp_code),
+    def _find_by_code_any(self, ctx: TenantContext, emp_code: str) -> EmployeeRead | None:
+        stmt = select(EmployeeRead).where(
+            EmployeeRead.tenant_id == ctx.tenant_id,
+            EmployeeRead.is_deleted.is_(False),
+            EmployeeRead.employee_code.ilike(emp_code),
         )
         return self._db.scalar(stmt)
 
@@ -746,9 +745,9 @@ class EmployeeImportService:
             return code_to_id[code]
         if not code_to_id:
             return None
-        stmt = select(MasterEmployee).where(
-            MasterEmployee.is_deleted.is_(False),
-            MasterEmployee.id.in_(list(code_to_id.values())),
+        stmt = select(EmployeeRead).where(
+            EmployeeRead.is_deleted.is_(False),
+            EmployeeRead.id.in_(list(code_to_id.values())),
         )
         needle_parts = needle.split()
         for emp in self._db.scalars(stmt).all():

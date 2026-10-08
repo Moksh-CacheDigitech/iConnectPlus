@@ -1,4 +1,4 @@
-"""CRM in-app notifications (Foundation notification engine)."""
+"""CRM in-app notifications via platform notify port / outbox."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from modules.foundation.service.notification_service import NotificationService
+from modules.crm.adapters.user_lookup_adapter import CrmUserLookupAdapter
+from modules.platform.compat.notify_facade import PlatformNotifyFacade
 
 
 def notify_crm_user(
@@ -23,19 +24,7 @@ def notify_crm_user(
     digest_key: str | None = None,
     created_by: UUID | None = None,
 ) -> None:
-    """In-app CRM notice; an unread notice with the same digest key is refreshed, not duplicated."""
-    from modules.foundation.repository.base import utcnow
-
-    notif = NotificationService(db)
-    tpl = notif.get_or_create_template(
-        tenant_id=tenant_id,
-        template_code=event_type,
-        template_name=f"CRM {event_type.removeprefix('crm.').replace('.', ' ').replace('_', ' ')}",
-        channel="in_app",
-        subject_template="{{title}}",
-        body_template="{{body}}",
-        created_by=created_by,
-    )
+    """In-app CRM notice; digest key makes re-sends idempotent via outbox."""
     key = digest_key or f"{entity_type}:{entity_id}:{event_type}"
     payload = {
         "title": title,
@@ -47,74 +36,27 @@ def notify_crm_user(
     }
     if href:
         payload["href"] = href
-    existing = notif.find_unread_digest(
+    PlatformNotifyFacade(db).send(
         tenant_id=tenant_id,
-        user_id=recipient_user_id,
-        event_type=event_type,
-        digest_key=key,
-    )
-    if existing is not None:
-        existing.payload_json = payload
-        existing.created_at = utcnow()
-        db.flush()
-        return
-    notif.send(
-        tenant_id=tenant_id,
-        template_id=tpl.id,
+        template_code=event_type,
         event_type=event_type,
         recipient_user_id=recipient_user_id,
-        recipient_address=None,
         payload_json=payload,
         created_by=created_by,
+        channel="in_app",
+        idempotency_key=f"crm:{key}",
+        aggregate_id=entity_id,
     )
 
 
 def resolve_employee_user_id(db: Session, tenant_id: UUID, employee_id: UUID | None) -> UUID | None:
     """Map a master_employee to its login (sec_user)."""
-    if employee_id is None:
-        return None
-    from sqlalchemy import select
-
-    from modules.foundation.models.security import SecUser
-    from modules.master_data.models.employee import MasterEmployee
-
-    user_id = db.scalar(
-        select(SecUser.id).where(
-            SecUser.tenant_id == tenant_id,
-            SecUser.employee_id == employee_id,
-            SecUser.is_deleted.is_(False),
-        )
-    )
-    if user_id is not None:
-        return user_id
-    emp = db.get(MasterEmployee, employee_id)
-    return emp.user_id if emp is not None else None
+    return CrmUserLookupAdapter(db).resolve_employee_user_id(tenant_id, employee_id)
 
 
 def resolve_user_manager_user_id(db: Session, tenant_id: UUID, user_id: UUID | None) -> UUID | None:
     """Reporting manager (as a login) of the employee behind ``user_id``."""
-    if user_id is None:
-        return None
-    from sqlalchemy import select
-
-    from modules.foundation.models.security import SecUser
-    from modules.master_data.models.employee import MasterEmployee
-
-    user = db.get(SecUser, user_id)
-    employee = None
-    if user is not None and user.employee_id is not None:
-        employee = db.get(MasterEmployee, user.employee_id)
-    if employee is None:
-        employee = db.scalar(
-            select(MasterEmployee).where(
-                MasterEmployee.tenant_id == tenant_id,
-                MasterEmployee.user_id == user_id,
-                MasterEmployee.is_deleted.is_(False),
-            )
-        )
-    if employee is None or employee.reporting_manager_id is None:
-        return None
-    return resolve_employee_user_id(db, tenant_id, employee.reporting_manager_id)
+    return CrmUserLookupAdapter(db).resolve_user_manager_user_id(tenant_id, user_id)
 
 
 def notify_approval_rejected(

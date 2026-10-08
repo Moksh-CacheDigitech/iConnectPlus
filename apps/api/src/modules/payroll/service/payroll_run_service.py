@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.payroll.adapters.hr_port import PayrollHrAdapter
 from modules.payroll.domain.enums import EmployeeSalaryStatus, PayEntityType, RunLineStatus
 from modules.payroll.models import PayPayrollRun
@@ -40,7 +40,7 @@ class PayrollRunService:
         self._numbers = DocumentNumberService(db)
         self._engine = PayrollRunEngine()
         self._hr = PayrollHrAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

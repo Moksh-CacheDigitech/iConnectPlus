@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.helpdesk.domain.enums import HdEntityType
 from modules.helpdesk.models import HdSupportSchedule
 from modules.helpdesk.repository.support_schedule_repository import SupportScheduleRepository
@@ -21,7 +21,7 @@ class SupportScheduleService:
         self._scope = HelpdeskScopeValidator(db)
         self._numbers = DocumentNumberService(db)
         self._engine = SupportScheduleEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

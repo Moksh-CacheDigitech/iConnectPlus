@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.inventory.adapters.sales_adapter import SalesInventoryAdapter
 from modules.sales.domain.enums import DeliveryStatus, SalesEntityType
 from modules.sales.models.delivery import SalesDeliveryHeader
@@ -28,7 +28,7 @@ class DeliveryService:
         self._engine = DeliveryEngine()
         self._numbers = DocumentNumberService(db)
         self._inventory = SalesInventoryAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_deliveries(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

@@ -1,9 +1,11 @@
 """HR Celery tasks."""
 
+from modules.platform.celery_idempotent import system_job
 from workers.celery_app import celery_app
 
 
 @celery_app.task(name="hr.attendance_auto_lock")
+@system_job("hr.attendance_auto_lock", window="day")
 def attendance_auto_lock() -> dict:
     from datetime import date, timedelta
 
@@ -24,15 +26,13 @@ def attendance_auto_lock() -> dict:
                 )
             ).all()
         )
-        locked = 0
         for row in rows:
             row.status = "locked"
-            locked += 1
         db.commit()
-        return {"status": "ok", "candidates": len(rows), "locked": locked}
-    except Exception as exc:
+        return {"status": "ok", "candidates": len(rows), "locked": len(rows)}
+    except Exception:
         db.rollback()
-        return {"status": "error", "message": str(exc)}
+        raise
     finally:
         db.close()
 
@@ -56,7 +56,7 @@ def attendance_auto_absent() -> dict:
         holiday_dates_from_json,
         is_weekly_off_day,
     )
-    from modules.master_data.models.employee import MasterEmployee
+    from modules.master_data.published import EmployeeRead
 
     db = SessionLocal()
     try:
@@ -140,7 +140,7 @@ def attendance_auto_absent() -> dict:
             key = (emp_row.employee_id, yesterday)
             if key in existing:
                 continue
-            master = db.get(MasterEmployee, emp_row.employee_id)
+            master = db.get(EmployeeRead, emp_row.employee_id)
             if master is None or getattr(master, "is_deleted", False):
                 continue
             if emp_row.employee_id in on_leave:
@@ -495,7 +495,7 @@ def probation_reminders() -> dict:
     from modules.foundation.models.security import SecUser
     from modules.foundation.service.notification_service import NotificationService
     from modules.hr.models import HrEmployment
-    from modules.master_data.models.employee import MasterEmployee
+    from modules.master_data.published import EmployeeRead
     from security.rbac import RBACEngine
 
     def _hr_recipients(db, tenant_id, company_id) -> list[tuple]:
@@ -520,11 +520,11 @@ def probation_reminders() -> dict:
             return out
         # Fallback: designation contains HR
         for emp in db.scalars(
-            select(MasterEmployee).where(
-                MasterEmployee.company_id == company_id,
-                MasterEmployee.is_deleted.is_(False),
-                MasterEmployee.user_id.is_not(None),
-                MasterEmployee.designation.ilike("%HR%"),
+            select(EmployeeRead).where(
+                EmployeeRead.company_id == company_id,
+                EmployeeRead.is_deleted.is_(False),
+                EmployeeRead.user_id.is_not(None),
+                EmployeeRead.designation.ilike("%HR%"),
             )
         ).all():
             if emp.user_id in seen:
@@ -558,7 +558,7 @@ def probation_reminders() -> dict:
 
         def _emp(eid):
             if eid not in emp_cache:
-                emp_cache[eid] = db.get(MasterEmployee, eid)
+                emp_cache[eid] = db.get(EmployeeRead, eid)
             return emp_cache[eid]
 
         def _hr_for(tenant_id, company_id):
@@ -693,7 +693,7 @@ def leave_balance_monthly_credit(period_yyyymm: str | None = None) -> dict:
     )
     from modules.hr.models import HrLeaveBalance, HrLeaveType
     from modules.hr.service.leave_service import LeaveBalanceService
-    from modules.master_data.models.employee import MasterEmployee
+    from modules.master_data.published import EmployeeRead
 
     period = period_yyyymm or completed_calendar_month_yyyymm()
     balance_year = balance_year_for_accrual_period(period)
@@ -730,7 +730,7 @@ def leave_balance_monthly_credit(period_yyyymm: str | None = None) -> dict:
             if lt is None or not lt.monthly_credit_days:
                 continue
             credit = Decimal(str(lt.monthly_credit_days))
-            employee = db.get(MasterEmployee, bal.employee_id)
+            employee = db.get(EmployeeRead, bal.employee_id)
             if employee is None or not employee.user_id:
                 continue
             tpl = notif.get_or_create_template(
@@ -840,7 +840,7 @@ def birthday_anniversary_reminders() -> dict:
     from database.session import SessionLocal
     from modules.hr.models import HrEmployeeProfile
     from modules.hr.service.hr_notify import notify_employee
-    from modules.master_data.models.employee import MasterEmployee
+    from modules.master_data.published import EmployeeRead
 
     db = SessionLocal()
     try:
@@ -877,10 +877,10 @@ def birthday_anniversary_reminders() -> dict:
 
         employees = list(
             db.scalars(
-                select(MasterEmployee).where(
-                    MasterEmployee.is_deleted.is_(False),
-                    extract("month", MasterEmployee.date_of_joining) == today.month,
-                    extract("day", MasterEmployee.date_of_joining) == today.day,
+                select(EmployeeRead).where(
+                    EmployeeRead.is_deleted.is_(False),
+                    extract("month", EmployeeRead.date_of_joining) == today.month,
+                    extract("day", EmployeeRead.date_of_joining) == today.day,
                 )
             ).all()
         )
@@ -931,7 +931,7 @@ def holiday_reminders() -> dict:
     from database.session import SessionLocal
     from modules.foundation.service.notification_service import NotificationService
     from modules.hr.models import HrHolidayCalendar
-    from modules.master_data.models.employee import MasterEmployee
+    from modules.master_data.published import EmployeeRead
 
     db = SessionLocal()
     try:
@@ -967,10 +967,10 @@ def holiday_reminders() -> dict:
         body = "Enjoy your holiday. Office will be closed / marked as holiday."
         employees = list(
             db.scalars(
-                select(MasterEmployee).where(
-                    MasterEmployee.is_deleted.is_(False),
-                    MasterEmployee.status.in_(("active", "probation", "confirmed")),
-                    MasterEmployee.user_id.is_not(None),
+                select(EmployeeRead).where(
+                    EmployeeRead.is_deleted.is_(False),
+                    EmployeeRead.status.in_(("active", "probation", "confirmed")),
+                    EmployeeRead.user_id.is_not(None),
                 )
             ).all()
         )

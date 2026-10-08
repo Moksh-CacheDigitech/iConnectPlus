@@ -15,7 +15,7 @@ from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.audit import AuditEvent, AuditLog
 from modules.foundation.models.security import SecRole, SecUser, SecUserModule, SecUserOrgScope, SecUserRole
 from modules.foundation.repository.user_module_repository import UserModuleRepository
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.rbac_service import RBACService
 from modules.foundation.service.user_service import UserService
 from modules.hr.schemas import (
@@ -24,7 +24,7 @@ from modules.hr.schemas import (
     HrAdminPasswordResponse,
     HrAdminRecord,
 )
-from modules.master_data.models.employee import MasterEmployee
+from modules.master_data.published import EmployeeCommands, EmployeeRead
 from modules.organization.models.company import OrgCompany
 from modules.organization.repository.org_scope_repository import OrgScopeRepository
 from security.password import PasswordHasher
@@ -72,7 +72,7 @@ class HrSuperadminService:
     def __init__(self, db: Session) -> None:
         self._db = db
         self._users = UserService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._scopes = OrgScopeRepository(db)
         self._modules = UserModuleRepository(db)
         self._rbac = RBACService(db)
@@ -148,12 +148,12 @@ class HrSuperadminService:
             role_id=role.id,
         )
 
-    def _employee(self, ctx: TenantContext, employee_id: UUID) -> MasterEmployee:
+    def _employee(self, ctx: TenantContext, employee_id: UUID) -> EmployeeRead:
         emp = self._db.scalar(
-            select(MasterEmployee).where(
-                MasterEmployee.id == employee_id,
-                MasterEmployee.tenant_id == ctx.tenant_id,
-                MasterEmployee.is_deleted.is_(False),
+            select(EmployeeRead).where(
+                EmployeeRead.id == employee_id,
+                EmployeeRead.tenant_id == ctx.tenant_id,
+                EmployeeRead.is_deleted.is_(False),
             )
         )
         if emp is None:
@@ -162,7 +162,7 @@ class HrSuperadminService:
 
     def _to_record(
         self,
-        emp: MasterEmployee,
+        emp: EmployeeRead,
         user: SecUser,
         *,
         login_created: bool,
@@ -197,7 +197,7 @@ class HrSuperadminService:
     def _resolve_company_ids(
         self,
         ctx: TenantContext,
-        emp: MasterEmployee,
+        emp: EmployeeRead,
         company_ids: list[UUID] | None,
         *,
         require_nonempty: bool = False,
@@ -272,17 +272,17 @@ class HrSuperadminService:
 
     def list_admins(self, ctx: TenantContext) -> list[HrAdminRecord]:
         rows = self._db.execute(
-            select(MasterEmployee, SecUser)
-            .join(SecUser, SecUser.id == MasterEmployee.user_id)
+            select(EmployeeRead, SecUser)
+            .join(SecUser, SecUser.id == EmployeeRead.user_id)
             .join(SecUserModule, SecUserModule.user_id == SecUser.id)
             .where(
-                MasterEmployee.tenant_id == ctx.tenant_id,
-                MasterEmployee.is_deleted.is_(False),
+                EmployeeRead.tenant_id == ctx.tenant_id,
+                EmployeeRead.is_deleted.is_(False),
                 SecUser.is_deleted.is_(False),
                 SecUserModule.module_key == HR_MODULE_KEY,
                 SecUserModule.role == MODULE_ROLE_MEMBER,
             )
-            .order_by(MasterEmployee.first_name, MasterEmployee.last_name)
+            .order_by(EmployeeRead.first_name, EmployeeRead.last_name)
         ).all()
         return [self._to_record(emp, user, login_created=False) for emp, user in rows]
 
@@ -306,7 +306,7 @@ class HrSuperadminService:
             if super_link:
                 raise AppException("Cannot assign HR Admin to a Superadmin account")
 
-    def _require_hr_member(self, ctx: TenantContext, emp: MasterEmployee) -> SecUser:
+    def _require_hr_member(self, ctx: TenantContext, emp: EmployeeRead) -> SecUser:
         if not emp.user_id:
             raise AppException("Employee has no login account")
         user = self._db.get(SecUser, emp.user_id)
@@ -354,7 +354,7 @@ class HrSuperadminService:
             )
             if existing:
                 user = existing
-                emp.user_id = existing.id
+                EmployeeCommands(self._db).link_user(emp.id, existing.id, updated_by=ctx.user_id)
             else:
                 temporary_password = generate_hr_login_password()
                 created = self._users.create_user(
@@ -368,7 +368,7 @@ class HrSuperadminService:
                 user = self._db.get(SecUser, created.id)
                 assert user is not None
                 user.must_change_password = True
-                emp.user_id = user.id
+                EmployeeCommands(self._db).link_user(emp.id, user.id, updated_by=ctx.user_id)
                 login_created = True
 
         assert user is not None

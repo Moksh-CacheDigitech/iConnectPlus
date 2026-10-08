@@ -32,7 +32,7 @@ from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.asset.service.asset_service import AssetService
 from modules.asset.service.registration_validator import RegistrationValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_UNIT = "ast_incoming_asset_unit"
 
@@ -70,7 +70,7 @@ class IncomingRegistrationService:
         self._scope = AssetScopeValidator(db)
         self._assets = AssetService(db)
         self._validator = RegistrationValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def _materialize_company_accepted(self, ctx: TenantContext, company_id: UUID) -> None:
         lines, _ = self._repo.search_qc(

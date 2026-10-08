@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.sales.repository.credit_repository import CreditRepository
 from modules.sales.service.engines.credit_check_engine import CreditCheckEngine
 from modules.sales.service.sales_scope_validator import SalesScopeValidator
@@ -18,7 +18,7 @@ class CustomerCreditService:
         self._repo = CreditRepository(db)
         self._scope = SalesScopeValidator(db)
         self._engine = CreditCheckEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_credits(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

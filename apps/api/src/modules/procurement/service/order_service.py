@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from core.exceptions import NotFoundException
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.procurement.adapters.crm_adapter import ProcurementCrmAdapter
 from modules.procurement.domain.enums import OrderStatus, ProcEntityType
 from modules.procurement.domain.exceptions import InvalidDocumentState, SegregationOfDutiesError
@@ -63,7 +63,7 @@ class OrderService:
         self._engine = OrderEngine()
         self._numbers = DocumentNumberService(db)
         self._governance = ProcurementGovernanceService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._crm = ProcurementCrmAdapter(db)
 
     def list_orders(self, ctx: TenantContext, company_id: UUID | None = None):
@@ -352,6 +352,7 @@ class OrderService:
         instance = self._governance.submit_for_approval(
             ctx, entity_name="proc_order_header", entity_id=order_id
         )
+        instance_id = instance.id
         return self._repo.update_order(
             ctx,
             order_id,

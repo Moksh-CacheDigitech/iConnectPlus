@@ -1,24 +1,21 @@
-"""Quality finance posting - PostingService.post_system_journal only."""
+"""Quality finance posting via platform IFinancePosting."""
 
 from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from modules.finance.domain.enums import JournalType
-from modules.finance.service.journal_service import JournalService
-from modules.finance.service.posting_service import PostingService
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.adapters.audit_adapter import AuditAdapter
+from modules.platform.dto import AuditIntent
+from modules.platform.helpers.system_journal import post_two_line_system_journal
 from modules.quality.models import QmCustomerComplaint, QmFinalInspection, QmIncomingInspection
 
 
 class QualityPostingService:
     def __init__(self, db: Session) -> None:
         self._db = db
-        self._journals = JournalService(db)
-        self._posting = PostingService(db)
-        self._audit = AuditService(db)
+        self._audit = AuditAdapter(db)
 
     def _post_pair(
         self,
@@ -28,47 +25,36 @@ class QualityPostingService:
         branch_id: UUID,
         journal_date,
         description: str,
-        period_id: UUID | None,
         fiscal_year_id: UUID | None,
         debit_account_id: UUID,
         credit_account_id: UUID,
         amount: Decimal,
         debit_desc: str,
         credit_desc: str,
+        idempotency_key: str,
+        source_document_id: UUID,
+        source_document_type: str,
     ) -> UUID:
-        amount = amount.quantize(Decimal("0.0001"))
-        if amount <= 0:
+        if amount.quantize(Decimal("0.0001")) <= 0:
             raise ValueError("Posting amount must be positive")
-        journal = self._journals.create_journal(
+        return post_two_line_system_journal(
+            self._db,
             ctx,
             company_id=company_id,
             branch_id=branch_id,
-            journal_date=journal_date,
             description=description,
-            journal_type=JournalType.SYSTEM.value,
-            period_id=period_id,
+            amount=amount,
+            debit_account_id=debit_account_id,
+            credit_account_id=credit_account_id,
+            idempotency_key=idempotency_key,
+            source_module="quality",
+            source_document_type=source_document_type,
+            source_document_id=source_document_id,
+            debit_desc=debit_desc,
+            credit_desc=credit_desc,
+            journal_date=journal_date,
             fiscal_year_id=fiscal_year_id,
         )
-        self._journals.add_line(
-            ctx,
-            journal.id,
-            line_number=1,
-            account_id=debit_account_id,
-            debit_amount=float(amount),
-            credit_amount=0,
-            description=debit_desc,
-        )
-        self._journals.add_line(
-            ctx,
-            journal.id,
-            line_number=2,
-            account_id=credit_account_id,
-            debit_amount=0,
-            credit_amount=float(amount),
-            description=credit_desc,
-        )
-        self._posting.post_system_journal(ctx, journal.id)
-        return journal.id
 
     def post_quality_cost(
         self,
@@ -86,74 +72,51 @@ class QualityPostingService:
             branch_id=doc.branch_id,
             journal_date=doc.document_date,
             description=f"QM quality cost {getattr(doc, 'document_number', doc.id)}",
-            period_id=doc.period_id,
             fiscal_year_id=fiscal_year_id,
             debit_account_id=quality_expense_account_id,
             credit_account_id=inventory_account_id,
             amount=amount,
             debit_desc="Quality expense",
             credit_desc="Inventory offset",
+            idempotency_key=f"quality.cost:{doc.id}",
+            source_document_id=doc.id,
+            source_document_type="quality_inspection",
         )
-        doc.finance_journal_id = jid
         self._audit.log_entity_change(
-            tenant_id=ctx.tenant_id,
-            entity_name=doc.__tablename__,
-            entity_id=doc.id,
-            operation="finance_post_quality",
-            performed_by=ctx.user_id,
+            AuditIntent(
+                tenant_id=ctx.tenant_id,
+                entity_name="quality_inspection",
+                entity_id=doc.id,
+                operation="finance_post",
+                performed_by=ctx.user_id,
+                new_value={"journal_id": str(jid)},
+            )
         )
         return jid
 
-    def post_scrap_cost(
+    def post_complaint_cost(
         self,
         ctx: TenantContext,
-        doc: QmIncomingInspection | QmFinalInspection,
+        doc: QmCustomerComplaint,
         *,
         amount: Decimal,
-        scrap_expense_account_id: UUID,
-        inventory_account_id: UUID,
+        quality_expense_account_id: UUID,
+        liability_account_id: UUID,
         fiscal_year_id: UUID | None = None,
     ) -> UUID:
-        jid = self._post_pair(
+        return self._post_pair(
             ctx,
             company_id=doc.company_id,
             branch_id=doc.branch_id,
             journal_date=doc.document_date,
-            description=f"QM scrap cost {getattr(doc, 'document_number', doc.id)}",
-            period_id=doc.period_id,
+            description=f"QM complaint {getattr(doc, 'document_number', doc.id)}",
             fiscal_year_id=fiscal_year_id,
-            debit_account_id=scrap_expense_account_id,
-            credit_account_id=inventory_account_id,
+            debit_account_id=quality_expense_account_id,
+            credit_account_id=liability_account_id,
             amount=amount,
-            debit_desc="Scrap expense",
-            credit_desc="Inventory credit",
+            debit_desc="Complaint expense",
+            credit_desc="Complaint liability",
+            idempotency_key=f"quality.complaint:{doc.id}",
+            source_document_id=doc.id,
+            source_document_type="quality_complaint",
         )
-        doc.finance_journal_id = jid
-        return jid
-
-    def post_warranty_cost(
-        self,
-        ctx: TenantContext,
-        complaint: QmCustomerComplaint,
-        *,
-        amount: Decimal,
-        warranty_expense_account_id: UUID,
-        provision_account_id: UUID,
-        fiscal_year_id: UUID | None = None,
-    ) -> UUID:
-        jid = self._post_pair(
-            ctx,
-            company_id=complaint.company_id,
-            branch_id=complaint.branch_id,
-            journal_date=complaint.document_date,
-            description=f"QM warranty cost {complaint.document_number}",
-            period_id=complaint.period_id,
-            fiscal_year_id=fiscal_year_id,
-            debit_account_id=warranty_expense_account_id,
-            credit_account_id=provision_account_id,
-            amount=amount,
-            debit_desc="Warranty expense",
-            credit_desc="Warranty provision",
-        )
-        complaint.finance_journal_id = jid
-        return jid

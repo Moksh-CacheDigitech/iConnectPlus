@@ -17,7 +17,7 @@ from modules.asset.repository.site_location_repository import (
 from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.asset.service.site_access import ensure_site_admin, ensure_site_read
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.organization.models.hierarchy import OrgLocation
 
 
@@ -31,7 +31,7 @@ class SiteLocationService:
         self._locs = SiteLocationRepository(db)
         self._bldgs = SiteBuildingRepository(db)
         self._scope = AssetScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_locations(
         self,

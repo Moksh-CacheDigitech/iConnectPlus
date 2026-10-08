@@ -4,13 +4,12 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from core.exceptions import NotFoundException
 from modules.asset.domain.workflow_codes import NOTIFICATION_TEMPLATE_CODES, WORKFLOW_CODES
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.repository.workflow_repository import WorkflowRepository
-from modules.foundation.service.audit_service import AuditService
-from modules.foundation.service.notification_service import NotificationService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
+from modules.platform.helpers.workflow_gate import resolve_workflow_definition_id
+from modules.platform.compat.notify_facade import PlatformNotifyFacade
 from modules.foundation.service.workflow_service import WorkflowService
 
 
@@ -18,9 +17,8 @@ class AssetGovernanceService:
     def __init__(self, db: Session) -> None:
         self._db = db
         self._workflow = WorkflowService(db)
-        self._workflow_repo = WorkflowRepository(db)
-        self._audit = AuditService(db)
-        self._notifications = NotificationService(db)
+        self._audit = PlatformAuditFacade(db)
+        self._notifications = PlatformNotifyFacade(db)
 
     def submit_for_approval(
         self,
@@ -30,15 +28,16 @@ class AssetGovernanceService:
         entity_id: UUID,
         recipient_user_id: UUID | None = None,
     ):
-        workflow_code = WORKFLOW_CODES.get(entity_name)
-        if workflow_code is None:
-            raise NotFoundException("No workflow configured for this entity")
-        definition = self._workflow_repo.get_definition_by_code(ctx.tenant_id, workflow_code)
-        if definition is None:
-            raise NotFoundException("Workflow definition not found")
+        definition_id = resolve_workflow_definition_id(
+            self._db,
+            tenant_id=ctx.tenant_id,
+            entity_name=entity_name,
+            module_workflow_code=WORKFLOW_CODES.get(entity_name),
+            created_by=ctx.user_id,
+        )
         instance = self._workflow.create_instance(
             tenant_id=ctx.tenant_id,
-            workflow_id=definition.id,
+            workflow_id=definition_id,
             entity_name=entity_name,
             entity_id=entity_id,
             started_by=ctx.user_id,

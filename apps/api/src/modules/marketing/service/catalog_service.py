@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.marketing.domain.enums import BrandVoiceStatus, PublishJobStatus
 from modules.marketing.domain.exceptions import ConflictException, NotFoundException, ValidationException
 from modules.marketing.models import (
@@ -103,7 +103,7 @@ class BrandVoiceService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self._repo = MktScopedRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._repo.resolve_company_id(ctx, company_id)

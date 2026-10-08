@@ -33,7 +33,7 @@ from modules.asset.service.workflow_governance_settings import asset_workflow_go
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.repository.base import utcnow
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class DisposalService:
@@ -46,7 +46,7 @@ class DisposalService:
         self._asset_engine = AssetEngine()
         self._finance = AssetFinanceAdapter(db)
         self._master = AssetMasterDataAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._governance = AssetGovernanceService(db)
         self._validator = DisposalValidator(db)
         self._operational = AssetOperationalStatusService(db)
@@ -284,12 +284,13 @@ class DisposalService:
             entity_id=row_id,
             recipient_user_id=row.created_by,
         )
+        instance_id = instance.id
         return self._repo.update(
             ctx,
             row_id,
             status=row.status,
             workflow_status=WorkflowStatus.IN_PROGRESS.value,
-            workflow_instance_id=instance.id,
+            workflow_instance_id=instance_id,
         )
 
     def approve(

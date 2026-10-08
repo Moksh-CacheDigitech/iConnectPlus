@@ -8,13 +8,13 @@ from core.exceptions import NotFoundException
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.exceptions import WorkflowStateException
 from modules.foundation.repository.workflow_repository import WorkflowRepository
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class WorkflowService:
     def __init__(self, db: Session) -> None:
         self._repo = WorkflowRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_definitions(self, tenant_id: UUID):
         return self._repo.list_definitions(tenant_id)

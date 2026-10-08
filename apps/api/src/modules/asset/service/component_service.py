@@ -28,7 +28,7 @@ from modules.asset.service.component_code_service import ComponentCodeService
 from modules.asset.service.component_validator import ComponentValidator
 from modules.asset.service.engines import AssetComponentEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_AST_COMPONENT = "ast_asset_component"
 _READY = AssetOperationalStatus.READY_TO_MOVE.value
@@ -42,7 +42,7 @@ class AssetComponentService:
         self._types = AssetTypeRepository(db)
         self._scope = AssetScopeValidator(db)
         self._engine = AssetComponentEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = ComponentValidator(db)
         self._codes = ComponentCodeService(db)
         self._operational = AssetOperationalStatusService(db)

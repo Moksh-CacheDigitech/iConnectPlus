@@ -11,7 +11,7 @@ from modules.asset.repository.asset_type_repository import AssetTypeRepository
 from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.asset.service.site_access import ensure_site_admin, ensure_site_read
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 # Seeded when a company has no types yet (mirrors migration 0506/0507).
 # (name, requires_hardware_config, eligible_as_component)
@@ -38,7 +38,7 @@ class AssetTypeService:
         self._db = db
         self._repo = AssetTypeRepository(db)
         self._scope = AssetScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def _ensure_read(self, ctx: TenantContext) -> None:
         # IT members / asset readers can list types for forms & filters.

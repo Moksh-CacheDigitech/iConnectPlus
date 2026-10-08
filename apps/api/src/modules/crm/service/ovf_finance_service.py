@@ -450,7 +450,7 @@ class OvfFinanceService:
         """Per salesperson: approved vs live margin, penalties, receivables, open deals."""
         if not self._crm_admin.is_admin(ctx):
             raise ForbiddenException("Sales performance is visible to CRM admins / management only")
-        from modules.master_data.models.employee import MasterEmployee
+        from modules.master_data.published import EmployeeRead
 
         stmt = (
             select(CrmOvf, CrmOpportunity.owner_employee_id)
@@ -490,7 +490,7 @@ class OvfFinanceService:
         names: dict[UUID, str] = {}
         owner_ids = [oid for oid in buckets if oid is not None]
         if owner_ids:
-            for emp in self._db.scalars(select(MasterEmployee).where(MasterEmployee.id.in_(owner_ids))).all():
+            for emp in self._db.scalars(select(EmployeeRead).where(EmployeeRead.id.in_(owner_ids))).all():
                 names[emp.id] = f"{emp.first_name} {emp.last_name or ''}".strip()
         rows = []
         for owner_id, b in buckets.items():

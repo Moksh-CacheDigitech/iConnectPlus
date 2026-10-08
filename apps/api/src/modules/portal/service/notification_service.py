@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.portal.models import PtNotification
 from modules.portal.repository.notification_repository import NotificationRepository
 from modules.portal.service.engines import NotificationEngine
@@ -18,7 +18,7 @@ class NotificationService:
         self._repo = NotificationRepository(db)
         self._scope = PortalScopeValidator(db)
         self._engine = NotificationEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

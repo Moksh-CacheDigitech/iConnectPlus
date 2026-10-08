@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.project.adapters.finance_port import ProjectFinanceAdapter
 from modules.project.domain.enums import PrjEntityType
 from modules.project.models import PrjProjectCost
@@ -25,7 +25,7 @@ class CostService:
         self._numbers = DocumentNumberService(db)
         self._engine = ProjectCostEngine()
         self._finance = ProjectFinanceAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._assignment = ProjectAssignmentScope(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):

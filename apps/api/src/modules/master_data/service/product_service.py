@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.master_data.domain.enums import MasterEntityType
 from modules.master_data.models.product import MasterProduct
 from modules.master_data.repository.product_repository import ProductRepository
@@ -21,7 +21,7 @@ class ProductService:
     def __init__(self, db: Session) -> None:
         self._repo = ProductRepository(db)
         self._uoms = UomRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._codes = CodeGeneratorService(db)
         self._duplicates = DuplicateCheckerService(db)
         self._scope = MasterScopeValidator(db)

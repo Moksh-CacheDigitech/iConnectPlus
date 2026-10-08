@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from database.base import Base
 from modules.master_data.models.mixins import MasterBranchRecordMixin
+from modules.platform.encrypted_types import EncryptedText
 
 
 class MasterCustomer(Base, *MasterBranchRecordMixin):
@@ -30,7 +31,7 @@ class MasterCustomer(Base, *MasterBranchRecordMixin):
     customer_code: Mapped[str] = mapped_column(String(50), nullable=False)
     customer_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     customer_type: Mapped[str] = mapped_column(String(30), nullable=False)
-    tax_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tax_number: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mobile: Mapped[str | None] = mapped_column(String(30), nullable=True)
     billing_address_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
@@ -59,7 +60,7 @@ class MasterVendor(Base, *MasterBranchRecordMixin):
     vendor_code: Mapped[str] = mapped_column(String(50), nullable=False)
     vendor_name: Mapped[str] = mapped_column(String(255), nullable=False)
     vendor_type: Mapped[str] = mapped_column(String(30), nullable=False)
-    tax_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tax_number: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mobile: Mapped[str | None] = mapped_column(String(30), nullable=True)
     payment_terms: Mapped[str | None] = mapped_column(String(50), nullable=True)

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.payroll.models import PayTaxConfiguration
 from modules.payroll.repository.tax_configuration_repository import TaxConfigurationRepository
 from modules.payroll.service.engines import TaxConfigurationEngine
@@ -18,7 +18,7 @@ class TaxConfigurationService:
         self._repo = TaxConfigurationRepository(db)
         self._scope = PayrollScopeValidator(db)
         self._engine = TaxConfigurationEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

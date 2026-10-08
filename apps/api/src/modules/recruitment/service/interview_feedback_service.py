@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.recruitment.models import RecInterviewFeedback
 from modules.recruitment.repository.interview_feedback_repository import InterviewFeedbackRepository
 from modules.recruitment.service.engines import InterviewFeedbackEngine
@@ -18,7 +18,7 @@ class InterviewFeedbackService:
         self._repo = InterviewFeedbackRepository(db)
         self._scope = RecruitmentScopeValidator(db)
         self._engine = InterviewFeedbackEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
