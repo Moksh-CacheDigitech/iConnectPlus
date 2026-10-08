@@ -30,7 +30,7 @@ from modules.asset.service.registration_validator import RegistrationValidator
 from modules.asset.service.workflow_governance_settings import asset_workflow_governance_enabled
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class AssetService:
@@ -41,7 +41,7 @@ class AssetService:
         self._scope = AssetScopeValidator(db)
         self._numbers = DocumentNumberService(db)
         self._engine = AssetEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._master = AssetMasterDataAdapter(db)
         self._governance = AssetGovernanceService(db)
         self._validator = RegistrationValidator(db)

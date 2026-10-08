@@ -15,7 +15,7 @@ from modules.hr.repository.attendance_repository import AttendanceRepository
 from modules.hr.repository.leave_request_repository import LeaveRequestRepository
 from modules.hr.repository.separation_repository import SeparationRepository
 from modules.hr.service.hr_scope_validator import HrScopeValidator
-from modules.master_data.models.employee import MasterEmployee
+from modules.master_data.published import EmployeeRead
 
 REPORT_TYPES = {
     "attendance",

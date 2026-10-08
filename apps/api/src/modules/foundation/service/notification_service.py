@@ -12,7 +12,7 @@ from modules.foundation.adapters.graph_email_adapter import GraphEmailAdapter
 from modules.foundation.domain.entities import NotificationInboxItem
 from modules.foundation.models.notification import NtfEvent, NtfTemplate
 from modules.foundation.repository.notification_repository import NotificationRepository
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.notification_href import sanitize_inbox_href
 from modules.foundation.service.engines.email_delivery_engine import (
     EmailDeliveryEngine,
@@ -25,7 +25,7 @@ class NotificationService:
     def __init__(self, db: Session) -> None:
         self._db = db
         self._repo = NotificationRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._graph = GraphEmailAdapter()
 
     def list_templates(self, tenant_id: UUID, *, channel: str | None = None):

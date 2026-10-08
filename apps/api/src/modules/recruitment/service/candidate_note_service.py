@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.recruitment.models import RecCandidateNote
 from modules.recruitment.repository.candidate_note_repository import CandidateNoteRepository
 from modules.recruitment.service.engines import CandidateNoteEngine
@@ -18,7 +18,7 @@ class CandidateNoteService:
         self._repo = CandidateNoteRepository(db)
         self._scope = RecruitmentScopeValidator(db)
         self._engine = CandidateNoteEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

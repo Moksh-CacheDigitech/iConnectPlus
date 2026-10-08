@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.manufacturing.domain.enums import BomStatus, MfgEntityType
 from modules.manufacturing.models.bom import MfgBom
 from modules.manufacturing.repository.bom_repository import BomRepository
@@ -24,7 +24,7 @@ class BomService:
         self._numbers = DocumentNumberService(db)
         self._engine = BomEngine()
         self._scope = MfgScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_boms(self, ctx: TenantContext, company_id: UUID | None = None, product_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

@@ -10,7 +10,7 @@ from modules.finance.service.engines.posting_engine import PostingEngine
 from modules.finance.service.finance_scope_validator import FinanceScopeValidator
 from modules.finance.service.journal_service import JournalService
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class PostingService:
@@ -19,7 +19,7 @@ class PostingService:
         self._journal_svc = JournalService(db)
         self._posting = PostingEngine(db)
         self._scope = FinanceScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def post_journal(self, ctx: TenantContext, journal_id: UUID):
         journal = self._journal_svc.get_journal(ctx, journal_id)

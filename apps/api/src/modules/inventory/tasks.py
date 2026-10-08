@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from modules.platform.celery_idempotent import system_job
 from workers.celery_app import celery_app
 
 _SYSTEM_USER = UUID("00000000-0000-0000-0000-000000000001")
@@ -76,15 +77,14 @@ def batch_expiry_alerts() -> dict:
 
 
 @celery_app.task(name="inventory.reservation_cleanup")
+@system_job("inventory.reservation_cleanup", window="day")
 def reservation_cleanup() -> dict:
     from sqlalchemy import select
 
     from database.session import SessionLocal
     from modules.foundation.domain.value_objects import TenantContext
     from modules.inventory.models.reservation import InvReservation
-    from modules.inventory.service.inventory_application_service import (
-        InventoryApplicationService,
-    )
+    from modules.platform.adapters.inventory_adapter import InventoryStockAdapter
 
     db = SessionLocal()
     try:
@@ -99,7 +99,7 @@ def reservation_cleanup() -> dict:
                 )
             ).all()
         )
-        released = 0
+        stock = InventoryStockAdapter(db)
         for row in rows:
             ctx = TenantContext(
                 tenant_id=row.tenant_id,
@@ -108,10 +108,9 @@ def reservation_cleanup() -> dict:
                 branch_id=row.branch_id,
                 user_type="tenant_admin",
             )
-            InventoryApplicationService(db).release_reservation(ctx, row.id)
-            released += 1
+            stock.release(ctx, row.id)
         db.commit()
-        return {"status": "ok", "released": released}
+        return {"status": "ok", "released": len(rows)}
     finally:
         db.close()
 

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from core.exceptions import AppException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.hr.adapters.master_data_port import HrMasterDataAdapter
 from modules.hr.domain.enums import HrEntityType, NoticeStatus
 from modules.hr.domain.exceptions import InvalidEmploymentState, InvalidSeparationState
@@ -114,7 +114,7 @@ class SeparationService:
         self._numbers = DocumentNumberService(db)
         self._engine = SeparationEngine()
         self._master = HrMasterDataAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._db = db
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
@@ -796,20 +796,10 @@ class SeparationService:
         return updated
 
     def _ensure_open_payroll_period(self, ctx: TenantContext, company_id: UUID, anchor: date):
-        from sqlalchemy import select
-
-        from modules.payroll.models import PayPayrollPeriod
+        from modules.hr.adapters.payroll_port import HrPayrollAdapter
         from modules.payroll.service.payroll_period_service import PayrollPeriodService
 
-        period = self._db.scalar(
-            select(PayPayrollPeriod)
-            .where(
-                PayPayrollPeriod.company_id == company_id,
-                PayPayrollPeriod.is_deleted.is_(False),
-                PayPayrollPeriod.status.in_(("open", "processing")),
-            )
-            .order_by(PayPayrollPeriod.start_date.desc())
-        )
+        period = HrPayrollAdapter(self._db).find_open_period(company_id)
         if period is not None:
             return period
 
@@ -849,7 +839,7 @@ class SeparationService:
             compute_leave_encashment,
             daily_rate_from_gross,
         )
-        from modules.payroll.models import PayPayrollRunLine
+        from modules.hr.adapters.payroll_port import HrPayrollAdapter
         from modules.payroll.service.payroll_run_service import PayrollRunService
 
         row = self.get(ctx, row_id)
@@ -889,13 +879,8 @@ class SeparationService:
                 HrEmployment.is_deleted.is_(False),
             )
         )
-        line = self._db.scalar(
-            select(PayPayrollRunLine).where(
-                PayPayrollRunLine.payroll_run_id == calculated.id,
-                PayPayrollRunLine.employee_id == row.employee_id,
-                PayPayrollRunLine.is_deleted.is_(False),
-            )
-        )
+        payroll = HrPayrollAdapter(self._db)
+        line = payroll.find_run_line(calculated.id, row.employee_id)
         gross = Decimal("0")
         if line is not None:
             gross = Decimal(str(line.gross_earnings or 0))
@@ -923,15 +908,17 @@ class SeparationService:
         total_gross = Decimal(str(calculated.total_gross or 0)) + extra
         total_net = Decimal(str(calculated.total_net or 0)) + extra
         if line is not None:
-            breakdown = dict(line.component_breakdown_json or {})
-            breakdown["leave_encashment"] = float(encash_amount)
-            breakdown["gratuity"] = float(gratuity_amount)
-            breakdown["encashment_days"] = float(encash_days)
-            breakdown["years_of_service"] = years
-            line.component_breakdown_json = breakdown
-            line.gross_earnings = Decimal(str(line.gross_earnings or 0)) + extra
-            line.net_pay = Decimal(str(line.net_pay or 0)) + extra
-            self._db.flush()
+            payroll.add_fnf_components(
+                ctx,
+                line.id,
+                extra=extra,
+                breakdown_updates={
+                    "leave_encashment": float(encash_amount),
+                    "gratuity": float(gratuity_amount),
+                    "encashment_days": float(encash_days),
+                    "years_of_service": years,
+                },
+            )
         elif extra > 0 and employment is not None:
             from modules.payroll.repository.payroll_run_line_repository import (
                 PayrollRunLineRepository,

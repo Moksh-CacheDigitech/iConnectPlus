@@ -9,7 +9,7 @@ from core.exceptions import NotFoundException
 from modules.finance.repository.fiscal_repository import FiscalRepository
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.sales.domain.enums import DeliveryStatus, InvoiceStatus, SalesEntityType
 from modules.sales.domain.exceptions import InvalidDocumentState, SegregationOfDutiesError
 from modules.sales.models.invoice import SalesInvoiceHeader
@@ -35,7 +35,7 @@ class InvoiceService:
         self._order_engine = OrderEngine()
         self._numbers = DocumentNumberService(db)
         self._governance = SalesGovernanceService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_invoices(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -152,12 +152,13 @@ class InvoiceService:
         instance = self._governance.submit_for_approval(
             ctx, entity_name="sales_invoice_header", entity_id=invoice_id
         )
+        instance_id = instance.id
         return self._repo.update_invoice(
             ctx,
             invoice_id,
             status=InvoiceStatus.SUBMITTED.value,
             workflow_status=WorkflowStatus.IN_PROGRESS.value,
-            workflow_instance_id=instance.id,
+            workflow_instance_id=instance_id,
         )
 
     def approve(self, ctx: TenantContext, invoice_id: UUID):

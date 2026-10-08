@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from modules.asset.models import AstNonitAsset, AstNonitAssetType, AstNonitLocation
 from modules.asset.repository.base import AstScopedRepository
 from modules.foundation.domain.value_objects import TenantContext
-from modules.master_data.models.employee import MasterEmployee
+from modules.master_data.published import EmployeeRead
 
 
 class NonItAssetRepository(AstScopedRepository):
@@ -79,15 +79,15 @@ class NonItAssetRepository(AstScopedRepository):
             )
         if q and q.strip():
             term = f"%{q.strip()}%"
-            emp_ids = select(MasterEmployee.id).where(
-                MasterEmployee.company_id == company_id,
-                MasterEmployee.is_deleted.is_(False),
+            emp_ids = select(EmployeeRead.id).where(
+                EmployeeRead.company_id == company_id,
+                EmployeeRead.is_deleted.is_(False),
                 or_(
-                    MasterEmployee.first_name.ilike(term),
-                    MasterEmployee.last_name.ilike(term),
-                    MasterEmployee.employee_code.ilike(term),
+                    EmployeeRead.first_name.ilike(term),
+                    EmployeeRead.last_name.ilike(term),
+                    EmployeeRead.employee_code.ilike(term),
                     func.concat(
-                        MasterEmployee.first_name, " ", MasterEmployee.last_name
+                        EmployeeRead.first_name, " ", EmployeeRead.last_name
                     ).ilike(term),
                 ),
             )
@@ -179,13 +179,13 @@ class NonItAssetRepository(AstScopedRepository):
 
     def employees_by_ids(
         self, company_id: UUID, ids: list[UUID]
-    ) -> dict[UUID, MasterEmployee]:
+    ) -> dict[UUID, EmployeeRead]:
         if not ids:
             return {}
-        stmt = select(MasterEmployee).where(
-            MasterEmployee.id.in_(ids),
-            MasterEmployee.company_id == company_id,
-            MasterEmployee.is_deleted.is_(False),
+        stmt = select(EmployeeRead).where(
+            EmployeeRead.id.in_(ids),
+            EmployeeRead.company_id == company_id,
+            EmployeeRead.is_deleted.is_(False),
         )
         return {r.id: r for r in self.db.scalars(stmt).all()}
 

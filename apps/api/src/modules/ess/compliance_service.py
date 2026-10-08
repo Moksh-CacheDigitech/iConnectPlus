@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
-
-from sqlalchemy import select
+from typing import Any
+from uuid import UUID
 
 from core.exceptions import AppException, ForbiddenException, NotFoundException
 from modules.ess.schemas import (
@@ -13,11 +11,12 @@ from modules.ess.schemas import (
     EssPolicyAckResponse,
     EssPolicyItem,
     EssPolicyStep,
+    EssPolicyWalkthrough,
 )
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecUser
-from modules.foundation.service.audit_service import AuditService
-from modules.hr.models.ess_policy import HrEssPolicy, HrEssPolicyAck
+from modules.hr.service.ess_policy_ack_service import EssPolicyAckService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from security.password import PasswordHasher
 
 
@@ -59,7 +58,8 @@ class EssComplianceService:
     def __init__(self, db, ess) -> None:
         self._db = db
         self._ess = ess
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
+        self._policies = EssPolicyAckService(db)
 
     def user_must_change_password(self, ctx: TenantContext) -> bool:
         user = self._db.get(SecUser, ctx.user_id)
@@ -70,62 +70,24 @@ class EssComplianceService:
 
     def list_policies(self, ctx: TenantContext) -> list[EssPolicyItem]:
         emp = self._ess.resolve_employee(ctx)
-        acked = self._ack_map(ctx, emp.id)
-        rows = list(
-            self._db.scalars(
-                select(HrEssPolicy)
-                .where(
-                    HrEssPolicy.tenant_id == ctx.tenant_id,
-                    HrEssPolicy.company_id == emp.company_id,
-                    HrEssPolicy.is_deleted.is_(False),
-                    HrEssPolicy.status == "published",
-                )
-                .order_by(HrEssPolicy.display_order, HrEssPolicy.title)
-            ).all()
-        )
+        acked = self._policies.acknowledged_versions(ctx, emp.id)
         out: list[EssPolicyItem] = []
-        for row in rows:
+        for row in self._policies.list_published(ctx, emp.company_id):
             if not row.is_mandatory:
                 continue
-            ack_ver = acked.get(row.id)
-            acknowledged = ack_ver is not None and ack_ver >= row.policy_version
-            out.append(
-                EssPolicyItem(
-                    id=row.id,
-                    policy_code=row.policy_code,
-                    title=row.title,
-                    policy_version=row.policy_version,
-                    is_mandatory=row.is_mandatory,
-                    acknowledged=acknowledged,
-                    step_count=len(_split_policy_steps(row.content_markdown)),
-                )
-            )
+            out.append(self._to_item(row, acked.get(row.id)))
         return out
 
     def get_policy(self, ctx: TenantContext, policy_id: UUID) -> EssPolicyItem:
         emp = self._ess.resolve_employee(ctx)
-        row = self._get_published_policy(ctx, emp.company_id, policy_id)
-        acked = self._ack_map(ctx, emp.id)
-        ack_ver = acked.get(row.id)
-        acknowledged = ack_ver is not None and ack_ver >= row.policy_version
-        item = EssPolicyItem(
-            id=row.id,
-            policy_code=row.policy_code,
-            title=row.title,
-            policy_version=row.policy_version,
-            is_mandatory=row.is_mandatory,
-            acknowledged=acknowledged,
-            step_count=len(_split_policy_steps(row.content_markdown)),
-        )
-        return item
+        row = self._policies.get_published(ctx, emp.company_id, policy_id)
+        acked = self._policies.acknowledged_versions(ctx, emp.id)
+        return self._to_item(row, acked.get(row.id))
 
-    def get_policy_walkthrough(self, ctx: TenantContext, policy_id: UUID):
-        from modules.ess.schemas import EssPolicyWalkthrough
-
+    def get_policy_walkthrough(self, ctx: TenantContext, policy_id: UUID) -> EssPolicyWalkthrough:
         emp = self._ess.resolve_employee(ctx)
-        row = self._get_published_policy(ctx, emp.company_id, policy_id)
-        acked = self._ack_map(ctx, emp.id)
-        ack_ver = acked.get(row.id)
+        row = self._policies.get_published(ctx, emp.company_id, policy_id)
+        ack_ver = self._policies.acknowledged_versions(ctx, emp.id).get(row.id)
         return EssPolicyWalkthrough(
             id=row.id,
             policy_code=row.policy_code,
@@ -138,46 +100,23 @@ class EssComplianceService:
 
     def acknowledge_policy(self, ctx: TenantContext, policy_id: UUID) -> EssPolicyAckResponse:
         emp = self._ess.resolve_employee(ctx)
-        row = self._get_published_policy(ctx, emp.company_id, policy_id)
-        existing = self._db.scalar(
-            select(HrEssPolicyAck).where(
-                HrEssPolicyAck.employee_id == emp.id,
-                HrEssPolicyAck.policy_id == row.id,
-                HrEssPolicyAck.policy_version == row.policy_version,
-                HrEssPolicyAck.is_deleted.is_(False),
+        row = self._policies.get_published(ctx, emp.company_id, policy_id)
+        ack_id, acknowledged_at, created = self._policies.acknowledge(
+            ctx, company_id=emp.company_id, employee_id=emp.id, policy=row
+        )
+        if created:
+            self._audit.log_entity_change(
+                tenant_id=ctx.tenant_id,
+                entity_name="hr_ess_policy_ack",
+                entity_id=ack_id,
+                operation="create",
+                performed_by=ctx.user_id,
+                new_value={"policy_code": row.policy_code, "version": row.policy_version},
             )
-        )
-        if existing:
-            return EssPolicyAckResponse(
-                policy_id=row.id,
-                policy_version=row.policy_version,
-                acknowledged_at=existing.acknowledged_at,
-            )
-        now = datetime.now(timezone.utc)
-        ack = HrEssPolicyAck(
-            id=uuid4(),
-            tenant_id=ctx.tenant_id,
-            company_id=emp.company_id,
-            policy_id=row.id,
-            employee_id=emp.id,
-            policy_version=row.policy_version,
-            acknowledged_at=now,
-            created_by=ctx.user_id,
-            updated_by=ctx.user_id,
-        )
-        self._db.add(ack)
-        self._audit.log_entity_change(
-            tenant_id=ctx.tenant_id,
-            entity_name="hr_ess_policy_ack",
-            entity_id=ack.id,
-            operation="create",
-            performed_by=ctx.user_id,
-            new_value={"policy_code": row.policy_code, "version": row.policy_version},
-        )
         return EssPolicyAckResponse(
             policy_id=row.id,
             policy_version=row.policy_version,
-            acknowledged_at=now,
+            acknowledged_at=acknowledged_at,
         )
 
     def change_password(self, ctx: TenantContext, body: EssChangePasswordBody) -> None:
@@ -200,50 +139,23 @@ class EssComplianceService:
             user_id=ctx.user_id,
         )
 
-    def _pending_policies(self, ctx: TenantContext) -> list[HrEssPolicy]:
+    def _pending_policies(self, ctx: TenantContext) -> list[Any]:
         emp = self._ess.resolve_employee(ctx)
-        acked = self._ack_map(ctx, emp.id)
-        rows = list(
-            self._db.scalars(
-                select(HrEssPolicy).where(
-                    HrEssPolicy.tenant_id == ctx.tenant_id,
-                    HrEssPolicy.company_id == emp.company_id,
-                    HrEssPolicy.is_deleted.is_(False),
-                    HrEssPolicy.status == "published",
-                    HrEssPolicy.is_mandatory.is_(True),
-                )
-            ).all()
+        acked = self._policies.acknowledged_versions(ctx, emp.id)
+        return [
+            row
+            for row in self._policies.list_published(ctx, emp.company_id, mandatory_only=True)
+            if acked.get(row.id) is None or acked[row.id] < row.policy_version
+        ]
+
+    @staticmethod
+    def _to_item(row: Any, ack_ver: int | None) -> EssPolicyItem:
+        return EssPolicyItem(
+            id=row.id,
+            policy_code=row.policy_code,
+            title=row.title,
+            policy_version=row.policy_version,
+            is_mandatory=row.is_mandatory,
+            acknowledged=ack_ver is not None and ack_ver >= row.policy_version,
+            step_count=len(_split_policy_steps(row.content_markdown)),
         )
-        pending: list[HrEssPolicy] = []
-        for row in rows:
-            ver = acked.get(row.id)
-            if ver is None or ver < row.policy_version:
-                pending.append(row)
-        return pending
-
-    def _ack_map(self, ctx: TenantContext, employee_id: UUID) -> dict[UUID, int]:
-        rows = self._db.scalars(
-            select(HrEssPolicyAck).where(
-                HrEssPolicyAck.tenant_id == ctx.tenant_id,
-                HrEssPolicyAck.employee_id == employee_id,
-                HrEssPolicyAck.is_deleted.is_(False),
-            )
-        ).all()
-        best: dict[UUID, int] = {}
-        for row in rows:
-            cur = best.get(row.policy_id, 0)
-            if row.policy_version > cur:
-                best[row.policy_id] = row.policy_version
-        return best
-
-    def _get_published_policy(self, ctx: TenantContext, company_id: UUID, policy_id: UUID) -> HrEssPolicy:
-        row = self._db.get(HrEssPolicy, policy_id)
-        if (
-            row is None
-            or row.is_deleted
-            or row.tenant_id != ctx.tenant_id
-            or row.company_id != company_id
-            or row.status != "published"
-        ):
-            raise NotFoundException("Policy not found")
-        return row

@@ -10,7 +10,7 @@ from modules.document.repository.document_version_repository import DocumentVers
 from modules.document.service.document_scope_validator import DocumentScopeValidator
 from modules.document.service.engines import DocumentVersionEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class DocumentVersionService:
@@ -18,7 +18,7 @@ class DocumentVersionService:
         self._repo = DocumentVersionRepository(db)
         self._scope = DocumentScopeValidator(db)
         self._engine = DocumentVersionEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

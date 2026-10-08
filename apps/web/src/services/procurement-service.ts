@@ -1,4 +1,4 @@
-import { ApiClientError, apiClient, resourceService } from "@/services/api-client";
+import { listSheetTrackers } from "@/services/sheet-tracker-service";
 import { getAccessToken } from "@/lib/auth";
 import { cachedFetch, invalidateClientCache, peekCachedValue } from "@/lib/client-cache";
 import { isInlineSafeAttachment, triggerBlobDownload } from "@/lib/safe-attachment";
@@ -91,6 +91,10 @@ export function prefetchProcurementTab(href: string): void {
     prefetchQuiet(listProcurementInventory());
     prefetchQuiet(listVendorOptions());
     prefetchQuiet(listPurchaseOrders());
+    return;
+  }
+  if (path === "/procurement/tracker") {
+    prefetchQuiet(listSheetTrackers());
   }
 }
 

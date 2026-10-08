@@ -36,7 +36,7 @@ from modules.asset.schemas import (
 )
 from modules.asset.service.asset_service import AssetService
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 _OPS_LABELS = {
     "READY_TO_MOVE": "Ready to Move",
@@ -112,7 +112,7 @@ class AssetInformationPortalService:
         self._warranties = AssetWarrantyRepository(db)
         self._insurances = AssetInsuranceRepository(db)
         self._master = AssetMasterDataAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def get_portal(self, ctx: TenantContext, asset_id: UUID) -> AssetInformationPortalResponse:
         """Build redacted portal/self-service profile for an authenticated caller."""

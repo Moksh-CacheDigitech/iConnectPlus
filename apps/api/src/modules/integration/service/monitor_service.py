@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.integration.models import IntMonitor
 from modules.integration.repository.monitor_repository import MonitorRepository
 from modules.integration.service.engines import MonitorEngine
@@ -18,7 +18,7 @@ class MonitorService:
         self._repo = MonitorRepository(db)
         self._scope = IntegrationScopeValidator(db)
         self._engine = MonitorEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

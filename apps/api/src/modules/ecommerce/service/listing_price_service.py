@@ -10,7 +10,7 @@ from modules.ecommerce.repository.listing_price_repository import ListingPriceRe
 from modules.ecommerce.service.ecommerce_scope_validator import EcommerceScopeValidator
 from modules.ecommerce.service.engines import ListingPriceEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class ListingPriceService:
@@ -18,7 +18,7 @@ class ListingPriceService:
         self._repo = ListingPriceRepository(db)
         self._scope = EcommerceScopeValidator(db)
         self._engine = ListingPriceEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

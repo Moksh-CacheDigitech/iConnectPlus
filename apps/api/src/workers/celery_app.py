@@ -3,6 +3,7 @@
 from celery import Celery
 
 from core.config import settings
+from modules.platform.celery_signals import install_celery_correlation
 
 celery_app = Celery(
     "erp_workers",
@@ -57,14 +58,36 @@ celery_app.conf.update(
             "task": "crm.boq_sow_sla_escalations",
             "schedule": 600.0,
         },
+        # Transactional outbox drain — notify/audit/finance/integration handlers.
+        "platform.outbox_drain": {
+            "task": "platform.outbox_drain",
+            "schedule": 15.0,
+        },
+        # Daily jobs below are claimed per UTC day (fnd_job_run), so a shorter
+        # schedule only retries a failed run; it never repeats a successful one.
+        "platform.outbox_purge": {
+            "task": "platform.outbox_purge",
+            "schedule": 3600.0,
+        },
+        "platform.retention_purge": {
+            "task": "platform.retention_purge",
+            "schedule": 3600.0,
+        },
+        "inventory.reservation_cleanup": {
+            "task": "inventory.reservation_cleanup",
+            "schedule": 3600.0,
+        },
     },
 )
+
+install_celery_correlation()
 
 # Domain task modules registered in Sprint 1.
 celery_app.autodiscover_tasks(
     [
         "workers",
         "modules.foundation",
+        "modules.platform",
         "modules.finance",
         "modules.sales",
         "modules.procurement",

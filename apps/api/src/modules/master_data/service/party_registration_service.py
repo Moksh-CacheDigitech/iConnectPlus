@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import ValidationException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.master_data.domain.credit_evaluation import (
     DEFAULT_MONTHLY_INTEREST_RATE_PCT,
     DEFAULT_SUPPLIER_CREDIT_DAYS,
@@ -61,7 +61,7 @@ class PartyRegistrationService:
     def __init__(self, db: Session) -> None:
         self._db = db
         self._repo = PartyRegistrationRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._codes = CodeGeneratorService(db)
         self._scope = MasterScopeValidator(db)
         self._customers = CustomerService(db)

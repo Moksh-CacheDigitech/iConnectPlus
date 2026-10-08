@@ -1,6 +1,8 @@
 """Recruitment permission constants per ERD_13 §14."""
 
 RECRUITMENT_PERMISSIONS: list[tuple[str, str, str, str]] = [
+    ("recruitment.onboarding:update", "recruitment.onboarding", "update", "recruitment"),
+    ("recruitment.report:create", "recruitment.report", "create", "recruitment"),
     ("recruitment.requisition:read", "recruitment.requisition", "read", "recruitment"),
     ("recruitment.requisition:create", "recruitment.requisition", "create", "recruitment"),
     ("recruitment.requisition:update", "recruitment.requisition", "update", "recruitment"),

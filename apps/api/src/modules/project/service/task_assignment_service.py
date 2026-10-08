@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.project.models import PrjTaskAssignment
 from modules.project.repository.task_assignment_repository import TaskAssignmentRepository
 from modules.project.service.engines import TaskAssignmentEngine
@@ -19,7 +19,7 @@ class TaskAssignmentService:
         self._repo = TaskAssignmentRepository(db)
         self._scope = ProjectScopeValidator(db)
         self._engine = TaskAssignmentEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._assignment = ProjectAssignmentScope(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):

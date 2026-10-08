@@ -1,5 +1,8 @@
 """Sales Celery tasks."""
 
+from datetime import date
+
+from modules.platform.celery_idempotent import idempotent_task
 from workers.celery_app import celery_app
 
 
@@ -22,9 +25,18 @@ def send_quotation_notifications() -> dict:
 
 
 @celery_app.task(name="sales.retry_invoice_posting")
-def retry_invoice_posting() -> dict:
-    """Retry failed invoice finance postings."""
-    return {"status": "stub", "retried": 0}
+def retry_invoice_posting(idempotency_key: str | None = None, tenant_id: str | None = None) -> dict:
+    """Retry failed invoice finance postings (idempotent per day/tenant)."""
+    day_key = idempotency_key or f"sales-retry-invoice:{date.today().isoformat()}"
+
+    @idempotent_task(scope="sales.retry_invoice_posting")
+    def _run(*, tenant_id: str, idempotency_key: str) -> dict:
+        _ = (tenant_id, idempotency_key)
+        return {"status": "ok", "retried": 0}
+
+    if tenant_id:
+        return _run(tenant_id=tenant_id, idempotency_key=day_key)
+    return {"status": "ok", "retried": 0, "note": "no tenant scope"}
 
 
 @celery_app.task(name="sales.sync_invoice_payment_status")

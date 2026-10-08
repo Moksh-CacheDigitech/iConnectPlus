@@ -20,7 +20,7 @@ from modules.foundation.domain.erp_modules import (
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecUser
 from modules.foundation.repository.user_module_repository import UserModuleRepository
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.marketing.adapters.crm_port import CrmCampaignPort
 from modules.marketing.domain.enums import CampaignStatus
 from modules.marketing.domain.exceptions import NotFoundException, ValidationException
@@ -67,7 +67,7 @@ class CampaignService:
         self._repo = MktScopedRepository(db)
         self._numbers = MarketingNumberService(db)
         self._crm = CrmCampaignPort(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._modules = UserModuleRepository(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):

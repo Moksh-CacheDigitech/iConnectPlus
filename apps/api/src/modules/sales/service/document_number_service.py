@@ -1,15 +1,17 @@
-"""Sales document number service."""
+"""Sales document number service — platform SSOT with legacy fallback."""
 
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from modules.platform.helpers.ssot_numbering import generate_with_ssot
 from modules.sales.domain.enums import SalesEntityType
 from modules.sales.repository.code_sequence_repository import CodeSequenceRepository
 
 
 class DocumentNumberService:
     def __init__(self, db: Session) -> None:
+        self._db = db
         self._repo = CodeSequenceRepository(db)
 
     def generate(
@@ -20,11 +22,23 @@ class DocumentNumberService:
         model,
         code_column: str,
         year: int | None = None,
+        tenant_id: UUID | None = None,
     ) -> str:
-        return self._repo.next_code(
-            entity_type,
-            company_id,
-            model=model,
-            code_column=code_column,
+        key = getattr(entity_type, "value", str(entity_type))
+        prefix = f"{key.upper()[:4]}-"
+        return generate_with_ssot(
+            self._db,
+            tenant_id=tenant_id,
+            company_id=company_id,
+            module="sales",
+            entity_key=key,
+            prefix=prefix,
             year=year,
+            legacy=lambda: self._repo.next_code(
+                entity_type,
+                company_id,
+                model=model,
+                code_column=code_column,
+                year=year,
+            ),
         )

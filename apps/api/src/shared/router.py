@@ -25,6 +25,7 @@ from modules.marketing.router import marketing_router
 from modules.master_data.router import master_data_router
 from modules.organization.router import organization_router
 from modules.payroll.router import payroll_router
+from modules.platform.router import platform_router
 from modules.portal.router import portal_router
 from modules.procurement.router import procurement_router
 from modules.project.router import project_router
@@ -39,6 +40,7 @@ api_v1_router = APIRouter()
 api_v1_router.include_router(health_router, tags=["Health"])
 api_v1_router.include_router(landing_router)
 api_v1_router.include_router(foundation_router)
+api_v1_router.include_router(platform_router)
 api_v1_router.include_router(organization_router)
 # Asset module before master-data: master /assets/{asset_id} must not swallow
 # /assets/asset-categories, /assets/assets, etc.

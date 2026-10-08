@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
-from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
-
-from sqlalchemy import or_, select
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from core.exceptions import ConflictException, ForbiddenException, NotFoundException
+from modules.ess.adapters.asset_adapter import EssAssetAdapter
+from modules.ess.adapters.helpdesk_adapter import EssHelpdeskAdapter
+from modules.ess.adapters.hr_adapter import EssHrAdapter
 from modules.ess.schemas import (
     EssAssetDetail,
     EssAssetItem,
@@ -24,10 +25,7 @@ from modules.ess.schemas import (
 )
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.repository.base import utcnow
-from modules.hr.models.training_request import HrTrainingRequest
-from modules.hr.models.training_room import HrTrainingRoom
 from modules.hr.service.training_service import TrainingRequestService, TrainingRoomService
-from modules.master_data.models.employee import MasterEmployee
 
 if TYPE_CHECKING:
     from modules.ess.service import EssService
@@ -48,6 +46,9 @@ class EssWorkplaceService:
     def __init__(self, db, ess: EssService) -> None:
         self._db = db
         self._ess = ess
+        self._assets = EssAssetAdapter(db)
+        self._helpdesk = EssHelpdeskAdapter(db)
+        self._hr = EssHrAdapter(db)
 
     def list_meeting_rooms(self, ctx: TenantContext) -> list[EssMeetingRoomItem]:
         emp = self._ess.resolve_employee(ctx)
@@ -76,13 +77,15 @@ class EssWorkplaceService:
     ) -> list[EssMeetingRoomAvailability]:
         emp = self._ess.resolve_employee(ctx)
         rooms = self.list_meeting_rooms(ctx)
-        bookings = self._bookings_for_date(ctx, emp.company_id, on_date)
-        by_room: dict[UUID, list[HrTrainingRequest]] = {}
+        bookings = self._hr.list_room_bookings_for_day(
+            ctx, company_id=emp.company_id, on_date=on_date
+        )
+        by_room: dict[UUID, list[Any]] = {}
         for b in bookings:
             if b.room_id:
                 by_room.setdefault(b.room_id, []).append(b)
         emp_ids = {b.requested_by_employee_id for b in bookings}
-        names = self._employee_display_names(ctx, emp_ids)
+        names = self._hr.employee_display_names(ctx, emp_ids)
 
         result: list[EssMeetingRoomAvailability] = []
         for room in rooms:
@@ -104,19 +107,10 @@ class EssWorkplaceService:
         self, ctx: TenantContext, *, on_date: date | None = None
     ) -> list[EssMeetingBookingResponse]:
         emp = self._ess.resolve_employee(ctx)
-        q = select(HrTrainingRequest).where(
-            HrTrainingRequest.tenant_id == ctx.tenant_id,
-            HrTrainingRequest.company_id == emp.company_id,
-            HrTrainingRequest.is_deleted.is_(False),
-            HrTrainingRequest.room_id.isnot(None),
-            HrTrainingRequest.status.in_(("submitted", "approved")),
-        )
-        if on_date is not None:
-            q = q.where(HrTrainingRequest.request_date == on_date)
-        rows = list(self._db.scalars(q.order_by(HrTrainingRequest.request_date, HrTrainingRequest.start_time)).all())
+        rows = self._hr.list_room_bookings(ctx, company_id=emp.company_id, on_date=on_date)
         room_names = {r.id: r.room_name for r in TrainingRoomService(self._db).list(ctx, emp.company_id)}
         emp_ids = {row.requested_by_employee_id for row in rows}
-        names = self._employee_display_names(ctx, emp_ids)
+        names = self._hr.employee_display_names(ctx, emp_ids)
         return [
             self._booking_response(
                 row,
@@ -160,7 +154,7 @@ class EssWorkplaceService:
             attendees_json=[],
             status="approved",
         )
-        host_name = self._employee_display_names(ctx, {emp.id})
+        host_name = self._hr.employee_display_names(ctx, {emp.id})
         return self._booking_response(row, room.room_name, host_name)
 
     def get_asset(self, ctx: TenantContext, asset_id: UUID) -> EssAssetDetail:
@@ -168,20 +162,8 @@ class EssWorkplaceService:
         return self._to_asset_detail(item)
 
     def lookup_asset(self, ctx: TenantContext, *, code: str) -> EssAssetDetail:
-        from modules.asset.models.asset import AstAsset
-
         emp = self._ess.resolve_employee(ctx)
-        raw = code.strip()
-        if not raw:
-            raise NotFoundException("Asset not found")
-        asset = self._db.scalar(
-            select(AstAsset).where(
-                AstAsset.tenant_id == ctx.tenant_id,
-                AstAsset.company_id == emp.company_id,
-                AstAsset.is_deleted.is_(False),
-                or_(AstAsset.qr_code == raw, AstAsset.asset_code == raw, AstAsset.barcode == raw),
-            )
-        )
+        asset = self._assets.lookup_by_code(ctx, company_id=emp.company_id, code=code)
         if asset is None:
             raise NotFoundException("Asset not found")
         return self._to_asset_detail(
@@ -198,11 +180,9 @@ class EssWorkplaceService:
         problem_category: str | None = None,
         urgency: str | None = None,
     ) -> EssSupportTicketDetail:
-        from modules.asset.models.asset import AstAsset
-
         emp = self._ess.resolve_employee(ctx)
-        asset = self._db.get(AstAsset, asset_id)
-        if asset is None or getattr(asset, "is_deleted", False) or asset.company_id != emp.company_id:
+        asset = self._assets.get(asset_id)
+        if asset is None or asset.company_id != emp.company_id:
             raise NotFoundException("Asset not found")
         cat_code = "ESS_ASSET"
         subj = subject.strip() or "Asset issue"
@@ -223,21 +203,9 @@ class EssWorkplaceService:
         )
 
     def list_support_tickets(self, ctx: TenantContext) -> list[EssSupportTicketItem]:
-        from modules.helpdesk.models.ticket import HdTicket
-
         emp = self._ess.resolve_employee(ctx)
-        rows = list(
-            self._db.scalars(
-                select(HdTicket)
-                .where(
-                    HdTicket.tenant_id == ctx.tenant_id,
-                    HdTicket.company_id == emp.company_id,
-                    HdTicket.requester_employee_id == emp.id,
-                    HdTicket.is_deleted.is_(False),
-                )
-                .order_by(HdTicket.created_at.desc())
-                .limit(100)
-            ).all()
+        rows = self._helpdesk.list_requester_tickets(
+            ctx, company_id=emp.company_id, employee_id=emp.id
         )
         return [self._ticket_to_item(row) for row in rows]
 
@@ -278,20 +246,8 @@ class EssWorkplaceService:
     def list_support_ticket_comments(
         self, ctx: TenantContext, ticket_id: UUID
     ) -> list[EssSupportTicketCommentItem]:
-        from modules.helpdesk.models.ticket_comment import HdTicketComment
-
         self._get_own_ticket(ctx, ticket_id)
-        rows = list(
-            self._db.scalars(
-                select(HdTicketComment)
-                .where(
-                    HdTicketComment.ticket_id == ticket_id,
-                    HdTicketComment.is_deleted.is_(False),
-                    HdTicketComment.status == "active",
-                )
-                .order_by(HdTicketComment.commented_at.asc())
-            ).all()
-        )
+        rows = self._helpdesk.list_comments(ticket_id)
         return [
             EssSupportTicketCommentItem(
                 id=r.id,
@@ -326,45 +282,9 @@ class EssWorkplaceService:
             author_employee_id=row.author_employee_id,
         )
 
-    def _bookings_for_date(self, ctx: TenantContext, company_id: UUID, on_date: date):
-        return list(
-            self._db.scalars(
-                select(HrTrainingRequest).where(
-                    HrTrainingRequest.tenant_id == ctx.tenant_id,
-                    HrTrainingRequest.company_id == company_id,
-                    HrTrainingRequest.is_deleted.is_(False),
-                    HrTrainingRequest.request_date == on_date,
-                    HrTrainingRequest.room_id.isnot(None),
-                    HrTrainingRequest.status.in_(("submitted", "approved")),
-                )
-            ).all()
-        )
-
-    def _employee_display_names(
-        self, ctx: TenantContext, employee_ids: set[UUID]
-    ) -> dict[UUID, str]:
-        if not employee_ids:
-            return {}
-        rows = list(
-            self._db.scalars(
-                select(MasterEmployee).where(
-                    MasterEmployee.tenant_id == ctx.tenant_id,
-                    MasterEmployee.id.in_(employee_ids),
-                    MasterEmployee.is_deleted.is_(False),
-                )
-            ).all()
-        )
-        out: dict[UUID, str] = {}
-        for emp in rows:
-            label = f"{emp.first_name or ''} {emp.last_name or ''}".strip()
-            if not label:
-                label = str(getattr(emp, "employee_code", "") or "Employee")
-            out[emp.id] = label
-        return out
-
     def _booking_response(
         self,
-        row: HrTrainingRequest,
+        row: Any,
         room_name: str | None,
         names: dict[UUID, str],
     ) -> EssMeetingBookingResponse:
@@ -391,7 +311,7 @@ class EssWorkplaceService:
         start_time: time | None,
         end_time: time | None,
     ) -> None:
-        for b in self._bookings_for_date(ctx, company_id, on_date):
+        for b in self._hr.list_room_bookings_for_day(ctx, company_id=company_id, on_date=on_date):
             if b.room_id != room_id:
                 continue
             if _time_overlap(start_time, end_time, b.start_time, b.end_time):
@@ -399,10 +319,8 @@ class EssWorkplaceService:
 
     def _get_asset_for_employee(self, ctx: TenantContext, asset_id: UUID) -> EssAssetItem:
         self._assert_asset_access(ctx, asset_id)
-        from modules.asset.models.asset import AstAsset
-
-        asset = self._db.get(AstAsset, asset_id)
-        if asset is None or getattr(asset, "is_deleted", False):
+        asset = self._assets.get(asset_id)
+        if asset is None:
             raise NotFoundException("Asset not found")
         return self._asset_row_to_item(asset, self._assignment_label(ctx, asset_id))
 
@@ -435,9 +353,7 @@ class EssWorkplaceService:
         )
 
     def _to_asset_detail(self, item: EssAssetItem) -> EssAssetDetail:
-        from modules.asset.models.asset import AstAsset
-
-        asset = self._db.get(AstAsset, item.id)
+        asset = self._assets.get(item.id)
         return EssAssetDetail(
             **item.model_dump(),
             qr_code=getattr(asset, "qr_code", None) if asset else None,
@@ -445,10 +361,8 @@ class EssWorkplaceService:
         )
 
     def _get_own_ticket(self, ctx: TenantContext, ticket_id: UUID):
-        from modules.helpdesk.models.ticket import HdTicket
-
         emp = self._ess.resolve_employee(ctx)
-        row = self._db.get(HdTicket, ticket_id)
+        row = self._helpdesk.get_ticket(ticket_id)
         if row is None or row.is_deleted or row.requester_employee_id != emp.id:
             raise NotFoundException("Ticket not found")
         return row
@@ -480,9 +394,6 @@ class EssWorkplaceService:
         )
 
     def _resolve_ticket_routing(self, ctx: TenantContext, company_id: UUID, kind: str) -> tuple[UUID, UUID]:
-        from modules.helpdesk.models.ticket_category import HdTicketCategory
-        from modules.helpdesk.models.ticket_priority import HdTicketPriority
-
         cat_code = {
             "grievance": "ESS_GRIEVANCE",
             "asset": "ESS_ASSET",
@@ -494,49 +405,9 @@ class EssWorkplaceService:
             "it": "IT support",
         }.get(kind, "IT support")
 
-        cat = self._db.scalar(
-            select(HdTicketCategory).where(
-                HdTicketCategory.tenant_id == ctx.tenant_id,
-                HdTicketCategory.company_id == company_id,
-                HdTicketCategory.category_code == cat_code,
-                HdTicketCategory.is_deleted.is_(False),
-            )
+        cat = self._helpdesk.resolve_or_create_category(
+            ctx, company_id=company_id, category_code=cat_code, category_name=cat_name
         )
-        if cat is None:
-            cat = HdTicketCategory(
-                id=uuid4(),
-                tenant_id=ctx.tenant_id,
-                company_id=company_id,
-                category_code=cat_code,
-                category_name=cat_name,
-                status="active",
-                created_by=ctx.user_id,
-                updated_by=ctx.user_id,
-            )
-            self._db.add(cat)
-            self._db.flush()
-
-        pri = self._db.scalar(
-            select(HdTicketPriority).where(
-                HdTicketPriority.tenant_id == ctx.tenant_id,
-                HdTicketPriority.company_id == company_id,
-                HdTicketPriority.priority_code == "ESS_MEDIUM",
-                HdTicketPriority.is_deleted.is_(False),
-            )
-        )
-        if pri is None:
-            pri = HdTicketPriority(
-                id=uuid4(),
-                tenant_id=ctx.tenant_id,
-                company_id=company_id,
-                priority_code="ESS_MEDIUM",
-                priority_name="Medium",
-                rank_order=2,
-                status="active",
-                created_by=ctx.user_id,
-                updated_by=ctx.user_id,
-            )
-            self._db.add(pri)
-            self._db.flush()
+        pri = self._helpdesk.resolve_or_create_priority(ctx, company_id=company_id)
 
         return cat.id, pri.id

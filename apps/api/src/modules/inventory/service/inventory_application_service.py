@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.inventory.domain.entities import StockMovementResult
 from modules.inventory.domain.enums import InvEntityType, ReservationStatus, SourceModule
 from modules.inventory.domain.exceptions import InsufficientStock
@@ -45,7 +45,7 @@ class InventoryApplicationService:
         self._receipt_engine = ReceiptEngine()
         self._issue_engine = IssueEngine()
         self._fifo = ValuationEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def _already_processed(
         self,

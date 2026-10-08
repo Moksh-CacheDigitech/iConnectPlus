@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.procurement.domain.enums import ProcEntityType, VendorQuotationStatus
 from modules.procurement.domain.exceptions import InvalidDocumentState
 from modules.procurement.models.vendor_quotation import ProcVendorComparison
@@ -26,7 +26,7 @@ class VendorComparisonService:
         self._scope = ProcurementScopeValidator(db)
         self._engine = VendorComparisonEngine()
         self._numbers = DocumentNumberService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def get_by_rfq(self, ctx: TenantContext, rfq_header_id: UUID) -> ProcVendorComparison:
         row = self._repo.get_comparison_by_rfq(ctx, rfq_header_id)

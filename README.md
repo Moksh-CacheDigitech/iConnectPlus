@@ -2,7 +2,7 @@
 
 Multi-Industry, Multi-Company, Enterprise-Grade ERP Platform.
 
-**Architecture Baseline:** v1.1 — LOCKED  
+**Architecture Baseline:** v1.1 — LOCKED · **Addendum:** v1.2 (implementation reality)  
 **Product:** iConnect Plus / Connect Plus (B2B SaaS admin)
 
 ## Architecture
@@ -11,48 +11,57 @@ Multi-Industry, Multi-Company, Enterprise-Grade ERP Platform.
 |-------|------------|
 | Frontend | Next.js 16+, TypeScript, Tailwind CSS, ShadCN UI |
 | Backend | Python 3.13+, FastAPI, SQLAlchemy 2.0, Alembic, Pydantic v2, Celery |
-| Database | PostgreSQL (AWS RDS in production) |
-| Search | OpenSearch |
-| Object storage | MinIO (local / on-prem, S3 API) · AWS S3 (cloud) |
+| Database | PostgreSQL |
+| Objects | MinIO (local / on-prem) · AWS S3 (cloud) |
 | Antivirus | ClamAV (upload scanning) |
 | Cache / Queue | Redis, RabbitMQ |
-| Auth | Microsoft Entra ID SSO · JWT in **HttpOnly cookies** (not localStorage) |
+| Auth | Microsoft Entra ID SSO · JWT in **HttpOnly cookies** |
 | Deploy | Docker Compose · Coolify on EC2 (`docker-compose.coolify.yml`) |
 
 **Pattern:** Clean Architecture · DDD · Modular Monolith  
-**Backend flow:** Router → Service → Repository → Database
+**Backend flow:** Router → Service → Repository → Database  
+**Platform seams:** `apps/api/src/modules/platform` (ports, outbox, numbering, approvals, encryption, SLOs)
+
+OpenSearch / Kubernetes / microservice extract remain **gated** (`modules/platform/evolution.py`).
 
 ## Documentation
 
 | Document | Path |
 |----------|------|
-| BRD | `docs/01_BRD/` |
-| FRD | `docs/02_FRD/` |
-| SDD v1.1 | `docs/03_SDD/` |
-| DBS v1.1 | `docs/04_DBS/` |
-| Architecture Lock | `docs/05_ARCHITECTURE_LOCK/` |
-| Coolify deploy | `docs/coolify-deploy.md` |
+| **Start here (current system)** | [`docs/00_CURRENT/`](docs/00_CURRENT/) |
+| Docs map | [`docs/README.md`](docs/README.md) |
+| BRD / FRD / SDD / DBS | `docs/01_BRD` … `docs/04_DBS` |
+| Architecture Lock + Addendum | `docs/05_ARCHITECTURE_LOCK/` |
+| Master architecture | `docs/07_MASTER_ARCHITECTURE/` |
+| Coolify deploy | `docs/09_OPS/coolify-deploy.md` |
+| DC challan ↔ SCM | `docs/09_OPS/dc-challan-scm-contract.md` |
 
-## Repository Structure
+## Repository structure
 
 ```text
 enterprise-erp/
 ├── apps/
-│   ├── api/                 # FastAPI backend
-│   ├── web/                 # Next.js frontend
-│   └── employee-app/        # Employee PWA (optional)
-├── docker/
-│   ├── minio/               # MinIO server image (build from source)
-│   └── minio-mc/            # MinIO client image (build from source)
-├── docs/
-├── docker-compose.local.yml # All-in-one local stack (recommended)
-├── docker-compose.infra.yml # Infra only (VM / shared host)
-├── docker-compose.app.yml   # App services against external infra
+│   ├── api/                 # FastAPI backend (modules/*, alembic, workers)
+│   ├── web/                 # Next.js admin UI
+│   ├── employee-app/        # Employee PWA (optional)
+│   └── employee-mobile/
+├── design-system/           # UI/UX Pro Max — iConnect Plus
+├── docker/                  # MinIO build contexts
+├── docs/                    # Baseline pack + living 00_CURRENT
+├── docker-compose.local.yml
+├── docker-compose.infra.yml
+├── docker-compose.app.yml
 ├── docker-compose.coolify.yml
 └── .env.example
 ```
 
-## Quick Start (local Docker — recommended)
+### Backend modules (high level)
+
+Foundation · Organization · Master Data · **Platform** · Finance · Sales · Procurement · Inventory · Manufacturing · Quality · CRM · HR · ESS · Payroll · Recruitment · Project · Asset · Service · Helpdesk · Document · Marketing · GRC · Analytics · Integration · Ecommerce · Portal · Voice Agent · Agent Read  
+
+See [`docs/00_CURRENT/MODULE_CATALOG.md`](docs/00_CURRENT/MODULE_CATALOG.md).
+
+## Quick start (local Docker)
 
 ### 1. Environment
 
@@ -60,95 +69,60 @@ enterprise-erp/
 cp .env.example .env
 ```
 
-Point infra at local services (see comments in `.env`). Important knobs:
+Important knobs:
 
-| Variable | Local typical value | Notes |
-|----------|---------------------|--------|
-| `OBJECT_STORAGE_BACKEND` | `s3` or `minio` | S3-compatible API via MinIO |
-| `S3_ENDPOINT_URL` | `http://localhost:9000` | Compose overrides to `http://minio:9000` inside containers |
-| `S3_BUCKET` | `cache-erp-bucket` | Created by `minio-init` |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | MinIO root user/password | Match `MINIO_ROOT_*` |
-| `CLAMAV_ENABLED` | `true` | Upload AV scan |
-| `CLAMAV_HOST` | `clamav` (in Docker) / `localhost` (host tools) | Port `3310` |
-| `API_RATE_LIMIT` | `600`+ for local | Home dashboard fans out many GETs; `120` causes mass 429s |
-| `AUTH_COOKIE_*` | HttpOnly cookie settings | Sessions use cookies; UI keeps a non-secret session hint after `/auth/me` |
+| Variable | Local typical | Notes |
+|----------|---------------|--------|
+| `OBJECT_STORAGE_BACKEND` | `s3` / `minio` | S3-compatible via MinIO |
+| `S3_ENDPOINT_URL` | `http://localhost:9000` | Compose uses `http://minio:9000` in-network |
+| `CLAMAV_ENABLED` | `true` | Upload AV |
+| `FIELD_ENCRYPTION_KEYS` | set in non-dev | Comma-separated; first encrypts, all decrypt |
+| `INTEGRATION_OUTBOUND_ALLOWED_HOSTS` | set outside dev | Webhook SSRF allowlist |
+| `API_RATE_LIMIT` | `600`+ local | Dashboard fans out many GETs |
+| `AUTH_COOKIE_*` | HttpOnly cookies | Sessions are cookie-based |
 
-### 2. Start the stack
+### 2. Start
 
 ```bash
 docker compose -f docker-compose.local.yml up -d --build
 ```
 
-This starts Postgres, Redis, RabbitMQ, OpenSearch, **ClamAV**, **MinIO** (+ bucket init), API, Celery worker, and Web.
-
-| Service | Host URL / port |
-|---------|-----------------|
+| Service | URL / port |
+|---------|------------|
 | Web | http://localhost:3000 |
-| API | http://localhost:8000 · health `/api/v1/health` |
+| API | http://localhost:8000 · `/api/v1/health` |
 | Postgres | `localhost:5433` |
 | Redis | `localhost:6379` |
 | RabbitMQ | `localhost:5672` · UI `:15672` |
-| OpenSearch | http://localhost:9200 |
-| MinIO API | http://localhost:9000 |
-| MinIO Console | http://localhost:9001 |
+| MinIO | API `:9000` · Console `:9001` |
 | ClamAV | `localhost:3310` |
-
-Default MinIO login (override via `.env`): `erp_minio` / `erp_minio_password`.
 
 ### 3. Sign-in
 
-Use Microsoft Entra SSO from http://localhost:3000/login (or the landing access gate → live ERP).
-
-Auth tokens are set as **HttpOnly cookies**. After a reload the UI probes `/auth/me` with credentials; do not expect tokens in `localStorage`.
-
----
+Microsoft Entra SSO from http://localhost:3000/login.  
+Tokens are **HttpOnly cookies** — not `localStorage`.
 
 ## Compose files
 
 | File | Use |
 |------|-----|
-| `docker-compose.local.yml` | Full local stack (infra + API + Celery + Web). No VM IPs. |
-| `docker-compose.infra.yml` | Infra only on a LAN VM / shared host (Postgres, Redis, RabbitMQ, OpenSearch, MinIO, ClamAV). |
-| `docker-compose.app.yml` | App containers against external infra. |
-| `docker-compose.coolify.yml` | Production-style Coolify deploy (RDS + S3; see `docs/coolify-deploy.md`). |
+| `docker-compose.local.yml` | Full local stack |
+| `docker-compose.infra.yml` | Infra only on a shared host |
+| `docker-compose.app.yml` | App containers against external infra |
+| `docker-compose.coolify.yml` | Coolify / production-style |
 
-### MinIO images (important)
-
-Public Docker Hub / Quay MinIO images were removed (Sep 2026). Local and infra compose **build MinIO and `mc` from source**:
-
-- `docker/minio/Dockerfile` → `enterprise-erp-minio:local`
-- `docker/minio-mc/Dockerfile` → `enterprise-erp-minio-mc:local`
-
-First build can take several minutes (Go compile). Images are cached afterward.
-
-### Optional: sync DB from VM
-
-```powershell
-powershell -File scripts/sync-from-vm.ps1 -SkipMinio
-```
-
----
+MinIO images are **built from source** under `docker/minio` (public Hub images were removed).
 
 ## Host-based API / Web (optional)
-
-Use when infra is already running (local compose or VM).
-
-### Backend
 
 ```bash
 cd apps/api
 python -m venv .venv
-.venv\Scripts\activate        # Windows
+.venv\Scripts\activate
 pip install -e ".[dev]"
 alembic upgrade head
 uvicorn main:app --reload --reload-dir src --host 0.0.0.0 --port 8000 --app-dir src
 ```
-
-API: http://localhost:8000/api/v1/health  
-
-OpenAPI/Swagger may be disabled when `ENABLE_API_DOCS=false` (VAPT / shared hosts).
-
-### Frontend
 
 ```bash
 cd apps/web
@@ -157,46 +131,36 @@ npm install
 npm run dev
 ```
 
-App: http://localhost:3000
-
----
-
-## Quality Checks
-
-### Backend
+## Quality checks
 
 ```bash
 cd apps/api
 ruff check src
-ruff format --check src
-mypy src
-pytest
+pytest src/tests/unit/platform   # architecture / security gates
 ```
-
-### Frontend
 
 ```bash
 cd apps/web
 npm run lint
 npm run typecheck
-npm run build
 ```
 
-## Development Rules
+## Development rules
 
-- **Backend flow:** Router → Service → Repository → Database
-- **No business logic in routers**
-- **No direct database access from UI**
-- **Alembic migrations only** for schema changes
-- **Follow DBS standards:** UUID PK, audit columns, tenant isolation, soft delete
-- **Do not bypass** Workflow, Notification, or Audit engines
+- Router → Service → Repository → Database  
+- No business logic in routers · no UI→DB  
+- Alembic only for schema  
+- UUID / audit / tenant / soft-delete (DBS)  
+- Do not bypass Workflow, Notification, or Audit engines  
+- Cross-module data via **ports/adapters** or `master_data.published` — not foreign ORM  
 
 ## Remotes
 
 | Remote | Role |
 |--------|------|
-| `origin` (GitHub) | Primary — default push target |
-| `gitlab` | Mirror — sync only when explicitly requested |
+| `origin` (GitHub) | Primary — default push (also syncs iConnectPlus mirror via push URL) |
+| `iconnectplus` | Always-synced mirror of origin |
+| `gitlab` | Mirror — only when explicitly requested |
 
 ## License
 

@@ -18,7 +18,7 @@ from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecUser
 from modules.foundation.repository.user_module_repository import UserModuleRepository
 from modules.foundation.repository.user_repository import UserRepository
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.org_module_admin_sync_service import (
     SERVICE_TEAM_JOB_ROLES,
     OrgModuleAdminSyncService,
@@ -30,7 +30,7 @@ class ModuleAdminService:
         self._db = db
         self._modules = UserModuleRepository(db)
         self._users = UserRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def ensure_module_admin(self, ctx: TenantContext, module_key: str) -> None:
         self._require_known_module(module_key)

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.payroll.domain.enums import PayrollPeriodStatus
 from modules.payroll.domain.payroll_period_calendar import (
     default_payment_date,
@@ -32,7 +32,7 @@ class PayrollPeriodService:
         self._scope = PayrollScopeValidator(db)
         self._engine = PayrollPeriodEngine()
         self._policy = PayrollPolicyService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

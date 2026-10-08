@@ -20,7 +20,7 @@ from modules.crm.service.document_number_service import DocumentNumberService
 from modules.crm.service.engines import OpportunityEngine, OpportunityStageEngine, PipelineEngine
 from modules.crm.service.integration_service import CRMIntegrationService
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class PipelineService:
@@ -65,7 +65,7 @@ class OpportunityService:
         self._engine = OpportunityEngine()
         self._stage_engine = OpportunityStageEngine()
         self._integration = CRMIntegrationService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._crm_admin = CrmModuleAdminService(db)
         self._visibility = CrmRecordVisibility(db)
 

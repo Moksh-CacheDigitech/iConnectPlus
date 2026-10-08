@@ -6,13 +6,13 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, NotFoundException
 from modules.foundation.repository.tenant_repository import TenantRepository
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class TenantService:
     def __init__(self, db: Session) -> None:
         self._repo = TenantRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_tenants(self):
         return self._repo.list_all()

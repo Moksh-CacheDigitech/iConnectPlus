@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.payroll.domain.payroll_policy_spec import default_company_payroll_policy_fields
 from modules.payroll.models.payroll_policy import PayPayrollPolicy
 from modules.payroll.repository.payroll_policy_repository import PayrollPolicyRepository
@@ -22,7 +22,7 @@ class PayrollPolicyService:
         self._repo = PayrollPolicyRepository(db)
         self._scope = PayrollScopeValidator(db)
         self._engine = PayrollPolicyEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     @staticmethod
     def default_template() -> dict:

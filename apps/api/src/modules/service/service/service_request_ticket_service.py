@@ -24,7 +24,7 @@ from modules.foundation.models.security import (
     SecUserOrgScope,
     SecUserRole,
 )
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.rbac_service import RBACService
 from modules.foundation.service.user_service import UserService
 from modules.service.domain.enums import SvcEntityType
@@ -41,7 +41,7 @@ from modules.service.models import (
     SvcTicketFieldEngineer,
 )
 from modules.service.models.service_sla import SvcServiceSla
-from modules.master_data.models.employee import MasterEmployee
+from modules.master_data.published import EmployeeRead
 from modules.service.permissions import SERVICE_FIELD_ENGINEER_PERMISSIONS
 from modules.service.repository.service_request_repository import ServiceRequestRepository
 from modules.service.service.document_number_service import DocumentNumberService
@@ -85,7 +85,7 @@ class ServiceRequestTicketService:
         self._scope = ServiceScopeValidator(db)
         self._numbers = DocumentNumberService(db)
         self._engine = ServiceRequestTicketEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._access = TicketAccessService(db)
         self._channels = ServiceChannelNotifier(db)
 
@@ -354,9 +354,9 @@ class ServiceRequestTicketService:
 
         unique_ids = list({eid for eid in employee_ids})
         stmt = (
-            select(MasterEmployee.id, SecUser.display_name, MasterEmployee.first_name, MasterEmployee.last_name, MasterEmployee.employee_code)
-            .outerjoin(SecUser, SecUser.id == MasterEmployee.user_id)
-            .where(MasterEmployee.id.in_(unique_ids), MasterEmployee.is_deleted.is_(False))
+            select(EmployeeRead.id, SecUser.display_name, EmployeeRead.first_name, EmployeeRead.last_name, EmployeeRead.employee_code)
+            .outerjoin(SecUser, SecUser.id == EmployeeRead.user_id)
+            .where(EmployeeRead.id.in_(unique_ids), EmployeeRead.is_deleted.is_(False))
         )
         result: dict[UUID, str] = {}
         for emp_id, display_name, first, last, code in self._db.execute(stmt).all():
@@ -370,19 +370,19 @@ class ServiceRequestTicketService:
 
         cid = self._scope.resolve_company_id(ctx, None)
         stmt = (
-            select(MasterEmployee, SecUser.display_name)
-            .join(SecUser, SecUser.id == MasterEmployee.user_id)
+            select(EmployeeRead, SecUser.display_name)
+            .join(SecUser, SecUser.id == EmployeeRead.user_id)
             .join(SecUserRole, SecUserRole.user_id == SecUser.id)
             .join(SecRole, SecRole.id == SecUserRole.role_id)
             .where(
-                MasterEmployee.tenant_id == ctx.tenant_id,
-                MasterEmployee.company_id == cid,
-                MasterEmployee.is_deleted.is_(False),
-                MasterEmployee.status == "active",
+                EmployeeRead.tenant_id == ctx.tenant_id,
+                EmployeeRead.company_id == cid,
+                EmployeeRead.is_deleted.is_(False),
+                EmployeeRead.status == "active",
                 SecUser.is_deleted.is_(False),
                 SecRole.role_code == "SERVICE_ENGINEER",
             )
-            .order_by(SecUser.display_name, MasterEmployee.employee_code)
+            .order_by(SecUser.display_name, EmployeeRead.employee_code)
         )
         options: list[ServiceAssignableEmployee] = []
         seen: set[UUID] = set()
@@ -1433,9 +1433,9 @@ class ServiceRequestTicketService:
         recipient_user_id = ctx.user_id
         if row.owner_employee_id:
             owner_user = self._db.scalar(
-                select(MasterEmployee.user_id).where(
-                    MasterEmployee.id == row.owner_employee_id,
-                    MasterEmployee.is_deleted.is_(False),
+                select(EmployeeRead.user_id).where(
+                    EmployeeRead.id == row.owner_employee_id,
+                    EmployeeRead.is_deleted.is_(False),
                 )
             )
             if owner_user:

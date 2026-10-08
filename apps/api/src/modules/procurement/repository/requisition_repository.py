@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from modules.foundation.domain.value_objects import TenantContext
+from modules.platform.optimistic import assert_version, bump_version
 from modules.procurement.models.requisition import ProcRequisitionHeader, ProcRequisitionLine
 from modules.procurement.repository.base import ProcScopedRepository
 
@@ -53,11 +54,13 @@ class RequisitionRepository(ProcScopedRepository):
         row = self.get_requisition(ctx, requisition_id)
         if row is None:
             return None
+        expected = kwargs.pop("expected_version", None)
+        assert_version(row, expected if isinstance(expected, int) else None)
         for k, v in kwargs.items():
             setattr(row, k, v)
         row.updated_by = ctx.user_id
         row.updated_at = datetime.now(timezone.utc)
-        row.version = (row.version or 1) + 1
+        bump_version(row)
         self.db.flush()
         return row
 

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from database.base import Base
 from modules.integration.models.mixins import IntRowMixin
+from modules.platform.encrypted_types import EncryptedText
 
 
 class IntOauthClient(Base, *IntRowMixin):
@@ -44,7 +45,7 @@ class IntOauthClient(Base, *IntRowMixin):
         index=True,
     )
     client_id_public: Mapped[str] = mapped_column(String(255), nullable=False)
-    client_secret_vault_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    client_secret_vault_ref: Mapped[str] = mapped_column(EncryptedText(), nullable=False)
     token_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     authorize_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     scopes: Mapped[str | None] = mapped_column(String(500), nullable=True)

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.payroll.models import PaySalaryComponent
 from modules.payroll.repository.salary_component_repository import SalaryComponentRepository
 from modules.payroll.service.engines import SalaryComponentEngine
@@ -18,7 +18,7 @@ class SalaryComponentService:
         self._repo = SalaryComponentRepository(db)
         self._scope = PayrollScopeValidator(db)
         self._engine = SalaryComponentEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

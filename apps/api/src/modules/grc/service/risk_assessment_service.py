@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.grc.domain.enums import GrcEntityType
 from modules.grc.models import GrcRiskAssessment
 from modules.grc.repository.risk_assessment_repository import RiskAssessmentRepository
@@ -21,7 +21,7 @@ class RiskAssessmentService:
         self._scope = GrcScopeValidator(db)
         self._numbers = GrcNumberService(db)
         self._engine = RiskAssessmentEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

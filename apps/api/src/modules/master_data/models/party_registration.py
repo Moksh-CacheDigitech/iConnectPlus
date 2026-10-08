@@ -18,6 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from database.base import Base
 from modules.master_data.models.mixins import MasterBranchRecordMixin
+from modules.platform.encrypted_types import EncryptedBankJSON, EncryptedText
 
 
 class MasterPartyRegistration(Base, *MasterBranchRecordMixin):
@@ -57,15 +58,15 @@ class MasterPartyRegistration(Base, *MasterBranchRecordMixin):
     trade_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     party_subtype: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
-    tax_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    pan_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    tax_number: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
+    pan_number: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
     cin_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     contact_person: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mobile: Mapped[str | None] = mapped_column(String(30), nullable=True)
     address_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    bank_details_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    bank_details_json: Mapped[dict | None] = mapped_column(EncryptedBankJSON(), nullable=True)
 
     kyc_documents_json: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     kyc_status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")

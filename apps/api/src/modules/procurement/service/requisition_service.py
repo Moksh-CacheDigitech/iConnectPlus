@@ -1,5 +1,6 @@
 """Purchase requisition service."""
 
+import time
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -7,7 +8,8 @@ from sqlalchemy.orm import Session
 from core.exceptions import NotFoundException
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
+from modules.platform.observability import log_path_metric
 from modules.procurement.domain.enums import ProcEntityType, RequisitionStatus
 from modules.procurement.domain.exceptions import InvalidDocumentState, SegregationOfDutiesError
 from modules.procurement.models.requisition import ProcRequisitionHeader
@@ -26,7 +28,7 @@ class RequisitionService:
         self._engine = RequisitionEngine()
         self._numbers = DocumentNumberService(db)
         self._governance = ProcurementGovernanceService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_requisitions(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -119,18 +121,26 @@ class RequisitionService:
         return line
 
     def submit(self, ctx: TenantContext, requisition_id: UUID):
+        started = time.perf_counter()
         requisition = self.get_requisition(ctx, requisition_id)
         self._engine.validate_submittable(requisition)
         instance = self._governance.submit_for_approval(
             ctx, entity_name="proc_requisition_header", entity_id=requisition_id
         )
-        return self._repo.update_requisition(
+        instance_id = instance.id
+        result = self._repo.update_requisition(
             ctx,
             requisition_id,
             status=RequisitionStatus.SUBMITTED.value,
             workflow_status=WorkflowStatus.IN_PROGRESS.value,
-            workflow_instance_id=instance.id,
+            workflow_instance_id=instance_id,
         )
+        log_path_metric(
+            "procurement.pr_to_po",
+            latency_ms=(time.perf_counter() - started) * 1000,
+            success=True,
+        )
+        return result
 
     def approve(self, ctx: TenantContext, requisition_id: UUID):
         requisition = self.get_requisition(ctx, requisition_id)

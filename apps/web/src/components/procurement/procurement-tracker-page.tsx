@@ -1,21 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Paperclip, Plus, RefreshCw, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { FileSpreadsheet, RefreshCw, Upload } from "lucide-react";
 
-import { ConfirmDialog } from "@/components/finance/journals/confirm-dialog";
 import { ProcurementPageHeader } from "@/components/procurement/procurement-page-header";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { formatApiError } from "@/services/api-client";
 import {
-  createCustomerTracker,
-  downloadCustomerTracker,
-  listCustomerTrackers,
-  listProjects,
-  type CustomerTracker,
-  type Project,
-} from "@/services/projects-portal-service";
+  getSheetTracker,
+  listSheetTrackers,
+  uploadSheetTracker,
+  type SheetTrackerDetail,
+  type SheetTrackerSummary,
+} from "@/services/sheet-tracker-service";
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -29,314 +27,235 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-function formatBytes(value: number): string {
-  if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+function formatWhen(value: string | null | undefined): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
 }
 
-/** Procurement workspace tracker upload — same versioned customer trackers as Projects. */
+function mergeSummary(detail: SheetTrackerDetail | null): string | null {
+  const merge = detail?.last_merge;
+  if (!merge) return null;
+  const bits: string[] = [];
+  if (merge.added_columns.length) {
+    bits.push(
+      `${merge.added_columns.length} column${merge.added_columns.length === 1 ? "" : "s"} (${merge.added_columns.join(", ")})`,
+    );
+  }
+  if (merge.added_rows) {
+    bits.push(`${merge.added_rows} new row${merge.added_rows === 1 ? "" : "s"}`);
+  }
+  if (merge.updated_rows) {
+    bits.push(`${merge.updated_rows} row${merge.updated_rows === 1 ? "" : "s"} filled`);
+  }
+  if (!bits.length) return "No new rows or columns in the last file.";
+  return `Last upload added ${bits.join(" · ")}.`;
+}
+
+/** Repeated Excel uploads merge into one extracted table (new columns and rows). */
 export function ProcurementTrackerPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [trackers, setTrackers] = useState<CustomerTracker[]>([]);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [projectId, setProjectId] = useState("");
+  const [summaries, setSummaries] = useState<SheetTrackerSummary[]>([]);
+  const [selectedId, setSelectedId] = useState<string>("");
+  const [detail, setDetail] = useState<SheetTrackerDetail | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [remarks, setRemarks] = useState("");
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
 
-  const projectLabels = useMemo(
-    () =>
-      new Map(
-        projects.map((project) => [
-          project.id,
-          `${project.project_code} · ${project.project_name}`,
-        ]),
-      ),
-    [projects],
-  );
-
-  const clearFile = useCallback(() => {
-    setFile(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }, []);
-
-  const resetForm = useCallback(() => {
-    setProjectId("");
-    setRemarks("");
-    setFormError(null);
-    clearFile();
-  }, [clearFile]);
-
-  const closeDialog = useCallback(() => {
-    if (uploading) return;
-    setDialogOpen(false);
-    resetForm();
-  }, [resetForm, uploading]);
-
-  const openDialog = useCallback(() => {
-    resetForm();
-    setDialogOpen(true);
-  }, [resetForm]);
-
-  const load = useCallback(async () => {
+  const loadList = useCallback(async (preferId?: string) => {
     setLoading(true);
     setError(null);
     try {
-      const [projectRows, trackerRows] = await Promise.all([
-        listProjects(),
-        listCustomerTrackers(),
-      ]);
-      setProjects(projectRows);
-      setTrackers(trackerRows);
+      const rows = await listSheetTrackers();
+      setSummaries(rows);
+      const nextId = preferId && rows.some((r) => r.id === preferId) ? preferId : (rows[0]?.id ?? "");
+      setSelectedId(nextId);
+      if (nextId) {
+        setDetail(await getSheetTracker(nextId));
+      } else {
+        setDetail(null);
+      }
     } catch (err) {
-      setError(formatApiError(err, "Unable to load customer trackers"));
+      setError(formatApiError(err, "Unable to load trackers"));
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
+    const timer = window.setTimeout(() => void loadList(), 0);
     return () => window.clearTimeout(timer);
-  }, [load]);
+  }, [loadList]);
+
+  async function onSelect(id: string) {
+    setSelectedId(id);
+    if (!id) {
+      setDetail(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      setDetail(await getSheetTracker(id));
+    } catch (err) {
+      setError(formatApiError(err, "Unable to open tracker table"));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function onUpload() {
-    if (!projectId || !file) {
-      setFormError("Select a project and tracker file.");
+    if (!file) {
+      setError("Choose an Excel file (.xlsx).");
       return;
     }
     setUploading(true);
-    setFormError(null);
+    setError(null);
     try {
-      await createCustomerTracker({
-        project_id: projectId,
+      const uploaded = await uploadSheetTracker({
         file_name: file.name,
         content_base64: await fileToBase64(file),
         content_type: file.type || undefined,
-        remarks: remarks.trim() || undefined,
+        tracker_id: selectedId || null,
       });
-      setDialogOpen(false);
-      resetForm();
-      await load();
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      await loadList(uploaded.id);
     } catch (err) {
-      setFormError(formatApiError(err, "Unable to upload tracker"));
+      setError(formatApiError(err, "Unable to upload tracker"));
     } finally {
       setUploading(false);
     }
   }
 
+  const columns = detail?.columns ?? [];
+  const rows = detail?.rows ?? [];
+  const hint = mergeSummary(detail);
+
   return (
     <div className="space-y-4">
       <ProcurementPageHeader
-        title="Tracker"
-        description="Upload the tracker sent to a customer and retain each project version."
+        title="Tracker upload"
+        description="Upload Excel sheets as often as needed. New columns and rows are added to the extracted table; existing cells stay as they are."
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="cursor-pointer transition-colors duration-200"
-              onClick={() => void load()}
-              disabled={loading}
-            >
-              <RefreshCw className="size-3.5" /> Refresh
-            </Button>
-            <Button
-              size="sm"
-              className="cursor-pointer transition-opacity duration-200 hover:opacity-90"
-              onClick={openDialog}
-            >
-              <Plus className="size-3.5" /> New Tracker
-            </Button>
-          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="cursor-pointer transition-colors duration-200"
+            onClick={() => void loadList(selectedId)}
+            disabled={loading || uploading}
+          >
+            <RefreshCw className="size-3.5" /> Refresh
+          </Button>
         }
       />
 
       {error ? (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">
           {error}
         </div>
       ) : null}
 
-      <section className="overflow-hidden rounded-xl border border-border/70 bg-card">
-        <div className="border-b border-border/70 px-4 py-3">
-          <h2 className="text-sm font-semibold">Tracker history</h2>
-        </div>
-        <div className="erp-scroll overflow-x-auto">
-          <table className="w-full min-w-200 text-left text-sm">
-            <thead className="border-b border-border/70 bg-muted/30 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2.5 font-medium">Project</th>
-                <th className="px-4 py-2.5 font-medium">Version</th>
-                <th className="px-4 py-2.5 font-medium">File</th>
-                <th className="px-4 py-2.5 font-medium">Remarks</th>
-                <th className="px-4 py-2.5 font-medium">Uploaded</th>
-                <th className="px-4 py-2.5 font-medium text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trackers.map((tracker) => (
-                <tr key={tracker.id} className="border-b border-border/50 last:border-0">
-                  <td className="px-4 py-2.5 font-medium">
-                    {projectLabels.get(tracker.project_id) ?? tracker.project_id}
-                  </td>
-                  <td className="px-4 py-2.5">v{tracker.version_no}</td>
-                  <td className="px-4 py-2.5">
-                    <p>{tracker.file_name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatBytes(tracker.file_size)}
-                      {tracker.is_grid ? " · Table" : ""}
-                    </p>
-                  </td>
-                  <td className="max-w-70 px-4 py-2.5 text-muted-foreground">
-                    {tracker.remarks || "-"}
-                  </td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {tracker.created_at
-                      ? new Date(tracker.created_at).toLocaleString()
-                      : "-"}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="cursor-pointer transition-colors duration-200"
-                      onClick={() => void downloadCustomerTracker(tracker)}
-                    >
-                      <Download className="size-3.5" /> Download
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-              {!loading && trackers.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-4 py-10 text-center text-sm text-muted-foreground"
-                  >
-                    No tracker uploads yet. Use New Tracker to add the first version.
-                  </td>
-                </tr>
-              ) : null}
-              {loading ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-4 py-10 text-center text-sm text-muted-foreground"
-                  >
-                    Loading tracker history…
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <ConfirmDialog
-        open={dialogOpen}
-        title="New Tracker"
-        description="Upload the tracker sent to a customer. Each upload is kept as a new version for its project."
-        confirmLabel="Upload tracker"
-        cancelLabel="Cancel"
-        busy={uploading}
-        confirmDisabled={!projectId || !file}
-        contentClassName="max-w-xl"
-        onCancel={closeDialog}
-        onConfirm={() => void onUpload()}
-      >
-        <div className="mt-3 space-y-3">
-          <div className="space-y-1.5">
-            <label htmlFor="proc-tracker-project" className="text-sm font-medium">
-              Project
+      <section className="rounded-xl border border-border/70 bg-card p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <label htmlFor="proc-sheet-tracker" className="text-sm font-medium">
+              Tracker table
             </label>
             <select
-              id="proc-tracker-project"
-              value={projectId}
-              onChange={(event) => setProjectId(event.target.value)}
+              id="proc-sheet-tracker"
+              value={selectedId}
+              onChange={(event) => void onSelect(event.target.value)}
               className="flex h-9 w-full cursor-pointer rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              disabled={uploading}
+              disabled={uploading || loading}
             >
-              <option value="">Select project</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.project_code} · {project.project_name}
+              <option value="">New table from this file</option>
+              {summaries.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name} · {row.row_count} rows · {row.column_count} cols
                 </option>
               ))}
             </select>
           </div>
-
-          <div className="space-y-1.5">
-            <span className="text-sm font-medium">Tracker file</span>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <input
-                ref={fileInputRef}
-                id="proc-customer-tracker-file"
-                type="file"
-                className="sr-only"
-                disabled={uploading}
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-9 cursor-pointer transition-colors duration-200"
-                disabled={uploading}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Paperclip className="size-3.5" />
-                Choose file
-              </Button>
-              {file ? (
-                <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-xs text-foreground">
-                  <span className="min-w-0 truncate" title={file.name}>
-                    {file.name}
-                  </span>
-                  <span className="shrink-0 text-muted-foreground">
-                    {formatBytes(file.size)}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="Clear selected file"
-                    className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground"
-                    disabled={uploading}
-                    onClick={clearFile}
-                  >
-                    <X className="size-3.5" aria-hidden />
-                  </button>
-                </span>
-              ) : (
-                <span className="text-xs text-muted-foreground">No file selected</span>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <label htmlFor="proc-tracker-remarks" className="text-sm font-medium">
-              Remarks <span className="text-muted-foreground">(optional)</span>
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <label htmlFor="proc-sheet-file" className="text-sm font-medium">
+              Excel file
             </label>
-            <Textarea
-              id="proc-tracker-remarks"
-              value={remarks}
-              onChange={(event) => setRemarks(event.target.value)}
-              placeholder="Add a note about this tracker version…"
-              className="min-h-20"
+            <Input
+              ref={fileInputRef}
+              id="proc-sheet-file"
+              type="file"
+              accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="h-9 cursor-pointer text-sm file:mr-3 file:cursor-pointer"
               disabled={uploading}
+              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             />
           </div>
-
-          {formError ? (
-            <p className="text-xs text-destructive" role="alert">
-              {formError}
-            </p>
-          ) : null}
+          <Button
+            size="sm"
+            className="h-9 cursor-pointer transition-opacity duration-200 hover:opacity-90"
+            disabled={uploading || !file}
+            onClick={() => void onUpload()}
+          >
+            <Upload className="size-3.5" />
+            {uploading ? "Uploading…" : selectedId ? "Merge into table" : "Create table"}
+          </Button>
         </div>
-      </ConfirmDialog>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Matching uses the first column as the row key. New headers become columns; new keys become rows.
+        </p>
+      </section>
+
+      {hint ? (
+        <p className="flex items-start gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          <FileSpreadsheet className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          {hint}
+        </p>
+      ) : null}
+
+      <section className="overflow-hidden rounded-xl border border-border/70 bg-card">
+        <div className="border-b border-border/70 px-4 py-3">
+          <h2 className="text-sm font-semibold">
+            {detail ? detail.name : "Extracted table"}
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            {detail
+              ? `${detail.row_count} rows · ${detail.column_count} columns · last file ${detail.last_file_name ?? "—"} · ${formatWhen(detail.last_upload_at)}`
+              : "Upload a workbook to extract the first sheet."}
+          </p>
+        </div>
+        <div className="erp-scroll max-h-[min(70vh,720px)] overflow-auto">
+          {detail && columns.length ? (
+            <table className="w-full min-w-max text-left text-[13px]">
+              <thead className="sticky top-0 z-10 border-b border-border/70 bg-muted/80 text-[11px] text-muted-foreground backdrop-blur-sm">
+                <tr>
+                  {columns.map((col) => (
+                    <th key={col.id} className="whitespace-nowrap px-3 py-2 font-semibold">
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, index) => (
+                  <tr key={`${index}-${row[columns[0]?.id ?? ""] ?? ""}`} className="border-b border-border/40">
+                    {columns.map((col) => (
+                      <td key={col.id} className="max-w-56 truncate px-3 py-1.5 tabular-nums" title={row[col.id] ?? ""}>
+                        {row[col.id] || "—"}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+              {loading ? "Loading tracker…" : "No extracted table yet. Create one from an Excel file."}
+            </p>
+          )}
+        </div>
+      </section>
     </div>
   );
 }

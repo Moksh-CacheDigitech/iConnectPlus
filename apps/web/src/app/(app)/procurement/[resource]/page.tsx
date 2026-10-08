@@ -15,6 +15,7 @@ import {
 } from "@/components/procurement/procurement-insight-pages";
 import { ProcurementTimelineListPage } from "@/components/procurement/ovf-timeline-page";
 import { ScmQueuePage } from "@/components/procurement/scm-queue-page";
+import { ProcurementTrackerPage } from "@/components/procurement/procurement-tracker-page";
 import { ProcurementInventoryListPage } from "@/components/procurement/procurement-inventory-list-page";
 import { ServiceContractsPage } from "@/components/procurement/service-contracts-page";
 import { VendorsListPage } from "@/components/procurement/vendors-list-page";
@@ -26,6 +27,7 @@ interface PageProps {
 
 export default async function ProcurementResourcePage({ params }: PageProps) {
   const { resource: resourceKey } = await params;
+  if (resourceKey === "tracker") return <ProcurementTrackerPage />;
   if (resourceKey === "scm") return <ScmQueuePage />;
   // Legacy "Vendors & PO" route - same unified Purchase Orders list.
   if (resourceKey === "vendor-po" || resourceKey === "orders") return <OrdersListPage />;

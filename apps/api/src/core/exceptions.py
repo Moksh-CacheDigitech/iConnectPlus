@@ -12,6 +12,7 @@ from sqlalchemy.exc import (
     OperationalError,
     TimeoutError as SATimeoutError,
 )
+from sqlalchemy.orm.exc import StaleDataError
 
 from shared.schemas import ErrorResponse
 
@@ -73,6 +74,15 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=ErrorResponse(message=exc.message).model_dump(),
+        )
+
+    @app.exception_handler(StaleDataError)
+    async def stale_data_handler(_: Request, __: StaleDataError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content=ErrorResponse(
+                message="Record was modified by another user. Reload and try again."
+            ).model_dump(),
         )
 
     @app.exception_handler(RequestValidationError)

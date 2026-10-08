@@ -1,4 +1,4 @@
-"""CEO disposal approval notifications via Foundation NotificationService."""
+"""CEO disposal approval notifications via platform notify port."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 
 from core.config import get_settings
 from modules.asset.domain.workflow_codes import ENTITY_AST_DISPOSAL
-from modules.foundation.models.security import SecRole, SecUser, SecUserRole
-from modules.foundation.service.notification_service import NotificationService
 from modules.foundation.domain.value_objects import TenantContext
+from modules.foundation.models.security import SecRole, SecUser, SecUserRole
+from modules.platform.compat.notify_facade import PlatformNotifyFacade
 
 CEO_APPROVAL_TEMPLATE_CODE = "AST_DISPOSAL_CEO_APPROVAL"
 _CEO_ROLE_CODES = ("TENANT_ADMIN", "ASSET_ADMIN", "SUPER_ADMIN")
@@ -57,6 +57,7 @@ def build_ceo_approval_email_payload(
     ) or "—"
     return {
         "subject": f"Asset Disposal Approval Required - {asset.asset_code}",
+        "title": f"Asset Disposal Approval Required - {asset.asset_code}",
         "asset_code": asset.asset_code,
         "asset_name": asset.asset_name,
         "serial_number": getattr(asset, "serial_number", None) or "—",
@@ -98,34 +99,7 @@ def render_ceo_approval_email_body(payload: dict) -> str:
 class DisposalApprovalNotifier:
     def __init__(self, db: Session) -> None:
         self._db = db
-        self._notifications = NotificationService(db)
-
-    def _ensure_template(self, tenant_id: UUID, created_by: UUID | None):
-        templates = self._notifications.list_templates(tenant_id)
-        existing = next(
-            (
-                t
-                for t in templates
-                if t.template_code == CEO_APPROVAL_TEMPLATE_CODE and t.is_active
-            ),
-            None,
-        )
-        if existing is not None:
-            return existing
-        return self._notifications.create_template(
-            tenant_id=tenant_id,
-            template_code=CEO_APPROVAL_TEMPLATE_CODE,
-            template_name="Asset Disposal CEO Approval",
-            channel="email",
-            subject_template="Asset Disposal Approval Required - {{asset_code}}",
-            body_template=(
-                "CEO approval is required.\n"
-                "Asset Code: {{asset_code}}\n"
-                "Reason: {{reason}}\n"
-                "Approval Link: {{approval_url}}\n"
-            ),
-            created_by=created_by,
-        )
+        self._notifications = PlatformNotifyFacade(db)
 
     def notify_ceo_approval_required(
         self,
@@ -146,31 +120,35 @@ class DisposalApprovalNotifier:
             requested_by_label=requested_by_label,
             approval_url=approval_url,
         )
-        payload["body_text"] = render_ceo_approval_email_body(payload)
-        template = self._ensure_template(ctx.tenant_id, ctx.user_id)
+        payload["body"] = render_ceo_approval_email_body(payload)
+        payload["body_text"] = payload["body"]
+        event_type = f"{ENTITY_AST_DISPOSAL}.ceo_approval_required"
         recipients = resolve_disposal_approver_emails(self._db, ctx.tenant_id)
         sent = 0
         for email in recipients:
             self._notifications.send(
                 tenant_id=ctx.tenant_id,
-                template_id=template.id,
-                event_type=f"{ENTITY_AST_DISPOSAL}.ceo_approval_required",
-                recipient_user_id=None,
+                template_code=CEO_APPROVAL_TEMPLATE_CODE,
+                event_type=event_type,
                 recipient_address=email,
                 payload_json=payload,
                 created_by=ctx.user_id,
+                channel="email",
+                idempotency_key=f"ast-disposal-ceo:{disposal.id}:{email}",
+                aggregate_id=disposal.id,
             )
             sent += 1
         if sent == 0:
-            # Still record an in-app/event trail for the requester when no CEO email resolved.
             self._notifications.send(
                 tenant_id=ctx.tenant_id,
-                template_id=template.id,
-                event_type=f"{ENTITY_AST_DISPOSAL}.ceo_approval_required",
+                template_code=CEO_APPROVAL_TEMPLATE_CODE,
+                event_type=event_type,
                 recipient_user_id=ctx.user_id,
-                recipient_address=None,
                 payload_json=payload,
                 created_by=ctx.user_id,
+                channel="in_app",
+                idempotency_key=f"ast-disposal-ceo:{disposal.id}:requester",
+                aggregate_id=disposal.id,
             )
             sent = 1
         return sent

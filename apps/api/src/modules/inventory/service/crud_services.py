@@ -6,15 +6,13 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
-from modules.finance.domain.enums import JournalType
 from modules.finance.repository.fiscal_repository import FiscalRepository
-from modules.finance.service.journal_service import JournalService
-from modules.finance.service.posting_service import PostingService
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.repository.workflow_repository import WorkflowRepository
-from modules.foundation.service.audit_service import AuditService
 from modules.foundation.service.workflow_service import WorkflowService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
+from modules.platform.helpers.system_journal import post_two_line_system_journal
 from modules.inventory.domain.enums import (
     AdjustmentStatus,
     CycleCountStatus,
@@ -56,7 +54,7 @@ class BinService:
     def __init__(self, db: Session) -> None:
         self._repo = BinRepository(db)
         self._scope = InventoryScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_bins(
         self, ctx: TenantContext, company_id: UUID | None = None,
@@ -92,7 +90,7 @@ class BatchService:
         self._repo = BatchRepository(db)
         self._scope = InventoryScopeValidator(db)
         self._numbers = DocumentNumberService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_batches(
         self, ctx: TenantContext, company_id: UUID | None = None,
@@ -134,7 +132,7 @@ class SerialService:
         self._repo = SerialRepository(db)
         self._scope = InventoryScopeValidator(db)
         self._numbers = DocumentNumberService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_serials(
         self, ctx: TenantContext, company_id: UUID | None = None,
@@ -256,10 +254,8 @@ class InventoryPostingService:
     def __init__(self, db: Session) -> None:
         self._db = db
         self._adjustments = AdjustmentRepository(db)
-        self._journals = JournalService(db)
-        self._posting = PostingService(db)
         self._fiscal = FiscalRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._scope = InventoryScopeValidator(db)
 
     def post_adjustment_journal(
@@ -288,44 +284,43 @@ class InventoryPostingService:
         if amount <= 0:
             return header
 
-        journal = self._journals.create_journal(
+        net = sum(
+            Decimal(str(ln.quantity)) * Decimal(str(ln.unit_cost or 0))
+            for ln in header.lines
+            if not ln.is_deleted
+        )
+        if net >= 0:
+            debit_id, credit_id = inventory_account_id, offset_account_id
+            debit_desc, credit_desc = "Inventory gain", "Adjustment income"
+        else:
+            debit_id, credit_id = offset_account_id, inventory_account_id
+            debit_desc, credit_desc = "Adjustment expense", "Inventory write-off"
+        journal_id = post_two_line_system_journal(
+            self._db,
             ctx,
             company_id=header.company_id,
             branch_id=header.branch_id,
-            journal_date=header.document_date,
             description=f"Inventory adjustment {header.document_number}",
-            journal_type=JournalType.SYSTEM.value,
-            period_id=header.period_id,
+            amount=amount,
+            debit_account_id=debit_id,
+            credit_account_id=credit_id,
+            idempotency_key=f"inventory.adjustment:{adjustment_id}",
+            source_module="inventory",
+            source_document_type="inv_adjustment",
+            source_document_id=adjustment_id,
+            debit_desc=debit_desc,
+            credit_desc=credit_desc,
+            journal_date=header.document_date,
             fiscal_year_id=header.fiscal_year_id,
         )
-        # gain: Dr Inventory Cr Income; loss: Dr Expense Cr Inventory - use signed net
-        net = sum(
-            Decimal(str(ln.quantity)) * Decimal(str(ln.unit_cost or 0))
-            for ln in header.lines if not ln.is_deleted
-        )
-        if net >= 0:
-            self._journals.add_line(
-                ctx, journal.id, line_number=1, account_id=inventory_account_id,
-                debit_amount=float(amount), credit_amount=0, description="Inventory gain",
-            )
-            self._journals.add_line(
-                ctx, journal.id, line_number=2, account_id=offset_account_id,
-                debit_amount=0, credit_amount=float(amount), description="Adjustment income",
-            )
-        else:
-            self._journals.add_line(
-                ctx, journal.id, line_number=1, account_id=offset_account_id,
-                debit_amount=float(amount), credit_amount=0, description="Adjustment expense",
-            )
-            self._journals.add_line(
-                ctx, journal.id, line_number=2, account_id=inventory_account_id,
-                debit_amount=0, credit_amount=float(amount), description="Inventory write-off",
-            )
-        self._posting.post_system_journal(ctx, journal.id)
-        self._adjustments.update(ctx, adjustment_id, finance_journal_id=journal.id)
+        self._adjustments.update(ctx, adjustment_id, finance_journal_id=journal_id)
         self._audit.log_entity_change(
-            tenant_id=ctx.tenant_id, entity_name="inv_adjustment_header", entity_id=adjustment_id,
-            operation="finance_post", performed_by=ctx.user_id,
+            tenant_id=ctx.tenant_id,
+            entity_name="inv_adjustment_header",
+            entity_id=adjustment_id,
+            operation="finance_post",
+            performed_by=ctx.user_id,
+            new_value={"journal_id": str(journal_id)},
         )
         return self._adjustments.get(ctx, adjustment_id)
 
@@ -338,7 +333,7 @@ class TransferService:
         self._numbers = DocumentNumberService(db)
         self._engine = TransferEngine()
         self._app = InventoryApplicationService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._workflow = WorkflowService(db)
         self._workflow_repo = WorkflowRepository(db)
 
@@ -460,7 +455,7 @@ class AdjustmentService:
         self._engine = AdjustmentEngine()
         self._app = InventoryApplicationService(db)
         self._posting = InventoryPostingService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_adjustments(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -545,7 +540,7 @@ class CycleCountService:
         self._numbers = DocumentNumberService(db)
         self._engine = CycleCountEngine()
         self._app = InventoryApplicationService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_counts(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

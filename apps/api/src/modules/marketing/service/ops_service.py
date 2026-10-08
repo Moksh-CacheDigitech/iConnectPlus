@@ -11,7 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.marketing.adapters.graph_adapter import CAMPAIGN_FOLDERS, MicrosoftGraphAdapter
 from modules.marketing.domain.exceptions import NotFoundException, ValidationException
 from modules.marketing.models import (
@@ -36,7 +36,7 @@ class OpsEventService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self._repo = MktScopedRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def record(
         self,

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from core.exceptions import NotFoundException, ValidationException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.project.repository.customer_tracker_repository import CustomerTrackerRepository
 from modules.project.repository.project_repository import ProjectRepository
 from modules.project.schemas import (
@@ -100,7 +100,7 @@ class CustomerTrackerService:
         self._projects = ProjectRepository(db)
         self._scope = ProjectScopeValidator(db)
         self._admin = ProjectModuleAdminService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         self._admin.ensure_admin(ctx)

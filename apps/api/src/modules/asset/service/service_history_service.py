@@ -18,7 +18,7 @@ from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.asset.service.engines import AssetServiceHistoryEngine
 from modules.asset.service.service_history_validator import ServiceHistoryValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_AST_SERVICE_HISTORY = "ast_asset_service_history"
 
@@ -28,7 +28,7 @@ class ServiceHistoryService:
         self._repo = AssetServiceHistoryRepository(db)
         self._scope = AssetScopeValidator(db)
         self._engine = AssetServiceHistoryEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = ServiceHistoryValidator(db)
 
     def search(

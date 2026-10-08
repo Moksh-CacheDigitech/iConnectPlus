@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.integration.models import IntEventDefinition
 from modules.integration.repository.event_definition_repository import EventDefinitionRepository
 from modules.integration.service.engines import EventDefinitionEngine
@@ -18,7 +18,7 @@ class EventDefinitionService:
         self._repo = EventDefinitionRepository(db)
         self._scope = IntegrationScopeValidator(db)
         self._engine = EventDefinitionEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

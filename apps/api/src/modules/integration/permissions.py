@@ -1,6 +1,7 @@
 """Integration permission constants per ERD_21 section 10."""
 
 INTEGRATION_PERMISSIONS: list[tuple[str, str, str, str]] = [
+    ("integration.sync:update", "integration.sync", "update", "integration"),
     ("integration.system:read", "integration.system", "read", "integration"),
     ("integration.system:create", "integration.system", "create", "integration"),
     ("integration.system:update", "integration.system", "update", "integration"),

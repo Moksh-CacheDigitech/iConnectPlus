@@ -12,7 +12,7 @@ from modules.asset.models.asset_assignment import AstAssetAssignment
 from modules.asset.models.asset_location import AstAssetLocation
 from modules.asset.repository.base import AstScopedRepository, utcnow
 from modules.foundation.domain.value_objects import TenantContext
-from modules.master_data.models.employee import MasterEmployee
+from modules.master_data.published import EmployeeRead
 
 _ACTIVE_ASSIGNMENT = AssetAssignmentStatus.ACTIVE.value
 
@@ -304,10 +304,10 @@ class AssetRepository(AstScopedRepository):
             select(1)
             .select_from(AstAssetAssignment)
             .outerjoin(
-                MasterEmployee,
+                EmployeeRead,
                 and_(
-                    MasterEmployee.id == AstAssetAssignment.employee_id,
-                    MasterEmployee.is_deleted.is_(False),
+                    EmployeeRead.id == AstAssetAssignment.employee_id,
+                    EmployeeRead.is_deleted.is_(False),
                 ),
             )
             .where(
@@ -317,7 +317,7 @@ class AssetRepository(AstScopedRepository):
                 AstAssetAssignment.status == _ACTIVE_ASSIGNMENT,
                 or_(
                     AstAssetAssignment.department_id == department_id,
-                    MasterEmployee.department_id == department_id,
+                    EmployeeRead.department_id == department_id,
                 ),
             )
         )
@@ -351,16 +351,16 @@ class AssetRepository(AstScopedRepository):
     @staticmethod
     def _exists_active_assignment_employee_search(company_id: UUID, term: str):
         full_name = func.concat(
-            MasterEmployee.first_name, " ", MasterEmployee.last_name
+            EmployeeRead.first_name, " ", EmployeeRead.last_name
         )
         return exists(
             select(1)
             .select_from(AstAssetAssignment)
             .join(
-                MasterEmployee,
+                EmployeeRead,
                 and_(
-                    MasterEmployee.id == AstAssetAssignment.employee_id,
-                    MasterEmployee.is_deleted.is_(False),
+                    EmployeeRead.id == AstAssetAssignment.employee_id,
+                    EmployeeRead.is_deleted.is_(False),
                 ),
             )
             .where(
@@ -369,9 +369,9 @@ class AssetRepository(AstScopedRepository):
                 AstAssetAssignment.is_deleted.is_(False),
                 AstAssetAssignment.status == _ACTIVE_ASSIGNMENT,
                 or_(
-                    MasterEmployee.first_name.ilike(term),
-                    MasterEmployee.last_name.ilike(term),
-                    MasterEmployee.employee_code.ilike(term),
+                    EmployeeRead.first_name.ilike(term),
+                    EmployeeRead.last_name.ilike(term),
+                    EmployeeRead.employee_code.ilike(term),
                     full_name.ilike(term),
                 ),
             )

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecUser
 from modules.foundation.service.org_context_service import OrgContextService
-from modules.master_data.models.employee import MasterEmployee
+from modules.master_data.published import EmployeeCommands, EmployeeRead
 from modules.master_data.repository.employee_repository import EmployeeRepository
 from modules.master_data.service.employee_service import EmployeeService
 from modules.organization.repository.hierarchy_repository import DepartmentRepository
@@ -41,25 +41,25 @@ class UserEmployeeLinkService:
         self._departments = DepartmentRepository(db)
         self._org = OrgContextService(db)
 
-    def find_employee_for_user(self, ctx: TenantContext, user: SecUser) -> MasterEmployee | None:
+    def find_employee_for_user(self, ctx: TenantContext, user: SecUser) -> EmployeeRead | None:
         tenant_id = ctx.tenant_id
 
         if user.employee_id:
             row = self._db.scalar(
-                select(MasterEmployee).where(
-                    MasterEmployee.id == user.employee_id,
-                    MasterEmployee.tenant_id == tenant_id,
-                    MasterEmployee.is_deleted.is_(False),
+                select(EmployeeRead).where(
+                    EmployeeRead.id == user.employee_id,
+                    EmployeeRead.tenant_id == tenant_id,
+                    EmployeeRead.is_deleted.is_(False),
                 )
             )
             if row is not None:
                 return row
 
         by_user = self._db.scalar(
-            select(MasterEmployee).where(
-                MasterEmployee.tenant_id == tenant_id,
-                MasterEmployee.is_deleted.is_(False),
-                MasterEmployee.user_id == user.id,
+            select(EmployeeRead).where(
+                EmployeeRead.tenant_id == tenant_id,
+                EmployeeRead.is_deleted.is_(False),
+                EmployeeRead.user_id == user.id,
             )
         )
         if by_user is not None:
@@ -70,10 +70,10 @@ class UserEmployeeLinkService:
             return None
 
         return self._db.scalar(
-            select(MasterEmployee).where(
-                MasterEmployee.tenant_id == tenant_id,
-                MasterEmployee.is_deleted.is_(False),
-                func.lower(MasterEmployee.email) == email,
+            select(EmployeeRead).where(
+                EmployeeRead.tenant_id == tenant_id,
+                EmployeeRead.is_deleted.is_(False),
+                func.lower(EmployeeRead.email) == email,
             )
         )
 
@@ -84,7 +84,7 @@ class UserEmployeeLinkService:
         *,
         commit: bool = False,
         bypass_onboarding: bool = False,
-    ) -> MasterEmployee | None:
+    ) -> EmployeeRead | None:
         existing = self.find_employee_for_user(ctx, user)
         if existing is not None:
             self._link_user_and_employee(user, existing)
@@ -141,27 +141,25 @@ class UserEmployeeLinkService:
             bypass_onboarding=bypass_onboarding,
             status="active",
         )
-        row = self._db.get(MasterEmployee, entity.id)
+        EmployeeCommands(self._db).set_status(entity.id, "active", updated_by=ctx.user_id)
+        row = self._db.get(EmployeeRead, entity.id)
         if row is not None:
-            row.status = "active"
             self._link_user_and_employee(user, row)
-            self._db.flush()
         if commit:
             self._db.commit()
         return row
 
-    def _link_user_and_employee(self, user: SecUser, employee: MasterEmployee) -> None:
+    def _link_user_and_employee(self, user: SecUser, employee: EmployeeRead) -> None:
         if user.employee_id != employee.id:
             user.employee_id = employee.id
-        if employee.user_id != user.id:
-            employee.user_id = user.id
+        EmployeeCommands(self._db).link_user(employee.id, user.id)
         self._db.flush()
 
     def _next_unique_employee_code(self, company_id: UUID) -> str:
-        stmt = select(MasterEmployee.employee_code).where(
-            MasterEmployee.company_id == company_id,
-            MasterEmployee.is_deleted.is_(False),
-            MasterEmployee.employee_code.like(f"{EMPLOYEE_CODE_PREFIX}%"),
+        stmt = select(EmployeeRead.employee_code).where(
+            EmployeeRead.company_id == company_id,
+            EmployeeRead.is_deleted.is_(False),
+            EmployeeRead.employee_code.like(f"{EMPLOYEE_CODE_PREFIX}%"),
         )
         max_num = 0
         for (code,) in self._db.execute(stmt).all():

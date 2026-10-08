@@ -1,4 +1,4 @@
-"""Procurement inventory adapters - real stock updates."""
+"""Procurement inventory adapters — stock via platform IInventoryStock."""
 
 from decimal import Decimal
 from uuid import UUID
@@ -6,7 +6,9 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from modules.foundation.domain.value_objects import TenantContext
-from modules.inventory.service.inventory_application_service import InventoryApplicationService
+from modules.platform.adapters.inventory_adapter import InventoryStockAdapter
+from modules.platform.dto import StockKey
+from modules.platform.helpers.side_effects import enqueue_domain_event
 from modules.procurement.domain.entities import GrnReceiptResult
 from modules.procurement.repository.grn_repository import GrnRepository
 from modules.procurement.repository.order_repository import OrderRepository
@@ -15,11 +17,11 @@ from modules.procurement.service.inventory.port import InventoryReceiptPort
 
 
 class ProcurementInventoryAdapter:
-    """Implements InventoryReceiptPort with real InventoryApplicationService."""
+    """Implements InventoryReceiptPort with platform inventory port."""
 
     def __init__(self, db: Session) -> None:
         self._db = db
-        self._app = InventoryApplicationService(db)
+        self._stock = InventoryStockAdapter(db)
         self._grns = GrnRepository(db)
         self._orders = OrderRepository(db)
 
@@ -50,14 +52,16 @@ class ProcurementInventoryAdapter:
             qty = Decimal(str(line.quantity)) - Decimal(str(line.quantity_rejected or 0))
             if qty <= 0:
                 continue
-            self._app.receive_goods(
+            self._stock.receive(
                 ctx,
-                company_id=grn.company_id,
-                branch_id=grn.branch_id,
-                warehouse_id=warehouse_reference,
-                product_id=line.product_id,
-                uom_id=line.uom_id,
-                quantity=qty,
+                StockKey(
+                    company_id=grn.company_id,
+                    branch_id=grn.branch_id,
+                    warehouse_id=warehouse_reference,
+                    product_id=line.product_id,
+                    uom_id=line.uom_id,
+                ),
+                qty,
                 source_module="procurement",
                 source_document_type="grn",
                 source_document_id=grn.id,
@@ -65,6 +69,17 @@ class ProcurementInventoryAdapter:
                 unit_cost=unit_cost_by_line.get(line.order_line_id, Decimal("0")),
             )
             updated = True
+        if updated:
+            enqueue_domain_event(
+                self._db,
+                tenant_id=ctx.tenant_id,
+                event_type="domain.inventory.stock_received",
+                aggregate_type="grn",
+                aggregate_id=grn_id,
+                payload={"grn_id": str(grn_id), "order_id": str(order_id)},
+                idempotency_key=f"domain.inventory.stock_received:grn:{grn_id}",
+                created_by=ctx.user_id,
+            )
         return GrnReceiptResult(
             grn_id=grn_id,
             order_id=order_id,
@@ -74,11 +89,11 @@ class ProcurementInventoryAdapter:
 
 
 class ProcurementIssueAdapter:
-    """Issue stock for purchase returns."""
+    """Issue stock for purchase returns via platform inventory port."""
 
     def __init__(self, db: Session) -> None:
         self._db = db
-        self._app = InventoryApplicationService(db)
+        self._stock = InventoryStockAdapter(db)
         self._returns = ReturnRepository(db)
 
     def issue_purchase_return(
@@ -92,19 +107,31 @@ class ProcurementIssueAdapter:
         if header is None:
             return False
         for line in [ln for ln in header.lines if not ln.is_deleted]:
-            self._app.issue_goods(
+            self._stock.issue(
                 ctx,
-                company_id=header.company_id,
-                branch_id=header.branch_id,
-                warehouse_id=warehouse_id,
-                product_id=line.product_id,
-                uom_id=line.uom_id,
-                quantity=Decimal(str(line.quantity)),
+                StockKey(
+                    company_id=header.company_id,
+                    branch_id=header.branch_id,
+                    warehouse_id=warehouse_id,
+                    product_id=line.product_id,
+                    uom_id=line.uom_id,
+                ),
+                Decimal(str(line.quantity)),
                 source_module="procurement",
                 source_document_type="purchase_return",
                 source_document_id=header.id,
                 source_line_id=line.id,
             )
+        enqueue_domain_event(
+            self._db,
+            tenant_id=ctx.tenant_id,
+            event_type="domain.inventory.stock_issued",
+            aggregate_type="purchase_return",
+            aggregate_id=return_id,
+            payload={"return_id": str(return_id)},
+            idempotency_key=f"domain.inventory.stock_issued:purchase_return:{return_id}",
+            created_by=ctx.user_id,
+        )
         return True
 
 

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from core.config import settings
 from database.base import Base
 import modules.foundation.models  # noqa: F401 - register ORM metadata
+import modules.platform.models  # noqa: F401 - register ORM metadata
 import modules.finance.models  # noqa: F401 - register ORM metadata
 import modules.master_data.models  # noqa: F401 - register ORM metadata
 import modules.organization.models  # noqa: F401 - register ORM metadata

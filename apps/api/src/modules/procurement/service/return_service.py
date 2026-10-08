@@ -9,7 +9,7 @@ from core.exceptions import NotFoundException
 from modules.finance.repository.fiscal_repository import FiscalRepository
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.inventory.adapters.procurement_adapter import ProcurementIssueAdapter
 from modules.procurement.domain.enums import ProcEntityType, ReturnStatus
 from modules.procurement.domain.exceptions import InvalidDocumentState, SegregationOfDutiesError
@@ -37,7 +37,7 @@ class ReturnService:
         self._numbers = DocumentNumberService(db)
         self._governance = ProcurementGovernanceService(db)
         self._inventory = ProcurementIssueAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_returns(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -145,6 +145,7 @@ class ReturnService:
         instance = self._governance.submit_for_approval(
             ctx, entity_name="proc_return_header", entity_id=return_id
         )
+        instance_id = instance.id
         return self._repo.update_return(
             ctx,
             return_id,

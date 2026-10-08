@@ -17,7 +17,7 @@ from modules.asset.service.document_number_service import DocumentNumberService
 from modules.asset.service.engines import AssetMaintenancePlanEngine
 from modules.asset.service.maintenance_plan_validator import MaintenancePlanValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_AST_MAINTENANCE_PLAN = "ast_asset_maintenance_plan"
 
@@ -28,7 +28,7 @@ class MaintenancePlanService:
         self._scope = AssetScopeValidator(db)
         self._numbers = DocumentNumberService(db)
         self._engine = AssetMaintenancePlanEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = MaintenancePlanValidator(db)
 
     def search(

@@ -21,7 +21,7 @@ from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.asset.service.engines import AssetNotificationEngine
 from modules.asset.service.notification_validator import NotificationValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_AST_NOTIFICATION = "ast_asset_notification"
 
@@ -31,7 +31,7 @@ class AssetNotificationService:
         self._repo = AssetNotificationRepository(db)
         self._scope = AssetScopeValidator(db)
         self._engine = AssetNotificationEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = NotificationValidator(db)
 
     def search(

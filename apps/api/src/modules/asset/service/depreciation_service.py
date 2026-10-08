@@ -24,7 +24,7 @@ from modules.asset.service.depreciation_validator import DepreciationValidator
 from modules.asset.service.document_number_service import DocumentNumberService
 from modules.asset.service.engines import AssetDepreciationEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 def period_idempotency_key(asset_id: UUID, period_year: int, period_month: int) -> str:
@@ -40,7 +40,7 @@ class DepreciationService:
         self._numbers = DocumentNumberService(db)
         self._engine = AssetDepreciationEngine()
         self._finance = AssetFinanceAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = DepreciationValidator(db)
 
     def search(

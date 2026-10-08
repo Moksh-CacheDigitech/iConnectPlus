@@ -19,33 +19,33 @@ export type ErpModule = {
   href: string;
   group: "platform" | "foundation" | "organization" | "master-data" | "operations";
   icon:
-    | "dashboard"
-    | "shield"
-    | "mail"
-    | "voice"
-    | "building"
-    | "boxes"
-    | "wallet"
-    | "cart"
-    | "truck"
-    | "package"
-    | "factory"
-    | "quality"
-    | "crm"
-    | "hr"
-    | "payroll"
-    | "recruit"
-    | "project"
-    | "asset"
-    | "service"
-    | "helpdesk"
-    | "document"
-    | "marketing"
-    | "grc"
-    | "analytics"
-    | "integration"
-    | "ecommerce"
-    | "portal";
+  | "dashboard"
+  | "shield"
+  | "mail"
+  | "voice"
+  | "building"
+  | "boxes"
+  | "wallet"
+  | "cart"
+  | "truck"
+  | "package"
+  | "factory"
+  | "quality"
+  | "crm"
+  | "hr"
+  | "payroll"
+  | "recruit"
+  | "project"
+  | "asset"
+  | "service"
+  | "helpdesk"
+  | "document"
+  | "marketing"
+  | "grc"
+  | "analytics"
+  | "integration"
+  | "ecommerce"
+  | "portal";
   resources: ModuleResource[];
 };
 
@@ -451,6 +451,12 @@ export const erpModules: ErpModule[] = [
         title: "Delivery Status",
         description: "Shipment and delivery tracking",
         apiPath: "/procurement/delivery-status",
+      },
+      {
+        key: "tracker",
+        title: "Tracker Upload",
+        description: "Excel trackers merged into an extracted table",
+        apiPath: "/procurement/scm/sheet-trackers",
       },
       {
         key: "correspondence",

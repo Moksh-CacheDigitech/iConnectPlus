@@ -16,7 +16,7 @@ from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.asset.service.engines import AssetWarrantyEngine
 from modules.asset.service.warranty_validator import WarrantyValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_AST_WARRANTY = "ast_asset_warranty"
 
@@ -26,7 +26,7 @@ class WarrantyService:
         self._repo = AssetWarrantyRepository(db)
         self._scope = AssetScopeValidator(db)
         self._engine = AssetWarrantyEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = WarrantyValidator(db)
 
     def search(

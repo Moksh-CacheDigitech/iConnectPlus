@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
-from modules.hr.models.employee_profile import HrEmployeeProfile
-from modules.master_data.models.employee import MasterEmployee
+from modules.platform.compat.audit_facade import PlatformAuditFacade
+from modules.master_data.published import EmployeeRead
+from modules.payroll.adapters.hr_port import PayrollHrAdapter
 from modules.payroll.domain.enums import PayEntityType, PayrollRunStatus
 from modules.payroll.domain.bank_export_builder import build_bank_export_csv
 from modules.payroll.domain.payslip_document_builder import build_payslip_document, format_payslip_text
@@ -36,7 +36,7 @@ class PayslipService:
         self._scope = PayrollScopeValidator(db)
         self._numbers = DocumentNumberService(db)
         self._engine = PayslipEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def _enrich(self, row: PayPayslip) -> PayslipResponse:
         payload = PayslipResponse.model_validate(row)
@@ -52,9 +52,9 @@ class PayslipService:
             payload.employee_code = str(emp_block["code"])
         if not payload.employee_name or not payload.employee_code:
             emp = self._db.scalar(
-                select(MasterEmployee).where(
-                    MasterEmployee.id == row.employee_id,
-                    MasterEmployee.is_deleted.is_(False),
+                select(EmployeeRead).where(
+                    EmployeeRead.id == row.employee_id,
+                    EmployeeRead.is_deleted.is_(False),
                 )
             )
             if emp is not None:
@@ -133,9 +133,9 @@ class PayslipService:
         out: list[PayslipResponse] = []
         for line in lines:
             emp = self._db.scalar(
-                select(MasterEmployee).where(
-                    MasterEmployee.id == line.employee_id,
-                    MasterEmployee.is_deleted.is_(False),
+                select(EmployeeRead).where(
+                    EmployeeRead.id == line.employee_id,
+                    EmployeeRead.is_deleted.is_(False),
                 )
             )
             breakdown = line.component_breakdown_json if isinstance(line.component_breakdown_json, dict) else {}
@@ -230,17 +230,12 @@ class PayslipService:
         rows: list[dict] = []
         for line in lines:
             emp = self._db.scalar(
-                select(MasterEmployee).where(
-                    MasterEmployee.id == line.employee_id,
-                    MasterEmployee.is_deleted.is_(False),
+                select(EmployeeRead).where(
+                    EmployeeRead.id == line.employee_id,
+                    EmployeeRead.is_deleted.is_(False),
                 )
             )
-            profile = self._db.scalar(
-                select(HrEmployeeProfile).where(
-                    HrEmployeeProfile.employee_id == line.employee_id,
-                    HrEmployeeProfile.is_deleted.is_(False),
-                )
-            )
+            bank = PayrollHrAdapter(self._db).bank_details(line.employee_id)
             slip = self._db.scalar(
                 select(PayPayslip).where(
                     PayPayslip.payroll_run_line_id == line.id,
@@ -254,10 +249,10 @@ class PayslipService:
                     "employee_name": (
                         f"{emp.first_name} {emp.last_name}".strip() if emp else ""
                     ),
-                    "account_number": getattr(profile, "bank_account_number", None) if profile else None,
-                    "ifsc": getattr(profile, "bank_ifsc", None) if profile else None,
-                    "bank_name": getattr(profile, "bank_name", None) if profile else None,
-                    "account_holder": getattr(profile, "bank_account_holder", None) if profile else None,
+                    "account_number": bank["account_number"],
+                    "ifsc": bank["ifsc"],
+                    "bank_name": bank["bank_name"],
+                    "account_holder": bank["account_holder"],
                     "net_pay": net,
                     "payroll_run_line_id": str(line.id),
                 }

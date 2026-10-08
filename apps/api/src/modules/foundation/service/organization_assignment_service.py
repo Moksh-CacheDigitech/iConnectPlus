@@ -14,8 +14,7 @@ from modules.foundation.models.security import SecUser, SecUserOrgScope, SecUser
 from modules.foundation.schemas import UserResponse
 from modules.foundation.service.user_employee_link_service import UserEmployeeLinkService
 from modules.foundation.service.user_service import UserService
-from modules.master_data.models.employee import MasterEmployee
-from modules.master_data.repository.base import utcnow
+from modules.master_data.published import EmployeeCommands, EmployeeRead
 from modules.organization.models.company import OrgCompany
 from modules.organization.models.hierarchy import OrgDepartment
 from modules.organization.repository.org_scope_repository import OrgScopeRepository
@@ -37,10 +36,10 @@ class OrganizationAssignmentService:
         dept_by_employee: dict[UUID, UUID] = {}
         if employee_ids:
             rows = self._db.scalars(
-                select(MasterEmployee).where(
-                    MasterEmployee.tenant_id == tenant_id,
-                    MasterEmployee.id.in_(employee_ids),
-                    MasterEmployee.is_deleted.is_(False),
+                select(EmployeeRead).where(
+                    EmployeeRead.tenant_id == tenant_id,
+                    EmployeeRead.id.in_(employee_ids),
+                    EmployeeRead.is_deleted.is_(False),
                 )
             ).all()
             for row in rows:
@@ -49,13 +48,13 @@ class OrganizationAssignmentService:
 
         # Fallback: employee linked by user_id when employee_id is empty
         missing_user_ids = [u.id for u in users if not u.employee_id]
-        emp_by_user: dict[UUID, MasterEmployee] = {}
+        emp_by_user: dict[UUID, EmployeeRead] = {}
         if missing_user_ids:
             for row in self._db.scalars(
-                select(MasterEmployee).where(
-                    MasterEmployee.tenant_id == tenant_id,
-                    MasterEmployee.user_id.in_(missing_user_ids),
-                    MasterEmployee.is_deleted.is_(False),
+                select(EmployeeRead).where(
+                    EmployeeRead.tenant_id == tenant_id,
+                    EmployeeRead.user_id.in_(missing_user_ids),
+                    EmployeeRead.is_deleted.is_(False),
                 )
             ).all():
                 if row.user_id:
@@ -210,15 +209,16 @@ class OrganizationAssignmentService:
             )
 
         emp_row = self._db.scalar(
-            select(MasterEmployee).where(
-                MasterEmployee.id == employee.id,
-                MasterEmployee.tenant_id == ctx.tenant_id,
-                MasterEmployee.is_deleted.is_(False),
+            select(EmployeeRead).where(
+                EmployeeRead.id == employee.id,
+                EmployeeRead.tenant_id == ctx.tenant_id,
+                EmployeeRead.is_deleted.is_(False),
             )
         )
         if emp_row is None:
             raise NotFoundException("Employee not found")
 
+        commands = EmployeeCommands(self._db)
         if department_id is not None:
             dept = self._db.scalar(
                 select(OrgDepartment).where(
@@ -229,19 +229,16 @@ class OrganizationAssignmentService:
             )
             if dept is None:
                 raise ValidationException("Department not found")
-            emp_row.department_id = department_id
             # Keep employee org placement aligned with the selected department.
-            if dept.branch_id is not None:
-                emp_row.branch_id = dept.branch_id
-            if dept.company_id is not None:
-                emp_row.company_id = dept.company_id
+            commands.assign_department(
+                emp_row.id,
+                department_id=department_id,
+                branch_id=dept.branch_id,
+                company_id=dept.company_id,
+                updated_by=ctx.user_id,
+            )
         else:
-            emp_row.department_id = None
-
-        emp_row.updated_at = utcnow()
-        emp_row.updated_by = ctx.user_id
-        emp_row.version += 1
-        self._db.flush()
+            commands.assign_department(emp_row.id, department_id=None, updated_by=ctx.user_id)
 
         refreshed = self._users.get_user(ctx.tenant_id, user_entity.id)
         return self.enrich_responses(ctx.tenant_id, [refreshed])[0]

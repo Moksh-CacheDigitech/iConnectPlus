@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -15,7 +15,6 @@ from modules.agent_read.service.agent_read_service import AgentReadService
 from modules.crm.schemas import LeadResponse
 from modules.foundation.dependencies import require_permission
 from modules.foundation.domain.value_objects import TenantContext
-from modules.master_data.models.party import MasterCustomer
 from modules.master_data.schemas import CustomerResponse, ProductResponse
 from modules.sales.schemas import InvoiceResponse, SalesOrderResponse
 from shared.schemas import APIResponse
@@ -27,7 +26,7 @@ invoices_router = APIRouter(prefix="/invoices", tags=["Agent Read - Invoices"])
 products_router = APIRouter(prefix="/agent/products", tags=["Agent Read - Products"])
 
 
-def _customer_from_row(row: MasterCustomer) -> CustomerResponse:
+def _customer_from_row(row: Any) -> CustomerResponse:
     return CustomerResponse(
         id=row.id,
         tenant_id=row.tenant_id,

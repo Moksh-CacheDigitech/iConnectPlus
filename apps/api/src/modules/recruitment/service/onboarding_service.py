@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.recruitment.adapters.hr_port import RecruitmentHrAdapter
 from modules.recruitment.adapters.master_data_port import RecruitmentMasterDataAdapter
 from modules.recruitment.domain.enums import OnboardingStatus, PayrollHandoffStatus, RecEntityType
@@ -32,7 +32,7 @@ class OnboardingService:
         self._candidate_engine = CandidateEngine()
         self._master = RecruitmentMasterDataAdapter(db)
         self._hr = RecruitmentHrAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

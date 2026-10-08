@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.recruitment.models import RecReferenceCheck
 from modules.recruitment.repository.reference_check_repository import ReferenceCheckRepository
 from modules.recruitment.service.engines import ReferenceCheckEngine
@@ -18,7 +18,7 @@ class ReferenceCheckService:
         self._repo = ReferenceCheckRepository(db)
         self._scope = RecruitmentScopeValidator(db)
         self._engine = ReferenceCheckEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

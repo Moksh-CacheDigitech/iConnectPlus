@@ -12,7 +12,7 @@ from modules.analytics.service.analytics_number_service import AnalyticsNumberSe
 from modules.analytics.service.analytics_scope_validator import AnalyticsScopeValidator
 from modules.analytics.service.engines import SubscriptionEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class SubscriptionService:
@@ -21,7 +21,7 @@ class SubscriptionService:
         self._scope = AnalyticsScopeValidator(db)
         self._numbers = AnalyticsNumberService(db)
         self._engine = SubscriptionEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

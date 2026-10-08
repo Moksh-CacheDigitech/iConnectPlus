@@ -19,7 +19,7 @@ from modules.asset.nonit.code_service import NonItCodeService
 from modules.asset.nonit.repository_type import NonItAssetTypeRepository
 from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 DEFAULT_TYPES: list[tuple[str, str, str, str]] = [
     ("Chair", "CH", "EMPLOYEE", "FURNITURE"),
@@ -42,7 +42,7 @@ class NonItAssetTypeService:
         self._repo = NonItAssetTypeRepository(db)
         self._codes = NonItCodeService(db)
         self._scope = AssetScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def _ensure_read(self, ctx: TenantContext) -> None:
         ensure_nonit_member_or_permission(ctx, self._db, "asset.nonit_type:read")

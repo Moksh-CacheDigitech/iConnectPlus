@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.helpdesk.models import HdTicketComment
 from modules.helpdesk.repository.ticket_comment_repository import TicketCommentRepository
 from modules.helpdesk.service.engines import TicketCommentEngine
@@ -18,7 +18,7 @@ class TicketCommentService:
         self._repo = TicketCommentRepository(db)
         self._scope = HelpdeskScopeValidator(db)
         self._engine = TicketCommentEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

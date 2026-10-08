@@ -18,7 +18,7 @@ from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.asset.service.document_number_service import DocumentNumberService
 from modules.asset.service.engines import AssetAuditEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_AST_AUDIT = "ast_asset_audit"
 
@@ -30,7 +30,7 @@ class AssetAuditService:
         self._scope = AssetScopeValidator(db)
         self._numbers = DocumentNumberService(db)
         self._engine = AssetAuditEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = AssetAuditValidator(db)
 
     def search(

@@ -21,7 +21,7 @@ from modules.finance.schemas import (
 from modules.finance.service.document_number_service import DocumentNumberService
 from modules.finance.service.finance_scope_validator import FinanceScopeValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 INVOICE_TYPES = {"invoice", "credit_note"}
@@ -34,7 +34,7 @@ class VendorLedgerService:
         self._repo = SubLedgerRepository(db)
         self._scope = FinanceScopeValidator(db)
         self._numbers = DocumentNumberService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def _to_response(self, entry: FinVendorLedger, vendor_map: dict | None = None) -> VendorLedgerResponse:
         vmap = vendor_map or {}

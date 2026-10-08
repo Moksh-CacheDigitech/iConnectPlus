@@ -16,7 +16,7 @@ from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.asset.service.checklist_validator import ChecklistValidator
 from modules.asset.service.engines import AssetChecklistEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_AST_CHECKLIST = "ast_asset_checklist"
 
@@ -26,7 +26,7 @@ class ChecklistService:
         self._repo = AssetChecklistRepository(db)
         self._scope = AssetScopeValidator(db)
         self._engine = AssetChecklistEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = ChecklistValidator(db)
 
     def search(

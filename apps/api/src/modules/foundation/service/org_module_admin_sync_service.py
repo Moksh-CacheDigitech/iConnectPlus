@@ -11,7 +11,7 @@ from modules.foundation.domain.erp_modules import MODULE_ROLE_ADMIN
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecRole, SecUser, SecUserModule, SecUserRole
 from modules.foundation.repository.user_module_repository import UserModuleRepository
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.rbac_service import RBACService
 from modules.foundation.service.user_service import UserService
 from modules.hr.service.hr_module_admin import HR_ADMIN_ROLE_CODE
@@ -33,7 +33,7 @@ class OrgModuleAdminSyncService:
         self._users = UserService(db)
         self._scopes = OrgScopeRepository(db)
         self._rbac = RBACService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._modules = UserModuleRepository(db)
 
     def sync_user_admin_modules(
@@ -154,9 +154,9 @@ class OrgModuleAdminSyncService:
         user = self._db.get(SecUser, user_id)
         default_company: UUID | None = None
         if user and user.employee_id:
-            from modules.master_data.models.employee import MasterEmployee
+            from modules.master_data.published import EmployeeRead
 
-            emp = self._db.get(MasterEmployee, user.employee_id)
+            emp = self._db.get(EmployeeRead, user.employee_id)
             if emp and emp.company_id:
                 default_company = emp.company_id
         if default_company is None and company_ids:
@@ -182,9 +182,9 @@ class OrgModuleAdminSyncService:
         self._revoke_role(ctx.tenant_id, user_id, HR_ADMIN_ROLE_CODE)
         user = self._db.get(SecUser, user_id)
         if user and user.employee_id:
-            from modules.master_data.models.employee import MasterEmployee
+            from modules.master_data.published import EmployeeRead
 
-            emp = self._db.get(MasterEmployee, user.employee_id)
+            emp = self._db.get(EmployeeRead, user.employee_id)
             if emp and emp.company_id:
                 self._scopes.replace_company_scopes(
                     ctx,
@@ -232,9 +232,9 @@ class OrgModuleAdminSyncService:
         user = self._db.get(SecUser, user_id)
         default_company: UUID | None = None
         if user and user.employee_id:
-            from modules.master_data.models.employee import MasterEmployee
+            from modules.master_data.published import EmployeeRead
 
-            emp = self._db.get(MasterEmployee, user.employee_id)
+            emp = self._db.get(EmployeeRead, user.employee_id)
             if emp and emp.company_id:
                 default_company = emp.company_id
         if default_company is None and company_ids:
@@ -260,9 +260,9 @@ class OrgModuleAdminSyncService:
         self._revoke_role(ctx.tenant_id, user_id, PROCUREMENT_MANAGER_ROLE_CODE)
         user = self._db.get(SecUser, user_id)
         if user and user.employee_id:
-            from modules.master_data.models.employee import MasterEmployee
+            from modules.master_data.published import EmployeeRead
 
-            emp = self._db.get(MasterEmployee, user.employee_id)
+            emp = self._db.get(EmployeeRead, user.employee_id)
             if emp and emp.company_id:
                 self._scopes.replace_company_scopes(
                     ctx,
@@ -289,9 +289,9 @@ class OrgModuleAdminSyncService:
         user = self._db.get(SecUser, user_id)
         default_company: UUID | None = None
         if user and user.employee_id:
-            from modules.master_data.models.employee import MasterEmployee
+            from modules.master_data.published import EmployeeRead
 
-            emp = self._db.get(MasterEmployee, user.employee_id)
+            emp = self._db.get(EmployeeRead, user.employee_id)
             if emp and emp.company_id:
                 default_company = emp.company_id
         if default_company is None and company_ids:
@@ -328,9 +328,9 @@ class OrgModuleAdminSyncService:
         self._revoke_role(ctx.tenant_id, user_id, SERVICE_HEAD_ROLE_CODE)
         user = self._db.get(SecUser, user_id)
         if user and user.employee_id:
-            from modules.master_data.models.employee import MasterEmployee
+            from modules.master_data.published import EmployeeRead
 
-            emp = self._db.get(MasterEmployee, user.employee_id)
+            emp = self._db.get(EmployeeRead, user.employee_id)
             if emp and emp.company_id:
                 self._scopes.replace_company_scopes(
                     ctx,

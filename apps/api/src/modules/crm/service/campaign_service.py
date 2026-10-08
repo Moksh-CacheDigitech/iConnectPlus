@@ -14,7 +14,7 @@ from modules.crm.service.crm_scope_validator import CrmScopeValidator
 from modules.crm.service.document_number_service import DocumentNumberService
 from modules.crm.service.engines import CampaignEngine, CampaignMemberEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class CampaignService:
@@ -25,7 +25,7 @@ class CampaignService:
         self._numbers = DocumentNumberService(db)
         self._engine = CampaignEngine()
         self._member_engine = CampaignMemberEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.organization.repository.branch_repository import BranchRepository
 from modules.organization.repository.company_repository import CompanyRepository
 from modules.organization.service.org_scope_validator import OrgScopeValidator
@@ -42,7 +42,7 @@ class BranchService:
     def __init__(self, db: Session) -> None:
         self._repo = BranchRepository(db)
         self._companies = CompanyRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._scope = OrgScopeValidator(db)
 
     def list_branches(self, ctx: TenantContext, *, company_id: UUID | None = None):

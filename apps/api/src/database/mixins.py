@@ -5,7 +5,7 @@ from uuid import UUID
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, declared_attr, mapped_column
 
 
 class AuditMixin:
@@ -39,6 +39,12 @@ class SoftDeleteMixin:
 
 class VersionMixin:
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+
+    # Every ORM UPDATE/DELETE asserts the loaded version (StaleDataError -> HTTP 409).
+    # Callers still bump ``version`` themselves, so the generator stays off.
+    @declared_attr.directive
+    def __mapper_args__(cls) -> dict:
+        return {"version_id_col": cls.version, "version_id_generator": False}
 
 
 class CompanyMixin:

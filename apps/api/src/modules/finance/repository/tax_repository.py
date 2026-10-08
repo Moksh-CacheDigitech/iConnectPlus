@@ -23,6 +23,18 @@ class TaxRepository(FinanceScopedRepository):
             stmt = stmt.where(FinTaxRegister.period_id == period_id)
         return list(self.db.scalars(stmt).all())
 
+    def count_register_lines(self, ctx: TenantContext, company_id: UUID) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(FinTaxRegister)
+            .where(
+                FinTaxRegister.tenant_id == ctx.tenant_id,
+                FinTaxRegister.company_id == company_id,
+                FinTaxRegister.is_deleted.is_(False),
+            )
+        )
+        return int(self.db.scalar(stmt) or 0)
+
     def create_register(self, ctx: TenantContext, **fields: object) -> FinTaxRegister:
         row = FinTaxRegister(
             id=uuid4(),

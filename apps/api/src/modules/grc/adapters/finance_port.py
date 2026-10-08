@@ -1,22 +1,22 @@
-"""Finance port - PostingService.post_system_journal only; store finance_journal_id."""
+"""Finance port — GRC charges through platform IFinancePosting."""
 
-from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from modules.finance.domain.enums import JournalType
-from modules.finance.service.journal_service import JournalService
-from modules.finance.service.posting_service import PostingService
+from modules.finance.repository.tax_repository import TaxRepository
 from modules.foundation.domain.value_objects import TenantContext
 from modules.grc.models import GrcCorrectiveAction, GrcIncident
+from modules.platform.helpers.system_journal import post_two_line_system_journal
 
 
 class GrcFinanceAdapter:
     def __init__(self, db: Session) -> None:
-        self._journals = JournalService(db)
-        self._posting = PostingService(db)
+        self._db = db
+
+    def tax_register_line_count(self, ctx: TenantContext, company_id: UUID) -> int:
+        return TaxRepository(self._db).count_register_lines(ctx, company_id)
 
     def post_incident_cost(
         self,
@@ -37,6 +37,9 @@ class GrcFinanceAdapter:
             debit_account_id=debit_account_id,
             credit_account_id=credit_account_id,
             fiscal_year_id=fiscal_year_id,
+            idempotency_key=f"grc.incident:{row.id}",
+            source_document_id=row.id,
+            source_document_type="grc_incident",
         )
 
     def post_capa_cost(
@@ -58,6 +61,9 @@ class GrcFinanceAdapter:
             debit_account_id=debit_account_id,
             credit_account_id=credit_account_id,
             fiscal_year_id=fiscal_year_id,
+            idempotency_key=f"grc.capa:{row.id}",
+            source_document_id=row.id,
+            source_document_type="grc_capa",
         )
 
     def _post_cost(
@@ -71,38 +77,27 @@ class GrcFinanceAdapter:
         debit_account_id: UUID,
         credit_account_id: UUID,
         fiscal_year_id: UUID | None,
+        idempotency_key: str,
+        source_document_id: UUID,
+        source_document_type: str,
     ) -> UUID:
-        amount = amount.quantize(Decimal("0.0001"))
         resolved_branch_id = branch_id if branch_id is not None else ctx.branch_id
         if resolved_branch_id is None:
-            msg = "branch_id is required for GRC finance posting"
-            raise ValueError(msg)
-        journal = self._journals.create_journal(
+            raise ValueError("branch_id is required for GRC finance posting")
+        return post_two_line_system_journal(
+            self._db,
             ctx,
             company_id=company_id,
             branch_id=resolved_branch_id,
-            journal_date=date.today(),
             description=f"GRC charge {document_label}",
-            journal_type=JournalType.SYSTEM.value,
+            amount=amount,
+            debit_account_id=debit_account_id,
+            credit_account_id=credit_account_id,
+            idempotency_key=idempotency_key,
+            source_module="grc",
+            source_document_type=source_document_type,
+            source_document_id=source_document_id,
+            debit_desc="GRC charge debit",
+            credit_desc="GRC charge credit",
             fiscal_year_id=fiscal_year_id,
         )
-        self._journals.add_line(
-            ctx,
-            journal.id,
-            line_number=1,
-            account_id=debit_account_id,
-            debit_amount=float(amount),
-            credit_amount=0,
-            description="GRC charge debit",
-        )
-        self._journals.add_line(
-            ctx,
-            journal.id,
-            line_number=2,
-            account_id=credit_account_id,
-            debit_amount=0,
-            credit_amount=float(amount),
-            description="GRC charge credit",
-        )
-        self._posting.post_system_journal(ctx, journal.id)
-        return journal.id

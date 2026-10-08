@@ -1,6 +1,10 @@
 """Project permission constants per ERD_14 §14."""
 
 PROJECT_PERMISSIONS: list[tuple[str, str, str, str]] = [
+    ("project.budget:update", "project.budget", "update", "project"),
+    ("project.change_request:update", "project.change_request", "update", "project"),
+    ("project.cost:update", "project.cost", "update", "project"),
+    ("project.timesheet:update", "project.timesheet", "update", "project"),
     ("project.project:read", "project.project", "read", "project"),
     ("project.project:create", "project.project", "create", "project"),
     ("project.project:update", "project.project", "update", "project"),

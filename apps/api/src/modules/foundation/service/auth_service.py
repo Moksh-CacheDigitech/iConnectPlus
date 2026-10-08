@@ -46,6 +46,36 @@ class AuthService:
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> dict:
+        import time
+
+        from modules.platform.observability import log_path_metric
+
+        started = time.perf_counter()
+        success = False
+        try:
+            result = self._login_inner(
+                email=email,
+                password=password,
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            success = True
+            return result
+        finally:
+            log_path_metric(
+                "auth.login",
+                latency_ms=(time.perf_counter() - started) * 1000,
+                success=success,
+            )
+
+    def _login_inner(
+        self,
+        *,
+        email: str,
+        password: str,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict:
         # Block well-known demo credentials unless explicitly allowed (VAPT 7.1.1).
         demo_password = "Secure1!"
         demo_emails = {

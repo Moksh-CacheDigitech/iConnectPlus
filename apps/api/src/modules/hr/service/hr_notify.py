@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 
 from modules.foundation.models.security import SecUser
 from modules.foundation.service.notification_href import sanitize_inbox_href
-from modules.foundation.service.notification_service import NotificationService
-from modules.master_data.models.employee import MasterEmployee
+from modules.master_data.published import EmployeeRead
+from modules.platform.compat.notify_facade import PlatformNotifyFacade
 from security.rbac import RBACEngine
 
 
@@ -27,30 +27,27 @@ def _send_in_app(
     kind: str,
     extra: dict | None = None,
 ) -> bool:
+    _ = template_name
     if recipient_user_id is None and not recipient_address:
         return False
-    notif = NotificationService(db)
-    tpl = notif.get_or_create_template(
-        tenant_id=tenant_id,
-        template_code=template_code,
-        template_name=template_name,
-        channel="in_app",
-        subject_template=title,
-        body_template=body,
-    )
     payload = {"title": title, "body": body, "kind": kind}
     if extra:
         payload.update(extra)
     href = sanitize_inbox_href(payload.get("href"), kind=kind)
     if href:
         payload["href"] = href
-    notif.send(
+    PlatformNotifyFacade(db).send(
         tenant_id=tenant_id,
-        template_id=tpl.id,
+        template_code=template_code,
         event_type=event_type,
         recipient_user_id=recipient_user_id,
         recipient_address=recipient_address,
         payload_json=payload,
+        channel="in_app",
+        idempotency_key=(
+            f"hr:{event_type}:{recipient_user_id or recipient_address}:"
+            f"{payload.get('employee_id') or payload.get('href') or kind}"
+        ),
     )
     return True
 
@@ -69,7 +66,7 @@ def notify_employee(
     extra: dict | None = None,
     cc_reporting_manager: bool = True,
 ) -> bool:
-    emp = db.get(MasterEmployee, employee_id)
+    emp = db.get(EmployeeRead, employee_id)
     if emp is None:
         return False
     sent = _send_in_app(
@@ -86,7 +83,7 @@ def notify_employee(
         extra={**(extra or {}), "employee_id": str(employee_id)},
     )
     if cc_reporting_manager and emp.reporting_manager_id:
-        mgr = db.get(MasterEmployee, emp.reporting_manager_id)
+        mgr = db.get(EmployeeRead, emp.reporting_manager_id)
         if mgr is not None:
             manager_extra = {**(extra or {}), "employee_id": str(employee_id)}
             if kind == "leave":

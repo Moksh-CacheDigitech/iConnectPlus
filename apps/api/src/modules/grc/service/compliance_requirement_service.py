@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.grc.models import GrcComplianceRequirement
 from modules.grc.repository.compliance_requirement_repository import ComplianceRequirementRepository
 from modules.grc.service.engines import ComplianceRequirementEngine
@@ -18,7 +18,7 @@ class ComplianceRequirementService:
         self._repo = ComplianceRequirementRepository(db)
         self._scope = GrcScopeValidator(db)
         self._engine = ComplianceRequirementEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

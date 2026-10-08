@@ -35,8 +35,8 @@ from modules.crm.service.engines import (
 from modules.crm.service.integration_service import CRMIntegrationService
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecUser
-from modules.foundation.service.audit_service import AuditService
-from modules.master_data.models.employee import MasterEmployee
+from modules.platform.compat.audit_facade import PlatformAuditFacade
+from modules.master_data.published import EmployeeCommands, EmployeeRead
 from modules.master_data.repository.employee_repository import EmployeeRepository
 
 
@@ -79,7 +79,7 @@ class LeadService:
         self._assign_engine = LeadAssignmentEngine()
         self._activity_engine = LeadActivityEngine()
         self._integration = CRMIntegrationService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._crm_admin = CrmModuleAdminService(db)
         self._visibility = CrmRecordVisibility(db)
 
@@ -223,10 +223,10 @@ class LeadService:
 
         if user and user.email:
             email_row = self._db.scalar(
-                select(MasterEmployee).where(
-                    MasterEmployee.tenant_id == ctx.tenant_id,
-                    MasterEmployee.is_deleted.is_(False),
-                    func.lower(MasterEmployee.email) == user.email.lower(),
+                select(EmployeeRead).where(
+                    EmployeeRead.tenant_id == ctx.tenant_id,
+                    EmployeeRead.is_deleted.is_(False),
+                    func.lower(EmployeeRead.email) == user.email.lower(),
                 )
             )
             if email_row is not None:
@@ -315,19 +315,17 @@ class LeadService:
             email = f"crm-user-{user.id}@local.invalid"
 
         existing = self._db.scalar(
-            select(MasterEmployee).where(
-                MasterEmployee.tenant_id == ctx.tenant_id,
-                MasterEmployee.company_id == company_id,
-                MasterEmployee.is_deleted.is_(False),
-                func.lower(MasterEmployee.email) == email,
+            select(EmployeeRead).where(
+                EmployeeRead.tenant_id == ctx.tenant_id,
+                EmployeeRead.company_id == company_id,
+                EmployeeRead.is_deleted.is_(False),
+                func.lower(EmployeeRead.email) == email,
             )
         )
         if existing is not None:
             if user.employee_id != existing.id:
                 user.employee_id = existing.id
-            if existing.user_id != user.id:
-                existing.user_id = user.id
-                existing.updated_by = ctx.user_id
+            EmployeeCommands(self._db).link_user(existing.id, user.id, updated_by=ctx.user_id)
             self._db.flush()
             return existing.id
 
@@ -338,18 +336,19 @@ class LeadService:
         employee_code = f"CRM-{str(user.id).replace('-', '')[:12].upper()}"
 
         code_taken = self._db.scalar(
-            select(MasterEmployee.id).where(
-                MasterEmployee.tenant_id == ctx.tenant_id,
-                MasterEmployee.company_id == company_id,
-                MasterEmployee.employee_code == employee_code,
-                MasterEmployee.is_deleted.is_(False),
+            select(EmployeeRead.id).where(
+                EmployeeRead.tenant_id == ctx.tenant_id,
+                EmployeeRead.company_id == company_id,
+                EmployeeRead.employee_code == employee_code,
+                EmployeeRead.is_deleted.is_(False),
             )
         )
         if code_taken is not None:
             employee_code = f"CRM-{uuid4().hex[:12].upper()}"
 
-        row = MasterEmployee(
-            id=uuid4(),
+        # Insert employee before linking sec_user.employee_id (FK order).
+        employee_id = EmployeeCommands(self._db).create_system_employee(
+            created_by=ctx.user_id,
             tenant_id=ctx.tenant_id,
             company_id=company_id,
             branch_id=branch_id,
@@ -363,15 +362,10 @@ class LeadService:
             date_of_joining=date.today(),
             status="active",
             user_id=user.id,
-            created_by=ctx.user_id,
-            updated_by=ctx.user_id,
         )
-        # Insert employee before linking sec_user.employee_id (FK order).
-        self._db.add(row)
+        user.employee_id = employee_id
         self._db.flush()
-        user.employee_id = row.id
-        self._db.flush()
-        return row.id
+        return employee_id
 
     def peek_next_dr_number(self, ctx: TenantContext, company_id: UUID | None = None) -> str:
         cid = self._scope.resolve_company_id(ctx, company_id)

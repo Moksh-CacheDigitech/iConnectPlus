@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.master_data.domain.enums import MasterEntityType
 from modules.master_data.models.party import MasterVendor
 from modules.master_data.repository.vendor_repository import VendorRepository
@@ -18,7 +18,7 @@ from modules.master_data.service.master_scope_validator import MasterScopeValida
 class VendorService:
     def __init__(self, db: Session) -> None:
         self._repo = VendorRepository(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._codes = CodeGeneratorService(db)
         self._duplicates = DuplicateCheckerService(db)
         self._scope = MasterScopeValidator(db)

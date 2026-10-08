@@ -1,17 +1,18 @@
-"""Procurement finance posting - invoice AP / return debit note."""
+"""Procurement finance posting via platform IFinancePosting."""
 
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
-from modules.finance.domain.enums import JournalStatus, JournalType, SubLedgerDocumentType
-from modules.finance.repository.journal_repository import JournalRepository
-from modules.finance.service.journal_service import JournalService
-from modules.finance.service.posting_service import PostingService
+from modules.finance.domain.enums import SubLedgerDocumentType
 from modules.finance.service.vendor_ledger_service import VendorLedgerService
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.adapters.finance_adapter import FinancePostingAdapter
+from modules.platform.compat.audit_facade import PlatformAuditFacade
+from modules.platform.dto import JournalLineDraft, SystemJournalDraft
+from modules.platform.helpers.side_effects import enqueue_domain_event
 from modules.procurement.domain.enums import InvoiceStatus, ReturnStatus
 from modules.procurement.domain.exceptions import InvalidDocumentState
 from modules.procurement.repository.invoice_repository import InvoiceRepository
@@ -28,10 +29,8 @@ class ProcurementPostingService:
         self._invoice_engine = InvoiceEngine()
         self._scope = ProcurementScopeValidator(db)
         self._ap = VendorLedgerService(db)
-        self._journals = JournalService(db)
-        self._journal_repo = JournalRepository(db)
-        self._posting = PostingService(db)
-        self._audit = AuditService(db)
+        self._finance = FinancePostingAdapter(db)
+        self._audit = PlatformAuditFacade(db)
 
     def post_invoice(
         self,
@@ -74,51 +73,44 @@ class ProcurementPostingService:
             exchange_rate=float(invoice.exchange_rate),
         )
 
-        journal = self._journals.create_journal(
+        posting = self._finance.post_system_journal(
             ctx,
-            company_id=invoice.company_id,
-            branch_id=invoice.branch_id,
-            journal_date=invoice.document_date,
-            description=f"Purchase invoice {invoice.document_number}",
-            journal_type=JournalType.SYSTEM.value,
-            currency_code=invoice.currency_code,
-            exchange_rate=float(invoice.exchange_rate),
-            period_id=invoice.period_id,
-            fiscal_year_id=invoice.fiscal_year_id,
+            SystemJournalDraft(
+                company_id=invoice.company_id,
+                branch_id=invoice.branch_id,
+                description=f"Purchase invoice {invoice.document_number}",
+                lines=(
+                    JournalLineDraft(
+                        account_id=expense_id,
+                        debit_amount=Decimal(str(amount)),
+                        credit_amount=Decimal("0"),
+                        description=f"Expense {invoice.document_number}",
+                        line_number=1,
+                    ),
+                    JournalLineDraft(
+                        account_id=ap_account_id,
+                        debit_amount=Decimal("0"),
+                        credit_amount=Decimal(str(amount)),
+                        description=f"AP {invoice.document_number}",
+                        line_number=2,
+                    ),
+                ),
+                idempotency_key=f"procurement.invoice.post:{invoice.id}",
+                journal_date=invoice.document_date,
+                fiscal_year_id=invoice.fiscal_year_id,
+                source_module="procurement",
+                source_document_type="proc_invoice",
+                source_document_id=invoice.id,
+            ),
         )
-        self._journals.add_line(
-            ctx,
-            journal.id,
-            line_number=1,
-            account_id=expense_id,
-            debit_amount=amount,
-            credit_amount=0,
-            description=f"Expense {invoice.document_number}",
-            vendor_id=invoice.vendor_id,
-        )
-        self._journals.add_line(
-            ctx,
-            journal.id,
-            line_number=2,
-            account_id=ap_account_id,
-            debit_amount=0,
-            credit_amount=amount,
-            description=f"AP {invoice.document_number}",
-            vendor_id=invoice.vendor_id,
-        )
-        self._journal_repo.update_journal(
-            ctx,
-            journal.id,
-            status=JournalStatus.APPROVED.value,
-        )
-        self._posting.post_system_journal(ctx, journal.id)
+        journal_id = posting.journal_id
 
         updated = self._invoices.update_invoice(
             ctx,
             invoice_id,
             status=InvoiceStatus.POSTED.value,
             finance_ledger_id=ap_entry.id,
-            finance_journal_id=journal.id,
+            finance_journal_id=journal_id,
             posting_status="posted",
             balance_due=amount,
         )
@@ -128,6 +120,22 @@ class ProcurementPostingService:
             entity_id=invoice_id,
             operation="post",
             performed_by=ctx.user_id,
+            new_value={"journal_id": str(journal_id)},
+        )
+        enqueue_domain_event(
+            self._db,
+            tenant_id=ctx.tenant_id,
+            event_type="domain.finance.journal_posted",
+            aggregate_type="proc_invoice",
+            aggregate_id=invoice_id,
+            payload={
+                "invoice_id": str(invoice_id),
+                "journal_id": str(journal_id),
+                "amount": amount,
+                "source_module": "procurement",
+            },
+            idempotency_key=f"domain.finance.journal_posted:proc_invoice:{invoice_id}",
+            created_by=ctx.user_id,
         )
         return updated
 
@@ -167,45 +175,37 @@ class ProcurementPostingService:
             exchange_rate=float(header.exchange_rate),
         )
 
-        journal = self._journals.create_journal(
+        posting = self._finance.post_system_journal(
             ctx,
-            company_id=header.company_id,
-            branch_id=header.branch_id,
-            journal_date=header.document_date,
-            description=f"Purchase return {header.document_number}",
-            journal_type=JournalType.SYSTEM.value,
-            currency_code=header.currency_code,
-            exchange_rate=float(header.exchange_rate),
-            period_id=header.period_id,
-            fiscal_year_id=header.fiscal_year_id,
+            SystemJournalDraft(
+                company_id=header.company_id,
+                branch_id=header.branch_id,
+                description=f"Purchase return {header.document_number}",
+                lines=(
+                    JournalLineDraft(
+                        account_id=ap_account_id,
+                        debit_amount=Decimal(str(amount)),
+                        credit_amount=Decimal("0"),
+                        description=f"AP debit {header.document_number}",
+                        line_number=1,
+                    ),
+                    JournalLineDraft(
+                        account_id=expense_account_id,
+                        debit_amount=Decimal("0"),
+                        credit_amount=Decimal(str(amount)),
+                        description=f"Return expense {header.document_number}",
+                        line_number=2,
+                    ),
+                ),
+                idempotency_key=f"procurement.return.post:{header.id}",
+                journal_date=header.document_date,
+                fiscal_year_id=header.fiscal_year_id,
+                source_module="procurement",
+                source_document_type="proc_return",
+                source_document_id=header.id,
+            ),
         )
-        # Reversal: AP Dr, Expense Cr
-        self._journals.add_line(
-            ctx,
-            journal.id,
-            line_number=1,
-            account_id=ap_account_id,
-            debit_amount=amount,
-            credit_amount=0,
-            description=f"AP debit {header.document_number}",
-            vendor_id=header.vendor_id,
-        )
-        self._journals.add_line(
-            ctx,
-            journal.id,
-            line_number=2,
-            account_id=expense_account_id,
-            debit_amount=0,
-            credit_amount=amount,
-            description=f"Return expense {header.document_number}",
-            vendor_id=header.vendor_id,
-        )
-        self._journal_repo.update_journal(
-            ctx,
-            journal.id,
-            status=JournalStatus.APPROVED.value,
-        )
-        self._posting.post_system_journal(ctx, journal.id)
+        journal_id = posting.journal_id
 
         for line in [ln for ln in header.lines if not ln.is_deleted]:
             line.status = "posted"
@@ -214,7 +214,7 @@ class ProcurementPostingService:
             return_id,
             status=ReturnStatus.POSTED.value,
             finance_ledger_id=ap_entry.id,
-            finance_journal_id=journal.id,
+            finance_journal_id=journal_id,
         )
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,
@@ -222,6 +222,6 @@ class ProcurementPostingService:
             entity_id=return_id,
             operation="post",
             performed_by=ctx.user_id,
-            new_value={"finance_ledger_id": str(ap_entry.id)},
+            new_value={"finance_ledger_id": str(ap_entry.id), "journal_id": str(journal_id)},
         )
         return updated

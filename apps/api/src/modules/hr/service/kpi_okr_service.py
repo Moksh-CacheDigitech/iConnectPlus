@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.hr.repository.kpi_okr_repository import KpiRepository, OkrRepository
 from modules.hr.service.hr_scope_validator import HrScopeValidator
 
@@ -33,7 +33,7 @@ class KpiService:
     def __init__(self, db: Session) -> None:
         self._repo = KpiRepository(db)
         self._scope = HrScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -108,7 +108,7 @@ class OkrService:
     def __init__(self, db: Session) -> None:
         self._repo = OkrRepository(db)
         self._scope = HrScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

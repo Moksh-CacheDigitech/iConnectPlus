@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.hr.adapters.master_data_port import HrMasterDataAdapter
 from modules.hr.domain.exceptions import InvalidAttendanceState
 from modules.hr.repository.attendance_repository import AttendanceRepository
@@ -30,7 +30,7 @@ class OnDutyRequestService:
         self._attendance_svc = AttendanceService(db)
         self._scope = HrScopeValidator(db)
         self._master = HrMasterDataAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -196,7 +196,7 @@ class OtAllotmentService:
         self._repo = OtAllotmentRepository(db)
         self._scope = HrScopeValidator(db)
         self._master = HrMasterDataAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

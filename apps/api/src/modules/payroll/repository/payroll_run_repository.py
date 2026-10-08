@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from modules.foundation.domain.value_objects import TenantContext
 from modules.payroll.models import PayPayrollRun
 from modules.payroll.repository.base import PayScopedRepository, utcnow
+from modules.platform.optimistic import assert_version, bump_version
 
 
 class PayrollRunRepository(PayScopedRepository):
@@ -43,12 +44,15 @@ class PayrollRunRepository(PayScopedRepository):
         row = self.get(ctx, row_id)
         if row is None:
             return None
+        expected = fields.pop("expected_version", None)
+        if hasattr(row, "version"):
+            assert_version(row, expected if isinstance(expected, int) else None)
         for k, v in fields.items():
             if v is not None:
                 setattr(row, k, v)
         row.updated_at = utcnow()
         row.updated_by = ctx.user_id
         if hasattr(row, "version"):
-            row.version = int(row.version or 1) + 1
+            bump_version(row)
         self.db.flush()
         return row

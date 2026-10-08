@@ -1,5 +1,6 @@
 """Procurement Celery tasks."""
 
+from modules.platform.celery_idempotent import system_job
 from workers.celery_app import celery_app
 
 
@@ -16,6 +17,7 @@ def retry_invoice_posting() -> dict:
 
 
 @celery_app.task(name="procurement.inventory_holding_costs")
+@system_job("procurement.inventory_holding_costs", window="day")
 def inventory_holding_costs() -> dict:
     """Release stock of closed / lost deals and push stock carrying cost into OVF margins."""
     from uuid import uuid4
@@ -54,6 +56,7 @@ def inventory_holding_costs() -> dict:
 
 
 @celery_app.task(name="procurement.delivery_notifications")
+@system_job("procurement.delivery_notifications", window="day")
 def delivery_notifications() -> dict:
     """Acknowledge new orders, chase distributors for an ETD, update customers.
 

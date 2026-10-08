@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from database.base import Base
 from modules.integration.models.mixins import IntRowMixin
+from modules.platform.encrypted_types import EncryptedText
 
 
 class IntWebhook(Base, *IntRowMixin):
@@ -70,7 +71,7 @@ class IntWebhook(Base, *IntRowMixin):
         nullable=True,
         index=True,
     )
-    secret_vault_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    secret_vault_ref: Mapped[str | None] = mapped_column(EncryptedText(), nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     owner_employee_id: Mapped[UUID | None] = mapped_column(

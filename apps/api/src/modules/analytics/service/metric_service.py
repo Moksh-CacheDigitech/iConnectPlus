@@ -10,7 +10,7 @@ from modules.analytics.repository.metric_repository import MetricRepository
 from modules.analytics.service.analytics_scope_validator import AnalyticsScopeValidator
 from modules.analytics.service.engines import MetricEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class MetricService:
@@ -18,7 +18,7 @@ class MetricService:
         self._repo = MetricRepository(db)
         self._scope = AnalyticsScopeValidator(db)
         self._engine = MetricEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

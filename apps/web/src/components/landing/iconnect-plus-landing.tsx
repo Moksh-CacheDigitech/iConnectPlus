@@ -17,8 +17,6 @@ import {
   Zap,
 } from "lucide-react";
 
-import { AccessCodeDialog } from "@/components/landing/access-code-dialog";
-
 const NAV = [
   { label: "About", href: "#about" },
   { label: "Features", href: "#features" },
@@ -151,9 +149,8 @@ function BrandMark({ light = false }: { light?: boolean }) {
         />
       </span>
       <span
-        className={`font-[family-name:var(--font-icp-display),sans-serif] text-[1.05rem] font-bold tracking-[-0.03em] ${
-          light ? "text-white" : "text-white"
-        }`}
+        className={`font-[family-name:var(--font-icp-display),sans-serif] text-[1.05rem] font-bold tracking-[-0.03em] ${light ? "text-white" : "text-white"
+          }`}
       >
         iConnect Plus
       </span>
@@ -206,16 +203,14 @@ function FaqItem({ q, a }: { q: string; a: string }) {
       >
         <span className="text-base font-semibold text-white sm:text-lg">{q}</span>
         <ChevronDown
-          className={`size-5 shrink-0 text-white/50 transition-transform duration-200 ${
-            open ? "rotate-180" : ""
-          }`}
+          className={`size-5 shrink-0 text-white/50 transition-transform duration-200 ${open ? "rotate-180" : ""
+            }`}
           aria-hidden
         />
       </button>
       <div
-        className={`grid transition-[grid-template-rows] duration-300 ease-out motion-reduce:transition-none ${
-          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
-        }`}
+        className={`grid transition-[grid-template-rows] duration-300 ease-out motion-reduce:transition-none ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+          }`}
       >
         <div className="overflow-hidden">
           <p className="pb-5 text-sm leading-relaxed text-white/55 sm:text-[0.95rem]">{a}</p>
@@ -227,7 +222,6 @@ function FaqItem({ q, a }: { q: string; a: string }) {
 
 export function IConnectPlusLanding() {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [signInOpen, setSignInOpen] = useState(false);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -271,10 +265,7 @@ export function IConnectPlusLanding() {
           </nav>
 
           <div className="flex items-center gap-2">
-            <PillButton
-              onClick={() => setSignInOpen(true)}
-              className="hidden !px-5 !py-2 sm:inline-flex"
-            >
+            <PillButton href="/login" className="hidden !px-5 !py-2 sm:inline-flex">
               Sign in
             </PillButton>
             <button
@@ -303,16 +294,13 @@ export function IConnectPlusLanding() {
                   {item.label}
                 </a>
               ))}
-              <button
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setSignInOpen(true);
-                }}
-                className="mt-2 inline-flex cursor-pointer items-center justify-center rounded-full bg-white px-5 py-3 text-sm font-semibold text-black"
+              <Link
+                href="/login"
+                onClick={() => setMenuOpen(false)}
+                className="mt-2 inline-flex cursor-pointer items-center justify-center rounded-full bg-white px-5 py-3 text-sm font-semibold text-black transition-opacity duration-200 hover:opacity-90"
               >
                 Sign in
-              </button>
+              </Link>
             </nav>
           </div>
         ) : null}
@@ -369,7 +357,7 @@ export function IConnectPlusLanding() {
                 Request a demo
                 <ArrowRight className="size-4" aria-hidden />
               </PillButton>
-              <PillButton variant="ghost" onClick={() => setSignInOpen(true)}>
+              <PillButton variant="ghost" href="/login">
                 Sign in
               </PillButton>
             </div>
@@ -578,7 +566,7 @@ export function IConnectPlusLanding() {
                 Book a conversation
                 <ArrowRight className="size-4" aria-hidden />
               </PillButton>
-              <PillButton variant="ghost" onClick={() => setSignInOpen(true)}>
+              <PillButton variant="ghost" href="/login">
                 Sign in to platform
               </PillButton>
             </div>
@@ -612,7 +600,6 @@ export function IConnectPlusLanding() {
         <p className="mx-auto mt-10 max-w-6xl text-xs text-white/30">© Connect Plus 2026</p>
       </footer>
 
-      <AccessCodeDialog open={signInOpen} onClose={() => setSignInOpen(false)} />
     </div>
   );
 }

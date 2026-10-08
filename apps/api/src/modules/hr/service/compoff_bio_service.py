@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from core.exceptions import AppException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.repository.base import hash_token
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.hr.adapters.master_data_port import HrMasterDataAdapter
 from modules.hr.domain.enums import AttendanceSource
 from modules.hr.domain.exceptions import InvalidLeaveRequestState
@@ -39,7 +39,7 @@ class CompoffRequestService:
         self._rules = AttendanceRuleService(db)
         self._scope = HrScopeValidator(db)
         self._master = HrMasterDataAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -196,7 +196,7 @@ class BiometricDeviceService:
         self._policy = AttendancePolicyApplyService(db)
         self._scope = HrScopeValidator(db)
         self._master = HrMasterDataAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     @staticmethod
     def _probe_device(ip: str | None, port: int | None) -> tuple[bool, str]:

@@ -12,7 +12,7 @@ from modules.ecommerce.service.ecommerce_number_service import EcommerceNumberSe
 from modules.ecommerce.service.ecommerce_scope_validator import EcommerceScopeValidator
 from modules.ecommerce.service.engines import CouponEngine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class CouponService:
@@ -21,7 +21,7 @@ class CouponService:
         self._scope = EcommerceScopeValidator(db)
         self._numbers = EcommerceNumberService(db)
         self._engine = CouponEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

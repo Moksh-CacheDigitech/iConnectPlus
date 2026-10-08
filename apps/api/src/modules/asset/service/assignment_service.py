@@ -37,7 +37,7 @@ from modules.asset.service.governance_service import AssetGovernanceService
 from modules.asset.service.workflow_governance_settings import asset_workflow_governance_enabled
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 def _json_safe_component_returns_for_audit(
@@ -70,7 +70,7 @@ class AssignmentService:
         self._governance = AssetGovernanceService(db)
         self._master = AssetMasterDataAdapter(db)
         self._validator = AssignmentValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._operational = AssetOperationalStatusService(db)
         self._assignment_components = AssignmentComponentService(db)
 
@@ -261,12 +261,13 @@ class AssignmentService:
             entity_id=row_id,
             recipient_user_id=row.created_by,
         )
+        instance_id = instance.id
         return self._repo.update(
             ctx,
             row_id,
             status=row.status,
             workflow_status=WorkflowStatus.IN_PROGRESS.value,
-            workflow_instance_id=instance.id,
+            workflow_instance_id=instance_id,
         )
 
     def approve(self, ctx: TenantContext, row_id: UUID, comments: str | None = None):

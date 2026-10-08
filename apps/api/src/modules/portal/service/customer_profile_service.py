@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.portal.domain.enums import PortalEntityType
 from modules.portal.models import PtCustomerProfile
 from modules.portal.repository.customer_profile_repository import CustomerProfileRepository
@@ -21,7 +21,7 @@ class CustomerProfileService:
         self._scope = PortalScopeValidator(db)
         self._numbers = PortalNumberService(db)
         self._engine = CustomerProfileEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.hr.adapters.master_data_port import HrMasterDataAdapter
 from modules.hr.domain.enums import EmploymentStatus, HrEntityType
 from modules.hr.domain.exceptions import InvalidEmploymentState
@@ -27,7 +27,7 @@ class EmploymentService:
         self._numbers = DocumentNumberService(db)
         self._engine = EmploymentEngine()
         self._master = HrMasterDataAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._db = db
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
@@ -355,15 +355,7 @@ class EmploymentService:
         )
 
     def _sync_master_status(self, ctx: TenantContext, employee_id: UUID, status: str) -> None:
-        try:
-            self._master.update_employee_status(ctx, employee_id, status)
-        except AttributeError:
-            # Adapter may not expose update yet - best-effort via ORM if present
-            from modules.master_data.models.employee import MasterEmployee
-
-            emp = self._db.get(MasterEmployee, employee_id)
-            if emp is not None:
-                emp.status = status
+        self._master.update_employee_status(ctx, employee_id, status)
 
     def _ensure_single_active(
         self,

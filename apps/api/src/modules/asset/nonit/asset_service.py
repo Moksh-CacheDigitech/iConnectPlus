@@ -23,8 +23,8 @@ from modules.asset.nonit.repository_timeline import NonItTimelineRepository
 from modules.asset.nonit.repository_type import NonItAssetTypeRepository
 from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
-from modules.master_data.models.employee import MasterEmployee
+from modules.platform.compat.audit_facade import PlatformAuditFacade
+from modules.master_data.published import EmployeeRead
 from modules.organization.models.branch import OrgBranch
 
 
@@ -37,7 +37,7 @@ class NonItAssetService:
         self._timeline = NonItTimelineRepository(db)
         self._codes = NonItCodeService(db)
         self._scope = AssetScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def _ensure_read(self, ctx: TenantContext) -> None:
         ensure_nonit_member_or_permission(ctx, self._db, "asset.nonit_asset:read")
@@ -664,10 +664,10 @@ class NonItAssetService:
             if mode == NonItAssignmentMode.LOCATION.value:
                 raise AppException("This asset type can only be assigned to a location")
             emp = self._db.scalar(
-                select(MasterEmployee).where(
-                    MasterEmployee.id == emp_id,
-                    MasterEmployee.company_id == company_id,
-                    MasterEmployee.is_deleted.is_(False),
+                select(EmployeeRead).where(
+                    EmployeeRead.id == emp_id,
+                    EmployeeRead.company_id == company_id,
+                    EmployeeRead.is_deleted.is_(False),
                 )
             )
             if emp is None:

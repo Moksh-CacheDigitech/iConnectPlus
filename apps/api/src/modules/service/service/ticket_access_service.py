@@ -11,7 +11,7 @@ from core.exceptions import ForbiddenException
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecUser
 from modules.foundation.service.rbac_service import RBACService
-from modules.master_data.models.employee import MasterEmployee
+from modules.master_data.published import EmployeeRead
 from modules.service.models import (
     SvcServiceRequest,
     SvcServiceRequestCoOwner,
@@ -60,10 +60,10 @@ class TicketAccessService:
         if user and user.employee_id:
             return user.employee_id
         emp = self._db.scalar(
-            select(MasterEmployee.id).where(
-                MasterEmployee.user_id == ctx.user_id,
-                MasterEmployee.tenant_id == ctx.tenant_id,
-                MasterEmployee.is_deleted.is_(False),
+            select(EmployeeRead.id).where(
+                EmployeeRead.user_id == ctx.user_id,
+                EmployeeRead.tenant_id == ctx.tenant_id,
+                EmployeeRead.is_deleted.is_(False),
             )
         )
         return emp

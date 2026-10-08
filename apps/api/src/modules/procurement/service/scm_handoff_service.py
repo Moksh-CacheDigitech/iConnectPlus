@@ -12,7 +12,7 @@ from core.exceptions import ConflictException, NotFoundException, ValidationExce
 from modules.crm.service.ovf_service import resolve_scm_hold_started_at
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.repository.user_repository import UserRepository
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.procurement.adapters.crm_adapter import ProcurementCrmAdapter
 from modules.procurement.adapters.master_data_adapter import (
     ProcurementMasterDataAdapter,
@@ -103,7 +103,7 @@ class ScmHandoffService:
         self._orders = OrderRepository(db)
         self._order_service = OrderService(db)
         self._scope = ProcurementScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._users = UserRepository(db)
 
     def _resolve_user_names(
@@ -2244,34 +2244,21 @@ class ScmHandoffService:
         }
 
     def list_ovf_attachments(self, ctx: TenantContext, ovf_id: UUID) -> list[dict]:
-        from modules.crm.models import CrmAttachment
-        from sqlalchemy import or_, select
-
         preview = self.get_ovf_preview(ctx, ovf_id)
         # Access already gated by OVF preview - include OVF + related sales
         # quote / opportunity files (sales attachments) for SCM + approval.
-        entity_filters = [
-            (CrmAttachment.entity_type == self.OVF_ATTACHMENT_ENTITY)
-            & (CrmAttachment.entity_id == ovf_id)
+        entity_filters: list[tuple[str, UUID]] = [
+            (self.OVF_ATTACHMENT_ENTITY, ovf_id),
         ]
         quote_id = preview.get("quote_id")
         opportunity_id = preview.get("opportunity_id")
         if quote_id is not None:
-            entity_filters.append(
-                (CrmAttachment.entity_type == "quote")
-                & (CrmAttachment.entity_id == quote_id)
-            )
+            entity_filters.append(("quote", quote_id))
         if opportunity_id is not None:
-            entity_filters.append(
-                (CrmAttachment.entity_type == "opportunity")
-                & (CrmAttachment.entity_id == opportunity_id)
-            )
-        stmt = select(CrmAttachment).where(
-            CrmAttachment.tenant_id == ctx.tenant_id,
-            CrmAttachment.is_deleted.is_(False),
-            or_(*entity_filters),
+            entity_filters.append(("opportunity", opportunity_id))
+        rows = ProcurementCrmAdapter(self._db).list_attachments(
+            ctx, entity_filters=entity_filters
         )
-        rows = list(self._db.scalars(stmt).all())
         seen: set = set()
         out: list[dict] = []
         for row in rows:
@@ -2311,19 +2298,13 @@ class ScmHandoffService:
         )
 
     def list_po_attachments(self, ctx: TenantContext, order_id: UUID) -> list[dict]:
-        from modules.crm.models import CrmAttachment
-        from sqlalchemy import select
-
         order = self._order_service.get_order(ctx, order_id)
-        stmt = select(CrmAttachment).where(
-            CrmAttachment.tenant_id == ctx.tenant_id,
-            CrmAttachment.entity_type == self.PO_ATTACHMENT_ENTITY,
-            CrmAttachment.entity_id == order_id,
-            CrmAttachment.is_deleted.is_(False),
+        rows = ProcurementCrmAdapter(self._db).list_attachments(
+            ctx,
+            entity_filters=[(self.PO_ATTACHMENT_ENTITY, order_id)],
+            company_id=getattr(order, "company_id", None),
         )
-        if getattr(order, "company_id", None) is not None:
-            stmt = stmt.where(CrmAttachment.company_id == order.company_id)
-        return [self._attachment_summary(row) for row in self._db.scalars(stmt).all()]
+        return [self._attachment_summary(row) for row in rows]
 
     def attach_po_document(
         self,
@@ -2394,19 +2375,10 @@ class ScmHandoffService:
 
         from core import object_storage
         from core.config import settings
-        from modules.crm.models import CrmAttachment
-        from modules.crm.models.ovf import CrmOvf
-        from sqlalchemy import select
-        from sqlalchemy import select as sa_select
 
+        crm = ProcurementCrmAdapter(self._db)
         # Load by tenant only - then authorize via OVF/PO ownership checks.
-        row = self._db.scalar(
-            select(CrmAttachment).where(
-                CrmAttachment.id == attachment_id,
-                CrmAttachment.tenant_id == ctx.tenant_id,
-                CrmAttachment.is_deleted.is_(False),
-            )
-        )
+        row = crm.get_attachment(ctx, attachment_id)
         if row is None:
             raise NotFoundException("Attachment not found")
         if row.entity_type == self.OVF_ATTACHMENT_ENTITY:
@@ -2414,16 +2386,9 @@ class ScmHandoffService:
         elif row.entity_type == self.PO_ATTACHMENT_ENTITY:
             self._order_service.get_order(ctx, row.entity_id)
         elif row.entity_type in {"quote", "opportunity"}:
-            # Sales pack files - authorize via any OVF handoff that references them.
-            ovf_stmt = sa_select(CrmOvf.id).where(
-                CrmOvf.tenant_id == ctx.tenant_id,
-                CrmOvf.is_deleted.is_(False),
+            linked_ovf_id = crm.find_ovf_id_for_sales_pack(
+                ctx, entity_type=row.entity_type, entity_id=row.entity_id
             )
-            if row.entity_type == "quote":
-                ovf_stmt = ovf_stmt.where(CrmOvf.quote_id == row.entity_id)
-            else:
-                ovf_stmt = ovf_stmt.where(CrmOvf.opportunity_id == row.entity_id)
-            linked_ovf_id = self._db.scalar(ovf_stmt.limit(1))
             if linked_ovf_id is None:
                 raise NotFoundException("Attachment not found")
             self.get_ovf_preview(ctx, linked_ovf_id)
@@ -2618,19 +2583,13 @@ class ScmHandoffService:
         if not batch_ids:
             return {}
         try:
-            from modules.crm.models import CrmAttachment
-            from modules.crm.repository.attachment_repository import AttachmentRepository
-            from sqlalchemy import select
-
-            repo = AttachmentRepository(self._db)
-            stmt = select(CrmAttachment).where(
-                CrmAttachment.entity_type == self.RECEIPT_BATCH_ATTACHMENT_ENTITY,
-                CrmAttachment.entity_id.in_(batch_ids),
-                CrmAttachment.is_deleted.is_(False),
+            rows = ProcurementCrmAdapter(self._db).list_attachments_by_entity_ids(
+                ctx,
+                entity_type=self.RECEIPT_BATCH_ATTACHMENT_ENTITY,
+                entity_ids=batch_ids,
             )
-            stmt = repo.apply_crm_filter(stmt, CrmAttachment, ctx, branch_scoped=True)
             out: dict[UUID, list[dict]] = defaultdict(list)
-            for row in self._db.scalars(stmt).all():
+            for row in rows:
                 out[row.entity_id].append(
                     {
                         "id": row.id,

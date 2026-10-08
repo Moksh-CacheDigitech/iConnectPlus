@@ -7,14 +7,14 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.hr.adapters.master_data_port import HrMasterDataAdapter
 from modules.hr.domain.kyc_validators import normalize_kyc_fields
 from modules.hr.repository.employee_profile_repository import EmployeeProfileRepository
 from modules.hr.schemas import EmployeeProfileResponse
 from modules.hr.service.engines import EmployeeProfileEngine
 from modules.hr.service.hr_scope_validator import HrScopeValidator
-from modules.master_data.models.employee import MasterEmployee
+from modules.master_data.published import EmployeeRead
 
 
 class EmployeeProfileService:
@@ -24,13 +24,13 @@ class EmployeeProfileService:
         self._scope = HrScopeValidator(db)
         self._engine = EmployeeProfileEngine()
         self._master = HrMasterDataAdapter(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def _enrich(self, row) -> EmployeeProfileResponse:
         emp = self._db.scalar(
-            select(MasterEmployee).where(
-                MasterEmployee.id == row.employee_id,
-                MasterEmployee.is_deleted.is_(False),
+            select(EmployeeRead).where(
+                EmployeeRead.id == row.employee_id,
+                EmployeeRead.is_deleted.is_(False),
             )
         )
         payload = EmployeeProfileResponse.model_validate(row)

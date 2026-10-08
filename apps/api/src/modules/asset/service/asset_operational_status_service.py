@@ -24,7 +24,7 @@ from modules.asset.service.engines.asset_operational_status_engine import (
 from modules.asset.service.operational_status_audit import log_operational_status_change
 from modules.asset.service.operational_status_validator import OperationalStatusValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 
 class AssetOperationalStatusService:
@@ -40,7 +40,7 @@ class AssetOperationalStatusService:
         self._repo = AssetRepository(db)
         self._engine = engine or AssetOperationalStatusEngine()
         self._validator = validator or OperationalStatusValidator(self._engine)
-        self._audit = audit or AuditService(db)
+        self._audit = audit or PlatformAuditFacade(db)
 
     def get_status(self, ctx: TenantContext, asset_id: UUID) -> str | None:
         return self._repo.get_operational_status(ctx, asset_id)

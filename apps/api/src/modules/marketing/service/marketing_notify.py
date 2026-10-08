@@ -7,9 +7,9 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.notification_service import NotificationService
 from modules.foundation.service.workflow_service import WorkflowService
 from modules.marketing.models import MktCampaign, MktContentRequest, MktGeneratedContent
+from modules.platform.compat.notify_facade import PlatformNotifyFacade
 
 WORKFLOW_CODE = "marketing.content_approval"
 
@@ -72,25 +72,17 @@ def notify_users(
     if not targets:
         return
     try:
-        service = NotificationService(db)
-        template = service.get_or_create_template(
-            tenant_id=ctx.tenant_id,
-            template_code=f"marketing.{event_type}",
-            template_name=title,
-            channel="in_app",
-            body_template=body,
-            subject_template=title,
-            created_by=ctx.user_id,
-        )
+        facade = PlatformNotifyFacade(db)
         for user_id in targets:
-            service.send(
+            facade.send(
                 tenant_id=ctx.tenant_id,
-                template_id=template.id,
+                template_code=f"marketing.{event_type}",
                 event_type=event_type,
                 recipient_user_id=user_id,
-                recipient_address=None,
                 payload_json={"title": title, "body": body, "href": href},
                 created_by=ctx.user_id,
+                channel="in_app",
+                idempotency_key=f"mkt:{event_type}:{user_id}:{href}",
             )
     except Exception:
         return

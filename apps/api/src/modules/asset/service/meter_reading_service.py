@@ -16,7 +16,7 @@ from modules.asset.service.asset_scope_validator import AssetScopeValidator
 from modules.asset.service.engines import AssetMeterReadingEngine
 from modules.asset.service.meter_reading_validator import MeterReadingValidator
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 ENTITY_AST_METER_READING = "ast_asset_meter_reading"
 
@@ -26,7 +26,7 @@ class MeterReadingService:
         self._repo = AssetMeterReadingRepository(db)
         self._scope = AssetScopeValidator(db)
         self._engine = AssetMeterReadingEngine()
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
         self._validator = MeterReadingValidator(db)
 
     def search(

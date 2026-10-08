@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, ConflictException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.hr.domain.enums import ShiftAssignmentStatus
 from modules.hr.domain.management_group_features import (
     DEFAULT_GROUP_SPECS,
@@ -35,7 +35,7 @@ class ManagementGroupService:
         self._shift_assignments = ShiftAssignmentRepository(db)
         self._employment = EmploymentRepository(db)
         self._scope = HrScopeValidator(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def feature_catalog(self) -> list[dict]:
         return catalog_for_api()

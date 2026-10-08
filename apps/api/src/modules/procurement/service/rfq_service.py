@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from core.exceptions import NotFoundException
 from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.procurement.domain.enums import ProcEntityType, RfqStatus
 from modules.procurement.domain.exceptions import InvalidDocumentState, SegregationOfDutiesError
 from modules.procurement.models.rfq import ProcRfqHeader
@@ -28,7 +28,7 @@ class RfqService:
         self._engine = RfqEngine()
         self._numbers = DocumentNumberService(db)
         self._governance = ProcurementGovernanceService(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def list_rfqs(self, ctx: TenantContext, company_id: UUID | None = None):
         cid = self._scope.resolve_company_id(ctx, company_id)

@@ -34,7 +34,7 @@ from modules.crm.service.crm_scope_validator import CrmScopeValidator
 from modules.crm.service.document_number_service import DocumentNumberService
 from modules.crm.service.engines import margin_engine, sales_blueprint_engine
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.master_data.service.employee_service import EmployeeService
 
 
@@ -159,7 +159,7 @@ class OvfService:
         self._attachments = AttachmentRepository(db)
         self._crm_admin = CrmModuleAdminService(db)
         self._visibility = CrmRecordVisibility(db)
-        self._audit = AuditService(db)
+        self._audit = PlatformAuditFacade(db)
 
     def resolve_customer_po_display_date(self, ctx: TenantContext, ovf: CrmOvf) -> date | None:
         """PO date on the OVF, or when the customer PO file was attached on the opportunity."""
