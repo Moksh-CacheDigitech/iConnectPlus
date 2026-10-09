@@ -24,29 +24,31 @@
 
 Use the semantic Tailwind classes (`bg-primary`, `text-muted-foreground`, …), never raw hex in module UI.
 
+Restored from ERP Core v1.19 / Sep 2026 (“Slate canvas + deep teal accents”).
+
 | Role | CSS Variable | Value | Usage |
 |------|--------------|-------|-------|
-| Background | `--background` | `oklch(0.985 0.004 220)` | Slate canvas behind workspace |
+| Background | `--background` | `oklch(0.985 0.004 220)` | Cool off-white canvas |
 | Foreground | `--foreground` | `oklch(0.22 0.02 240)` | Body text |
 | Card | `--card` | `oklch(0.995 0.002 220)` | Panels, tables, sections |
-| Primary | `--primary` | `oklch(0.42 0.08 210)` | Deep teal: primary actions, active states, links |
+| Primary | `--primary` | `oklch(0.42 0.08 210)` | Deep teal CTAs / links |
 | On Primary | `--primary-foreground` | `oklch(0.99 0.005 210)` | Text on primary |
 | Secondary | `--secondary` | `oklch(0.95 0.01 220)` | Secondary buttons, chips |
 | Muted | `--muted` | `oklch(0.955 0.008 220)` | Table heads, subtle fills |
-| Muted text | `--muted-foreground` | `oklch(0.5 0.02 240)` | Hints, metadata (meets 4.5:1 on card) |
-| Accent | `--accent` | `oklch(0.94 0.02 200)` | Hover fills, soft highlights |
+| Muted text | `--muted-foreground` | `oklch(0.5 0.02 240)` | Hints, metadata |
+| Accent | `--accent` | `oklch(0.94 0.02 200)` | Soft teal-mint highlights |
 | Destructive | `--destructive` | `oklch(0.55 0.2 25)` | Errors, destructive actions |
 | Border / Input | `--border`, `--input` | `oklch(0.9 0.01 220)` | Hairlines, inputs |
 | Ring | `--ring` | `oklch(0.55 0.08 210)` | Focus rings |
 | Charts | `--chart-1` … `--chart-5` | teal, green, slate-blue, amber, red-orange | Data series |
 
-**Sidebar (left rail) tokens:** `--sidebar` (`#000000`), `--sidebar-foreground`, `--sidebar-primary` (light teal), `--sidebar-accent`, `--sidebar-border`, `--sidebar-ring`. Every left sidebar uses these; no module may hardcode its own rail colors.
+**Sidebar (left rail) tokens:** same slate→teal family as KPI heroes, kept darker for chrome. Rail surface uses `--sidebar-hero-from/via/to` (`oklch(0.15→0.26)` at hues 235→205); solid fallback `--sidebar` `oklch(0.16 0.03 235)`. Light `--sidebar-foreground`, bright teal `--sidebar-primary` (`oklch(0.72 0.1 190)` for avatar / active glyph), `--sidebar-accent` for hover/active rows. KPI tiles (`--kpi-hero-*`) are the lighter siblings of this gradient. Every left sidebar uses these; no module may hardcode its own rail palette. Light translucent overlays (`bg-white/…`) on the rail are allowed for icon wells.
 
 **Status semantics (all modules):** success = emerald, warning/pending = amber, danger/overdue = red, info = sky. Soft surfaces use the `-50` tint with `-700/-800` text.
 
-**HR:** authenticated HR routes use the same enterprise teal tokens. The legacy HRMS purple (`#9B5BB8`) is allowed only inside `.hrms-theme` on the candidate onboarding portal, never on the shell or authenticated HR pages.
+**HR:** authenticated HR routes use the same light canvas + dark rail tokens. The legacy HRMS purple (`#9B5BB8`) is allowed only inside `.hrms-theme` on the candidate onboarding portal, never on the shell or authenticated HR pages.
 
-**Dark mode:** `.dark` tokens exist, but the authenticated app never defaults to dark.
+**Dark mode:** `.dark` tokens exist for a full dark canvas, but the authenticated app never defaults to dark mode. The left rail stays dark in light mode by design.
 
 ### Typography
 

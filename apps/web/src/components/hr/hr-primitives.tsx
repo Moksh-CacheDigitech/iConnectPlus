@@ -12,33 +12,32 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { dataTableClasses } from "@/components/shared/table-classes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { hrmsPastelSurface } from "@/config/hrms-theme";
 import { cn } from "@/lib/utils";
 
 export function HrStatusBadge({ status }: { status: string }) {
   const s = status.toLowerCase();
   const tone =
     s.includes("active") ||
-    s.includes("approved") ||
-    s.includes("accepted") ||
-    s.includes("present") ||
-    s.includes("paid") ||
-    s === "served"
+      s.includes("approved") ||
+      s.includes("accepted") ||
+      s.includes("present") ||
+      s.includes("paid") ||
+      s === "served"
       ? "border-transparent bg-hrms-mint text-hrms-success"
       : s.includes("pending") ||
-          s.includes("draft") ||
-          s.includes("submitted") ||
-          s.includes("open") ||
-          s.includes("onboarding") ||
-          s.includes("notice") ||
-          s.includes("serving")
+        s.includes("draft") ||
+        s.includes("submitted") ||
+        s.includes("open") ||
+        s.includes("onboarding") ||
+        s.includes("notice") ||
+        s.includes("serving")
         ? "border-transparent bg-hrms-peach text-hrms-warning"
         : s.includes("absent") ||
-            s.includes("reject") ||
-            s.includes("cancel") ||
-            s.includes("lost") ||
-            s.includes("not served") ||
-            s.includes("direct")
+          s.includes("reject") ||
+          s.includes("cancel") ||
+          s.includes("lost") ||
+          s.includes("not served") ||
+          s.includes("direct")
           ? "border-transparent bg-hrms-pink text-hrms-danger"
           : "border-transparent bg-hrms-blue text-hrms-info";
   return (
@@ -125,6 +124,9 @@ export function HrSection({
   );
 }
 
+const HR_KPI_HERO =
+  "relative overflow-hidden rounded-2xl border border-white/10 px-4 py-3 text-white shadow-sm bg-[linear-gradient(135deg,var(--kpi-hero-from)_0%,var(--kpi-hero-via)_45%,var(--kpi-hero-to)_100%)]";
+
 export function HrKpiGrid({
   items,
   className,
@@ -147,33 +149,30 @@ export function HrKpiGrid({
 
   return (
     <div className={cn("grid grid-cols-2 gap-3", desktopCols, className)}>
-      {items.map((item, index) => {
+      {items.map((item) => {
         const itemKey = item.key ?? item.label;
         const clickable = Boolean(onItemClick);
         const active = activeKey === itemKey;
-        const pastel = hrmsPastelSurface(index);
         const inner = (
           <>
-            <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            <span
+              className="pointer-events-none absolute -top-10 -right-8 size-28 rounded-full bg-white/10 blur-2xl"
+              aria-hidden
+            />
+            <p className="relative text-[11px] font-medium tracking-wide text-white/75 uppercase">
               {item.label}
             </p>
-            <p className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
+            <p className="relative mt-1 text-2xl font-semibold tracking-tight text-white tabular-nums">
               {item.value}
             </p>
             {item.hint ? (
-              <p className="mt-0.5 text-[11px] text-muted-foreground">{item.hint}</p>
+              <p className="relative mt-0.5 text-[11px] text-white/65">{item.hint}</p>
             ) : null}
           </>
         );
         if (!clickable) {
           return (
-            <div
-              key={itemKey}
-              className={cn(
-                "rounded-2xl border border-border px-4 py-3 shadow-sm",
-                pastel,
-              )}
-            >
+            <div key={itemKey} className={HR_KPI_HERO}>
               {inner}
             </div>
           );
@@ -184,11 +183,9 @@ export function HrKpiGrid({
             type="button"
             onClick={() => onItemClick?.(itemKey)}
             className={cn(
-              "cursor-pointer rounded-2xl border px-4 py-3 text-left shadow-sm transition-all",
-              pastel,
-              active
-                ? "border-foreground/20 ring-2 ring-primary"
-                : "border-border hover:brightness-[0.98]",
+              HR_KPI_HERO,
+              "cursor-pointer text-left transition-[filter,box-shadow] duration-200 hover:brightness-[1.06]",
+              active && "ring-2 ring-white/40 ring-offset-2 ring-offset-background",
             )}
           >
             {inner}

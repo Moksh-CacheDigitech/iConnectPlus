@@ -205,28 +205,28 @@ export function RecruitmentDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open requisitions"
           value={loading ? "-" : String(kpis.openRequisitions)}
           hint={`${kpis.openings} openings · ${data?.requisitions.length ?? 0} total`}
           icon={BriefcaseBusiness}
           tone={kpis.openRequisitions > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Pipeline applications"
           value={loading ? "-" : String(kpis.pipelineApps)}
           hint={`${data?.candidates.length ?? 0} candidates · ${data?.applications.length ?? 0} apps`}
           icon={UserRoundSearch}
           tone={kpis.pipelineApps > 0 ? "default" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Scheduled interviews"
           value={loading ? "-" : String(kpis.scheduledInterviews)}
           hint={`${countByStatus(data?.interviews ?? [], ["completed"])} completed · ${data?.interviews.length ?? 0} total`}
           icon={CalendarClock}
           tone={kpis.scheduledInterviews > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open offers"
           value={loading ? "-" : String(kpis.openOffers)}
           hint={`${formatInr(kpis.offerCtc)} CTC · ${countOpenDocs(data?.onboarding ?? [], ["completed", "cancelled", "failed"])} onboarding`}

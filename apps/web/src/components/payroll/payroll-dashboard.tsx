@@ -174,28 +174,28 @@ export function PayrollDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open periods"
           value={loading ? "-" : String(kpis.openPeriods)}
           hint={`${data?.periods.length ?? 0} periods · ${countByStatus(data?.periods ?? [], ["processing"])} processing`}
           icon={CalendarRange}
           tone={kpis.openPeriods > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open payroll runs"
           value={loading ? "-" : String(kpis.openRuns)}
           hint={`${formatInr(kpis.runNet)} net · ${data?.runs.length ?? 0} runs`}
           icon={Landmark}
           tone={kpis.openRuns > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Unpaid payslips"
           value={loading ? "-" : String(kpis.unpaidPayslips)}
           hint={`${formatInr(kpis.netPayTotal)} net salary · ${data?.payslips.length ?? 0} slips`}
           icon={Receipt}
           tone={kpis.unpaidPayslips > 0 ? "danger" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active loans"
           value={loading ? "-" : String(kpis.activeLoans)}
           hint={`${data?.loans.length ?? 0} loans · ${countByStatus(data?.bonuses ?? [], ["submitted", "approved"])} bonuses pending`}

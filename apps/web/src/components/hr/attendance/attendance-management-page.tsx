@@ -224,15 +224,17 @@ export function AttendanceManagementPage() {
                   onClick={() => selectStatCard(card.key)}
                   aria-pressed={active}
                   className={cn(
-                    "cursor-pointer rounded-xl border bg-card px-3 py-2.5 text-left shadow-sm transition-all duration-200",
-                    "hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                    active ? "border-primary/50 ring-1 ring-primary/20" : "border-border/70",
+                    "cursor-pointer rounded-xl border border-white/10 px-3 py-2.5 text-left text-white shadow-sm",
+                    "bg-[linear-gradient(135deg,var(--kpi-hero-from)_0%,var(--kpi-hero-via)_45%,var(--kpi-hero-to)_100%)]",
+                    "transition-[filter,box-shadow] duration-200 hover:brightness-[1.06] hover:shadow-md",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    active && "ring-2 ring-white/40 ring-offset-2 ring-offset-background",
                   )}
                 >
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <p className="text-[10px] font-medium tracking-wide text-white/75 uppercase">
                     {card.label}
                   </p>
-                  <p className="mt-0.5 text-xl font-semibold">{stats[card.key]}</p>
+                  <p className="mt-0.5 text-xl font-semibold text-white tabular-nums">{stats[card.key]}</p>
                 </button>
               );
             })}

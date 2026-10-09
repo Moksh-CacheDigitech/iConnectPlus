@@ -213,7 +213,7 @@ export function CrmDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <CrmKpiCard
+        <CrmKpiCard variant="hero" 
           label="Open leads"
           value={String(kpis.openLeads)}
           hint={`${data?.leads.length ?? 0} total`}
@@ -222,7 +222,7 @@ export function CrmDashboard() {
           href="/crm/leads"
           loading={loading}
         />
-        <CrmKpiCard
+        <CrmKpiCard variant="hero" 
           label="Open opportunities"
           value={String(kpis.openOpps)}
           hint={`${countByStatus(data?.opportunities ?? [], ["won"])} won`}
@@ -231,7 +231,7 @@ export function CrmDashboard() {
           href="/crm/opportunities"
           loading={loading}
         />
-        <CrmKpiCard
+        <CrmKpiCard variant="hero" 
           label="Win rate"
           value={`${kpis.winRate}%`}
           hint={`${formatInr(kpis.wonValue)} won value`}
@@ -239,7 +239,7 @@ export function CrmDashboard() {
           tone="success"
           loading={loading}
         />
-        <CrmKpiCard
+        <CrmKpiCard variant="hero" 
           label="Open tasks"
           value={String(kpis.pendingTasks)}
           hint={`${kpis.missedFollowups} missed follow-ups`}

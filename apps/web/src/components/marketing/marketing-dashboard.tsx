@@ -85,25 +85,25 @@ export function MarketingDashboard() {
       />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active campaigns"
           value={loading ? "-" : String(data.campaigns_active)}
           hint={`${data.campaigns_total} total`}
           icon={Megaphone}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Content requests"
           value={loading ? "-" : String(data.content_requests_total)}
           hint={`${data.content_drafts} drafts · ${data.content_approved} approved`}
           icon={Sparkles}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Upcoming calendar"
           value={loading ? "-" : String(data.calendar_upcoming)}
           hint={`${data.publish_pending} publish pending`}
           icon={CalendarDays}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Intelligence"
           value={loading ? "-" : String(data.research_reports)}
           hint={`${data.brand_voices} voices · ${data.competitors} competitors`}

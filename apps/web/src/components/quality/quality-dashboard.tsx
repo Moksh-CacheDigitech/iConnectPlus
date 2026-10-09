@@ -180,28 +180,28 @@ export function QualityDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open inspections"
           value={loading ? "-" : String(kpis.openInspections)}
           hint={`${allInspections.length} total · ${kpis.rejectedInspections} rejected/rework`}
           icon={ClipboardCheck}
           tone={kpis.openInspections > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open NCRs"
           value={loading ? "-" : String(kpis.openNcrs)}
           hint={`${data?.ncrs.length ?? 0} NCRs · ${countByStatus(data?.ncrs ?? [], ["submitted", "approved"])} in review`}
           icon={FileWarning}
           tone={kpis.openNcrs > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open CAPAs"
           value={loading ? "-" : String(kpis.openCapas)}
           hint={`${data?.capas.length ?? 0} CAPAs · ${countByStatus(data?.capas ?? [], ["in_progress"])} in progress`}
           icon={ShieldAlert}
           tone={kpis.openCapas > 0 ? "default" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Critical defects"
           value={loading ? "-" : String(kpis.criticalDefects)}
           hint={`${kpis.openDefects} open · ${data?.defects.length ?? 0} defect records`}

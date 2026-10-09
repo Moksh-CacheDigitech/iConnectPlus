@@ -145,10 +145,10 @@ export function MarketingCampaignHome({ campaignId }: { campaignId: string }) {
 
       {data ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <FinanceKpiCard label="In flight" value={String(data.health.content_in_flight ?? 0)} />
-          <FinanceKpiCard label="Approved" value={String(data.health.content_approved ?? 0)} />
-          <FinanceKpiCard label="Open tasks" value={String(data.health.open_tasks ?? 0)} />
-          <FinanceKpiCard label="Inbox" value={String(data.health.inbox_open ?? 0)} />
+          <FinanceKpiCard variant="hero"  label="In flight" value={String(data.health.content_in_flight ?? 0)} />
+          <FinanceKpiCard variant="hero"  label="Approved" value={String(data.health.content_approved ?? 0)} />
+          <FinanceKpiCard variant="hero"  label="Open tasks" value={String(data.health.open_tasks ?? 0)} />
+          <FinanceKpiCard variant="hero"  label="Inbox" value={String(data.health.inbox_open ?? 0)} />
         </div>
       ) : null}
 

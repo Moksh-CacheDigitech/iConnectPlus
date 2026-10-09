@@ -16,19 +16,20 @@ import {
 import { CRM_CHART_COLORS } from "@/components/crm/crm-dashboard-charts";
 import { cn } from "@/lib/utils";
 
+/** CRM-rail family (slate → deep teal) — not Apple blue/green. */
 const MODULE_COLORS = [
-  "#1D1D1F",
-  "#4B5563",
-  "#6B7280",
-  "#9CA3AF",
-  "#0071E3",
-  "#34C759",
+  "#1e2937", // near-rail slate
+  "#334155",
+  "#0f766e", // deep teal
+  "#0d9488",
+  "#14b8a6",
+  "#5eead4",
 ] as const;
 
 const HEALTH_COLORS = [
-  "#1D1D1F", // Live — black
+  "#0f766e", // Live — deep teal (CRM rail family)
   "#F59E0B", // Partial — alert amber
-  "#D2D2D7", // Offline — grey
+  "#94A3B8", // Offline — slate
 ] as const;
 
 type ChartTooltipProps = {

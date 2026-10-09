@@ -34,10 +34,10 @@
 
 ### Color Overrides
 
-- Neutral light shell (`--background` slate canvas, deep teal `--primary`)
-- Left rail uses `--sidebar*` tokens only (black rail, light-teal active glyph); HR included
+- Slate + deep teal shell (`--background` cool off-white, `--primary` `oklch(0.42 0.08 210)`)
+- Left rail uses `--sidebar*` tokens only (dark greenish-slate rail, bright teal avatar / active glyph); HR included
 - Status colors for operational states: success green, warning amber, danger red
-- Do **not** default to dark mode
+- Do **not** default the content canvas to dark mode (rail is dark by design)
 
 ### Component Overrides
 

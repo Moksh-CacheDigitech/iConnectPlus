@@ -58,7 +58,7 @@ function KpiCard({
   value,
   share,
   icon: Icon,
-  tone,
+  tone: _tone,
   loading,
   onClick,
 }: {
@@ -70,45 +70,44 @@ function KpiCard({
   loading?: boolean;
   onClick?: () => void;
 }) {
+  void _tone;
   const body = (
     <>
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {title}
-        </p>
-        <div
-          className={cn(
-            "flex size-8 shrink-0 items-center justify-center rounded-lg",
-            tone.iconWrap,
-          )}
-        >
+      <span
+        className="pointer-events-none absolute -top-10 -right-8 size-28 rounded-full bg-white/10 blur-2xl"
+        aria-hidden
+      />
+      <div className="relative flex items-start justify-between gap-2">
+        <p className="text-[11px] font-semibold tracking-wide text-white/75 uppercase">{title}</p>
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/15 text-white">
           <Icon className="size-3.5" aria-hidden />
         </div>
       </div>
-      <div>
+      <div className="relative">
         {loading ? (
-          <div className="h-8 w-16 animate-pulse rounded bg-muted/60" />
+          <div className="h-8 w-16 animate-pulse rounded bg-white/20 motion-reduce:animate-none" />
         ) : (
-          <p className="text-2xl font-semibold tabular-nums tracking-tight text-foreground">
-            {value}
-          </p>
+          <p className="text-2xl font-semibold tracking-tight text-white tabular-nums">{value}</p>
         )}
         {share != null && !loading ? (
           <div className="mt-2 space-y-1.5">
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted/60">
+            <div className="h-1.5 overflow-hidden rounded-full bg-white/20">
               <div
-                className={cn("h-full rounded-full transition-all duration-300", tone.bar)}
+                className="h-full rounded-full bg-white/80 transition-all duration-300"
                 style={{ width: `${Math.min(100, Math.max(0, share))}%` }}
               />
             </div>
-            <p className="text-[11px] text-muted-foreground">{share}% of total</p>
+            <p className="text-[11px] text-white/65">{share}% of total</p>
           </div>
         ) : !loading ? (
-          <p className="mt-2 text-[11px] text-muted-foreground">All Non-IT assets</p>
+          <p className="mt-2 text-[11px] text-white/65">All Non-IT assets</p>
         ) : null}
       </div>
     </>
   );
+
+  const shell =
+    "relative flex flex-col gap-3 overflow-hidden rounded-xl border border-white/10 p-4 text-white shadow-sm bg-[linear-gradient(135deg,var(--kpi-hero-from)_0%,var(--kpi-hero-via)_45%,var(--kpi-hero-to)_100%)]";
 
   if (onClick) {
     return (
@@ -116,9 +115,8 @@ function KpiCard({
         type="button"
         onClick={onClick}
         className={cn(
-          "flex flex-col gap-3 rounded-xl border border-border/70 bg-background/95 p-4 text-left shadow-sm transition-all duration-200",
-          "cursor-pointer hover:shadow-md",
-          tone.ring,
+          shell,
+          "cursor-pointer text-left transition-[filter,box-shadow] duration-200 hover:brightness-[1.06] hover:shadow-md",
         )}
       >
         {body}
@@ -126,11 +124,7 @@ function KpiCard({
     );
   }
 
-  return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border/70 bg-background/95 p-4 shadow-sm">
-      {body}
-    </div>
-  );
+  return <div className={shell}>{body}</div>;
 }
 
 function RankList({

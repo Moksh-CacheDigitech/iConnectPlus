@@ -157,28 +157,28 @@ export function SalesDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open quotations"
           value={loading ? "-" : String(kpis.openQuotes)}
           hint={`${formatInr(kpis.quoteValue)} total quote value`}
           icon={FileText}
           tone={kpis.openQuotes > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open orders"
           value={loading ? "-" : String(kpis.openOrders)}
           hint={`${formatInr(kpis.orderValue)} order book`}
           icon={ShoppingCart}
           tone="default"
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Invoice outstanding"
           value={loading ? "-" : formatInr(kpis.invoiceOutstanding)}
           hint={`${data?.invoices.length ?? 0} invoices · ${countByStatus(data?.invoices ?? [], ["posted", "approved", "paid"])} posted/paid`}
           icon={Receipt}
           tone={kpis.invoiceOutstanding > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Credit holds"
           value={loading ? "-" : String(kpis.creditHolds)}
           hint={`${data?.customerCredit.length ?? 0} credit accounts`}

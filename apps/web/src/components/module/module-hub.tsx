@@ -133,7 +133,7 @@ export function ModuleHub({ module }: ModuleHubProps) {
       />
 
       {kpiResources.length > 0 ? (
-        <KpiStrip>
+        <KpiStrip variant="hero">
           {kpiResources.map((resource) => {
             const count = data.counts[resource.key];
             return (

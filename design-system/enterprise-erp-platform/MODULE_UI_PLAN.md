@@ -12,10 +12,10 @@
 
 `apps/web/src/app/globals.css` is the single source of truth. `MASTER.md` mirrors it.
 
-- Light slate canvas, deep teal primary, black left rail with light-teal accents
+- Slate canvas + deep teal primary (`oklch(0.42 0.08 210)`), dark greenish-slate left rail (v1.19 / Sep 2026 theme)
 - Plus Jakarta Sans, `html { font-size: 90% }` density
 - Semantic Tailwind classes only (`bg-card`, `text-muted-foreground`, `border-border`, `bg-sidebar`, …)
-- HR uses the same teal tokens. HRMS purple is scoped to the `.hrms-theme` candidate portal.
+- HR uses the same light canvas + dark rail tokens. HRMS purple is scoped to the `.hrms-theme` candidate portal.
 
 `apps/web/design-system/` is retired; it only points back here.
 
@@ -82,7 +82,7 @@ Every authenticated page is one of these four. Vertical rhythm is `space-y-4` (`
 ### A. Module hub (landing)
 
 1. `PageHeader` + primary actions
-2. KPI strip: up to 4 `KpiCard`s backed by live aggregates
+2. KPI strip: up to 4 `KpiCard`s — default `hero` surface (CRM-rail teal/slate gradient). Use `variant="panel"` only for dense report toolbars that need a light card. Never Email-Intelligence blue→cyan.
 3. Attention / recent work (`DataTable` or `WorkspaceSection` list)
 4. Links into sub-areas (grouped, no API paths)
 
