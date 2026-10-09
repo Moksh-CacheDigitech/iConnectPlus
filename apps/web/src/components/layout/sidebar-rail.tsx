@@ -102,7 +102,8 @@ export function SidebarRail({
         data-erp-primary-sidebar
         data-collapsed={collapsed ? "true" : "false"}
         className={cn(
-          "fixed top-0 left-0 z-20 flex h-dvh flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
+          "fixed top-0 left-0 z-20 flex h-dvh flex-col overflow-hidden border-r border-sidebar-border text-sidebar-foreground",
+          "bg-[linear-gradient(165deg,var(--sidebar-hero-from)_0%,var(--sidebar-hero-via)_45%,var(--sidebar-hero-to)_100%)]",
           "transform-gpu transition-[width] duration-[320ms] ease-[cubic-bezier(0.32,0.72,0,1)] will-change-[width] [backface-visibility:hidden] motion-reduce:transition-none",
           collapsed ? "w-[72px]" : "w-[260px]",
           className,

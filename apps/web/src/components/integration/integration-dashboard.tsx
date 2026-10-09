@@ -177,28 +177,28 @@ export function IntegrationDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active systems"
           value={loading ? "-" : String(kpis.activeSystems)}
           hint={`${data?.systems.length ?? 0} systems · ${data?.credentials.length ?? 0} credentials`}
           icon={Server}
           tone={kpis.activeSystems > 0 ? "success" : "default"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active connectors"
           value={loading ? "-" : String(kpis.activeConnectors)}
           hint={`${data?.connectors.length ?? 0} connectors · ${data?.oauthClients.length ?? 0} OAuth`}
           icon={Cable}
           tone={kpis.activeConnectors > 0 ? "success" : "default"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active webhooks"
           value={loading ? "-" : String(kpis.activeWebhooks)}
           hint={`${data?.webhooks.length ?? 0} webhooks · ${data?.events.length ?? 0} events`}
           icon={Webhook}
           tone={kpis.activeWebhooks > 0 ? "default" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Sync jobs"
           value={loading ? "-" : String(kpis.syncJobs)}
           hint={`${countByStatus(data?.syncJobs ?? [], ["succeeded"])} succeeded · ${data?.deadLetters.length ?? 0} DLQ`}

@@ -58,7 +58,7 @@ Every module shares:
 |----------|--------|
 | Architecture | Modular monolith · Clean Architecture · DDD (ADR-001) |
 | Backend | Python 3.13+ · FastAPI · SQLAlchemy 2 · Alembic · Pydantic v2 · Celery (ADR-002) |
-| Frontend | Next.js 16+ · TypeScript · Tailwind · ShadCN · Zod |
+| Frontend | Next.js 16+ · TypeScript · Tailwind · ShadCN · Zod · white + emerald UI theme |
 | OLTP | PostgreSQL |
 | Cache / broker | Redis · RabbitMQ |
 | Objects | MinIO (local/on-prem) · AWS S3 (cloud) |
@@ -268,7 +268,7 @@ Aligned with [ERP Architecture Lock Report v1.1](../05_ARCHITECTURE_LOCK/ERP_Arc
 | Field encryption | `EncryptedText` / `FIELD_ENCRYPTION_KEYS` | Tax / KYC / bank / integration secrets |
 | Orchestration today | Docker Compose · Coolify on EC2 | Primary SaaS shipping path |
 | Orchestration target | Kubernetes Ready · Terraform Ready | Tier D / EARB when readiness met |
-| Design system | `design-system/enterprise-erp-platform/MASTER.md` (+ `iconnect-plus/`) | Data-dense · Swiss minimal · UI/UX Pro Max |
+| Design system | `design-system/enterprise-erp-platform/MASTER.md` (+ `iconnect-plus/`) | Data-dense · Swiss minimal · white canvas + emerald primary · UI/UX Pro Max |
 
 ### 5.2 Repository layout
 

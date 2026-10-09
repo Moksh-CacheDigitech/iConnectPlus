@@ -176,28 +176,28 @@ export function ManufacturingDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open production orders"
           value={loading ? "-" : String(kpis.openOrders)}
           hint={`${formatQty(kpis.plannedQty)} planned qty · ${data?.orders.length ?? 0} total`}
           icon={Factory}
           tone={kpis.openOrders > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open WIP value"
           value={loading ? "-" : formatInr(kpis.wipValue)}
           hint={`${countByStatus(data?.wip ?? [], ["open"])} open · ${data?.wip.length ?? 0} balances`}
           icon={Layers}
           tone={kpis.wipValue > 0 ? "default" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Scrap quantity"
           value={loading ? "-" : formatQty(kpis.scrapQty)}
           hint={`${data?.scrap.length ?? 0} scrap docs · ${countByStatus(data?.variances ?? [], ["open"])} open variances`}
           icon={Trash2}
           tone={kpis.scrapQty > 0 ? "danger" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Idle machines"
           value={loading ? "-" : String(kpis.idleMachines)}
           hint={`${kpis.runningMachines} running · ${data?.machines.length ?? 0} machines`}

@@ -192,28 +192,28 @@ export function AssetsDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active assets"
           value={loading ? "-" : String(kpis.activeAssets)}
           hint={`${formatInr(kpis.bookValue)} book · ${data?.assets.length ?? 0} register`}
           icon={Package}
           tone={kpis.activeAssets > 0 ? "default" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open maintenance"
           value={loading ? "-" : String(kpis.openMaintenance)}
           hint={`${countByStatus(data?.maintenances ?? [], ["scheduled", "in_progress"])} in flight · ${data?.maintenances.length ?? 0} jobs`}
           icon={Wrench}
           tone={kpis.openMaintenance > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Pending depreciation"
           value={loading ? "-" : String(kpis.pendingDepreciation)}
           hint={`${formatInr(kpis.depAmount)} amount · ${data?.depreciations.length ?? 0} runs`}
           icon={Scale}
           tone={kpis.pendingDepreciation > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open disposals"
           value={loading ? "-" : String(kpis.openDisposals)}
           hint={`${countByStatus(data?.assets ?? [], ["disposed", "written_off"])} disposed assets · ${data?.disposals.length ?? 0} docs`}

@@ -141,10 +141,10 @@ export function ModuleSidebar({
   const warmHandlers = (item: ModuleNavItem): WarmHandlers =>
     onItemWarm
       ? {
-          onPointerDown: () => onItemWarm(item),
-          onMouseEnter: () => onItemWarm(item),
-          onFocus: () => onItemWarm(item),
-        }
+        onPointerDown: () => onItemWarm(item),
+        onMouseEnter: () => onItemWarm(item),
+        onFocus: () => onItemWarm(item),
+      }
       : {};
 
   const brand = (
@@ -201,7 +201,7 @@ export function ModuleSidebar({
               placeholder={searchPlaceholder}
               aria-label={`Search ${title} panes`}
               autoComplete="off"
-              className="h-9 w-full rounded-xl border border-sidebar-border bg-white/5 pr-3 pl-8 text-[13px] text-sidebar-foreground transition-colors duration-150 outline-none placeholder:text-sidebar-foreground/55 focus-visible:border-sidebar-ring/60 focus-visible:ring-2 focus-visible:ring-sidebar-ring/35 [&::-webkit-search-cancel-button]:hidden"
+              className="h-9 w-full rounded-xl border border-sidebar-border/80 bg-white/5 pr-3 pl-8 text-[13px] text-sidebar-foreground transition-colors duration-150 outline-none placeholder:text-sidebar-foreground/55 focus-visible:border-sidebar-ring/60 focus-visible:bg-white/[0.08] focus-visible:ring-2 focus-visible:ring-sidebar-ring/35 [&::-webkit-search-cancel-button]:hidden"
             />
           </div>
         </div>
@@ -336,7 +336,9 @@ export function ModuleSidebar({
           size="sm"
           className={cn(
             "cursor-pointer bg-transparent text-sidebar-foreground/70 shadow-none transition-colors duration-200 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:scale-100",
-            collapsed ? "size-10 rounded-full bg-white/[0.08] p-0 hover:bg-white/[0.14]" : "w-full justify-center",
+            collapsed
+              ? "size-10 rounded-full bg-white/[0.08] p-0 hover:bg-white/[0.14]"
+              : "w-full justify-center",
           )}
           onClick={toggle}
           aria-label={collapsed ? `Expand ${title} sidebar` : `Collapse ${title} sidebar`}

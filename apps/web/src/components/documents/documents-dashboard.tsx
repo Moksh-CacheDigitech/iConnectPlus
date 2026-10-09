@@ -177,28 +177,28 @@ export function DocumentsDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Library documents"
           value={loading ? "-" : String(kpis.libraryDocs)}
           hint={`${data?.folders.length ?? 0} folders · ${countOpenDocs(data?.documents ?? [], ["archived", "disposed", "cancelled"])} active`}
           icon={FolderOpen}
           tone={kpis.libraryDocs > 0 ? "default" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Pending approvals"
           value={loading ? "-" : String(kpis.pendingApprovals)}
           hint={`${data?.approvals.length ?? 0} approvals · ${countByStatus(data?.workflows ?? [], ["active"])} workflows`}
           icon={CheckSquare}
           tone={kpis.pendingApprovals > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active shares"
           value={loading ? "-" : String(kpis.activeShares)}
           hint={`${data?.shares.length ?? 0} shares · ${data?.permissions.length ?? 0} ACL rows`}
           icon={Share2}
           tone={kpis.activeShares > 0 ? "default" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Archives"
           value={loading ? "-" : String(kpis.archives)}
           hint={`${data?.retentionPolicies.length ?? 0} retention · ${data?.templates.length ?? 0} templates`}

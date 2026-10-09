@@ -59,7 +59,7 @@
 }
 
 :root {
-  /* Slate canvas + deep teal accents - enterprise ERP */
+  /* Slate canvas + deep teal accents — enterprise ERP (restored from v1.19 / Sep 2026). */
   --background: oklch(0.985 0.004 220);
   --foreground: oklch(0.22 0.02 240);
   --card: oklch(0.995 0.002 220);
@@ -84,14 +84,22 @@
   --chart-4: oklch(0.7 0.08 80);
   --chart-5: oklch(0.6 0.1 30);
   --radius: 0.7rem;
-  --sidebar: #000000;
+  /* Left rail — same slate→teal family as KPI heroes, kept darker for chrome. */
+  --sidebar: oklch(0.16 0.03 235);
   --sidebar-foreground: oklch(0.92 0.01 220);
   --sidebar-primary: oklch(0.72 0.1 190);
-  --sidebar-primary-foreground: oklch(0.18 0.03 220);
-  --sidebar-accent: oklch(0.22 0.01 240);
+  --sidebar-primary-foreground: oklch(0.16 0.03 235);
+  --sidebar-accent: oklch(0.24 0.045 220);
   --sidebar-accent-foreground: oklch(0.96 0.01 210);
-  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: oklch(0.65 0.08 190);
+  --sidebar-hero-from: oklch(0.15 0.03 235);
+  --sidebar-hero-via: oklch(0.2 0.05 218);
+  --sidebar-hero-to: oklch(0.26 0.07 205);
+  /* Dashboard KPI hero tiles — lighter siblings of the rail gradient. */
+  --kpi-hero-from: oklch(0.24 0.03 235);
+  --kpi-hero-via: oklch(0.33 0.055 218);
+  --kpi-hero-to: oklch(0.42 0.08 205);
   --hrms-card-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.05);
 }
 
@@ -114,14 +122,20 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 12%);
   --ring: oklch(0.65 0.08 190);
-  --sidebar: #000000;
+  --sidebar: oklch(0.12 0.03 235);
   --sidebar-foreground: oklch(0.92 0.01 220);
   --sidebar-primary: oklch(0.72 0.1 190);
-  --sidebar-primary-foreground: oklch(0.18 0.03 220);
-  --sidebar-accent: oklch(0.22 0.01 240);
+  --sidebar-primary-foreground: oklch(0.12 0.03 235);
+  --sidebar-accent: oklch(0.2 0.045 220);
   --sidebar-accent-foreground: oklch(0.96 0.01 210);
-  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-border: oklch(1 0 0 / 8%);
   --sidebar-ring: oklch(0.65 0.08 190);
+  --sidebar-hero-from: oklch(0.11 0.03 235);
+  --sidebar-hero-via: oklch(0.16 0.05 218);
+  --sidebar-hero-to: oklch(0.22 0.07 205);
+  --kpi-hero-from: oklch(0.2 0.03 235);
+  --kpi-hero-via: oklch(0.3 0.055 218);
+  --kpi-hero-to: oklch(0.48 0.09 198);
 }
 
 @layer base {
@@ -163,7 +177,7 @@
   }
 
   ::selection {
-    background: oklch(0.42 0.08 210 / 18%);
+    background: oklch(0.52 0.135 160 / 18%);
   }
 }
 
@@ -184,7 +198,7 @@
 
   .erp-scroll {
     scrollbar-width: thin;
-    scrollbar-color: oklch(0.75 0.02 220 / 60%) transparent;
+    scrollbar-color: oklch(0.75 0.03 160 / 55%) transparent;
   }
 
   .erp-scroll::-webkit-scrollbar {
@@ -197,13 +211,13 @@
   }
 
   .erp-scroll::-webkit-scrollbar-thumb {
-    background: oklch(0.75 0.02 220 / 50%);
+    background: oklch(0.75 0.03 160 / 45%);
     border-radius: 999px;
     transition: background-color 150ms ease;
   }
 
   .erp-scroll::-webkit-scrollbar-thumb:hover {
-    background: oklch(0.65 0.03 220 / 80%);
+    background: oklch(0.6 0.08 160 / 70%);
   }
 }
 

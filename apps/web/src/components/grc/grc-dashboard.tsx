@@ -178,28 +178,28 @@ export function GrcDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open risks"
           value={loading ? "-" : String(kpis.openRisks)}
           hint={`${data?.risks.length ?? 0} risks · ${data?.riskCategories.length ?? 0} categories`}
           icon={ShieldAlert}
           tone={kpis.openRisks > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active controls"
           value={loading ? "-" : String(kpis.activeControls)}
           hint={`${data?.controls.length ?? 0} controls · ${data?.controlTests.length ?? 0} tests`}
           icon={ShieldCheck}
           tone={kpis.activeControls > 0 ? "success" : "default"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Planned audits"
           value={loading ? "-" : String(kpis.plannedAudits)}
           hint={`${data?.audits.length ?? 0} audits · ${data?.auditPlans.length ?? 0} plans`}
           icon={ClipboardCheck}
           tone={kpis.plannedAudits > 0 ? "default" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open CAPAs"
           value={loading ? "-" : String(kpis.openCapas)}
           hint={`${data?.correctiveActions.length ?? 0} CAPA · ${data?.incidents.length ?? 0} incidents`}

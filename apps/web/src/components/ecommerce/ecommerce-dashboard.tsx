@@ -191,28 +191,28 @@ export function EcommerceDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active stores"
           value={loading ? "-" : String(kpis.activeStores)}
           hint={`${data?.stores.length ?? 0} stores · ${data?.channels.length ?? 0} channels`}
           icon={Store}
           tone={kpis.activeStores > 0 ? "success" : "default"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open carts"
           value={loading ? "-" : String(kpis.openCarts)}
           hint={`${data?.carts.length ?? 0} carts · ${data?.listings.length ?? 0} listings`}
           icon={Package}
           tone={kpis.openCarts > 0 ? "default" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open orders"
           value={loading ? "-" : String(kpis.processingOrders)}
           hint={`${data?.orders.length ?? 0} orders · ${countByStatus(data?.payments ?? [], ["captured", "paid"])} paid`}
           icon={ShoppingBag}
           tone={kpis.processingOrders > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Shipments"
           value={loading ? "-" : String(kpis.shipments)}
           hint={`${countByStatus(data?.shipments ?? [], ["shipped", "delivered"])} in transit · ${data?.returns.length ?? 0} returns`}

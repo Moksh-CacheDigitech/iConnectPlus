@@ -213,47 +213,32 @@ export function HrExecutiveDashboardPage() {
     value: number | undefined;
     icon: typeof Users;
     href?: string;
-    tint: string;
-    iconBg: string;
-    iconColor: string;
   }[] = [
-    {
-      label: "Headcount",
-      value: stats?.totalEmployees,
-      icon: Users,
-      href: "/hr/workforce",
-      tint: "bg-hrms-lavender",
-      iconBg: "bg-primary/15",
-      iconColor: "text-primary",
-    },
-    {
-      label: "On leave today",
-      value: stats?.onLeave,
-      icon: CalendarDays,
-      href: "/hr/leave?view=on-leave-today",
-      tint: "bg-hrms-mint",
-      iconBg: "bg-[#01BD7E]/15",
-      iconColor: "text-[#01BD7E]",
-    },
-    {
-      label: "Open roles",
-      value: stats?.openPositions,
-      icon: Briefcase,
-      href: "/hr/recruitment",
-      tint: "bg-hrms-peach",
-      iconBg: "bg-[#FF8904]/15",
-      iconColor: "text-[#FF8904]",
-    },
-    {
-      label: "Onboarding in process",
-      value: stats?.onboardingInProcess,
-      icon: UserPlus,
-      href: "/hr/onboarding",
-      tint: "bg-hrms-blue",
-      iconBg: "bg-[#155DFD]/15",
-      iconColor: "text-[#155DFD]",
-    },
-  ];
+      {
+        label: "Headcount",
+        value: stats?.totalEmployees,
+        icon: Users,
+        href: "/hr/workforce",
+      },
+      {
+        label: "On leave today",
+        value: stats?.onLeave,
+        icon: CalendarDays,
+        href: "/hr/leave?view=on-leave-today",
+      },
+      {
+        label: "Open roles",
+        value: stats?.openPositions,
+        icon: Briefcase,
+        href: "/hr/recruitment",
+      },
+      {
+        label: "Onboarding in process",
+        value: stats?.onboardingInProcess,
+        icon: UserPlus,
+        href: "/hr/onboarding",
+      },
+    ];
 
   const departmentWise = charts?.departmentWise ?? [];
   const locationWise = charts?.locationWise ?? [];
@@ -427,24 +412,24 @@ export function HrExecutiveDashboardPage() {
                 const card = (
                   <div
                     className={cn(
-                      "flex items-center gap-3 rounded-2xl border border-border px-4 py-3.5 shadow-[var(--hrms-card-shadow)] transition-all duration-200",
-                      k.tint,
-                      k.href && "hover:border-primary/30 hover:shadow-md",
+                      "relative flex items-center gap-3 overflow-hidden rounded-2xl border border-white/10 px-4 py-3.5 text-white shadow-sm",
+                      "bg-[linear-gradient(135deg,var(--kpi-hero-from)_0%,var(--kpi-hero-via)_45%,var(--kpi-hero-to)_100%)]",
+                      k.href &&
+                      "transition-[filter,box-shadow] duration-200 hover:brightness-[1.06] hover:shadow-md",
                     )}
                   >
                     <span
-                      className={cn(
-                        "flex size-11 shrink-0 items-center justify-center rounded-xl",
-                        k.iconBg,
-                      )}
-                    >
-                      <Icon className={cn("size-5", k.iconColor)} />
+                      className="pointer-events-none absolute -top-8 -right-6 size-24 rounded-full bg-white/10 blur-2xl"
+                      aria-hidden
+                    />
+                    <span className="relative flex size-11 shrink-0 items-center justify-center rounded-xl bg-white/15 text-white">
+                      <Icon className="size-5" />
                     </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                    <div className="relative min-w-0 flex-1">
+                      <p className="text-[10px] font-semibold tracking-wide text-white/75 uppercase">
                         {k.label}
                       </p>
-                      <p className="mt-0.5 text-2xl font-semibold tabular-nums leading-none text-foreground">
+                      <p className="mt-0.5 text-2xl leading-none font-semibold text-white tabular-nums">
                         {loading ? "-" : (k.value ?? 0).toLocaleString("en-IN")}
                       </p>
                     </div>

@@ -198,28 +198,28 @@ export function PortalDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active accounts"
           value={loading ? "-" : String(kpis.activeAccounts)}
           hint={`${data?.accounts.length ?? 0} accounts · ${data?.profiles.length ?? 0} profiles`}
           icon={Users}
           tone={kpis.activeAccounts > 0 ? "success" : "default"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active sessions"
           value={loading ? "-" : String(kpis.activeSessions)}
           hint={`${data?.sessions.length ?? 0} sessions · ${data?.loginAudits.length ?? 0} audits`}
           icon={UserCircle}
           tone={kpis.activeSessions > 0 ? "default" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open tickets"
           value={loading ? "-" : String(kpis.openTickets)}
           hint={`${data?.tickets.length ?? 0} tickets · ${data?.threads.length ?? 0} threads`}
           icon={Ticket}
           tone={kpis.openTickets > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Service requests"
           value={loading ? "-" : String(kpis.openRequests)}
           hint={`${data?.serviceRequests.length ?? 0} requests · ${data?.orderViews.length ?? 0} order views`}

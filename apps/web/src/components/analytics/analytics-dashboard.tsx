@@ -173,28 +173,28 @@ export function AnalyticsDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Dashboards"
           value={loading ? "-" : String(kpis.dashboards)}
           hint={`${data?.widgets.length ?? 0} widgets · ${countByStatus(data?.dashboards ?? [], ["published", "active"])} live`}
           icon={LayoutDashboard}
           tone={kpis.dashboards > 0 ? "default" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active KPIs"
           value={loading ? "-" : String(kpis.activeKpis)}
           hint={`${data?.kpis.length ?? 0} KPIs · ${data?.metrics.length ?? 0} metrics`}
           icon={Target}
           tone={kpis.activeKpis > 0 ? "success" : "default"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active alerts"
           value={loading ? "-" : String(kpis.activeAlerts)}
           hint={`${data?.alertRules.length ?? 0} rules · ${data?.subscriptions.length ?? 0} subscriptions`}
           icon={Bell}
           tone={kpis.activeAlerts > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Reports"
           value={loading ? "-" : String(kpis.reports)}
           hint={`${data?.schedules.length ?? 0} schedules · ${data?.datasets.length ?? 0} datasets`}

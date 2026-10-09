@@ -1,6 +1,6 @@
 # iConnect Plus — System Overview (as built)
 
-**Updated:** 2026-10-08  
+**Updated:** 2026-10-09  
 **Baseline:** Architecture Lock v1.1 · ADR-001 · ADR-002  
 **Addendum:** `docs/05_ARCHITECTURE_LOCK/ERP_Architecture_Addendum_v1.2.md`
 
@@ -26,6 +26,7 @@ Browser (Next.js) ──HTTPS──► FastAPI (/api/v1)
 | Layer | Technology |
 |-------|------------|
 | Web | Next.js 16+, TypeScript, Tailwind, ShadCN |
+| UI theme | White canvas + emerald primary (`≈ #059669`); white left rail — tokens in `apps/web/src/app/globals.css`, mirrored by `design-system/enterprise-erp-platform/MASTER.md` |
 | API | Python 3.13+, FastAPI, SQLAlchemy 2, Alembic, Pydantic v2 |
 | Jobs | Celery + Celery Beat, RabbitMQ broker, Redis backend |
 | OLTP | PostgreSQL |

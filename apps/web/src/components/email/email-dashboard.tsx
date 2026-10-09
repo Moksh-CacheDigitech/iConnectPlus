@@ -194,28 +194,28 @@ export function EmailDashboard() {
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Delivered"
           value={String(counts?.delivered ?? 0)}
           hint="Successful Graph sends"
           icon={CheckCircle2}
           tone="success"
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Failed"
           value={String(counts?.failed ?? 0)}
           hint="Delivery failures"
           icon={XCircle}
           tone="danger"
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Queued"
           value={String(counts?.queued ?? 0)}
           hint="Pending events"
           icon={MailWarning}
           tone="warning"
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Templates"
           value={String(counts?.email_templates ?? 0)}
           hint="Email channel templates"

@@ -34,7 +34,6 @@ export function AppSidebar() {
   const {
     user,
     loading: userLoading,
-    signedIn,
     moduleKeys,
     adminModuleKeys,
     status: authStatus,
@@ -83,32 +82,27 @@ export function AppSidebar() {
     [filtered],
   );
 
+  const brand = (
+    <div className="flex items-center gap-2">
+      <AppLogo size={28} className="shrink-0" />
+      <div className="min-w-0">
+        <p className="truncate text-xs font-semibold text-sidebar-foreground">{env.appName}</p>
+        <p className="truncate text-[10px] text-sidebar-foreground/60">
+          {sessionPending
+            ? "Loading session…"
+            : authStatus === "error"
+              ? "Session retry needed"
+              : "23 modules · live API"}
+        </p>
+      </div>
+    </div>
+  );
+
   return (
     <SidebarRail collapsed={collapsed} layoutCollapsed={layoutCollapsed} aria-label="ERP modules">
       {/* Fill the animated rail — icons must live in the visible width (not a clipped 260px column). */}
       <div className="flex h-full w-full flex-col">
-        <div
-          className={cn(
-            "flex items-center py-5",
-            collapsed ? "justify-center px-0" : "gap-3 px-4",
-          )}
-        >
-          <AppLogo size={36} className="shrink-0" />
-          {!collapsed ? (
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium tracking-tight text-sidebar-foreground">
-                {env.appName}
-              </p>
-              <p className="truncate text-[11px] text-sidebar-foreground/55">
-                {sessionPending
-                  ? "Loading session…"
-                  : authStatus === "error"
-                    ? "Session retry needed"
-                    : "23 modules · live API"}
-              </p>
-            </div>
-          ) : null}
-        </div>
+        <SidebarAccountSection collapsed={collapsed}>{brand}</SidebarAccountSection>
 
         {!collapsed ? (
           <div
@@ -119,49 +113,49 @@ export function AppSidebar() {
               transitionTimingFunction: EASE,
             }}
           >
-          <div className="min-h-0 overflow-hidden">
-            <label className="sr-only" htmlFor="sidebar-module-search">
-              Search modules
-            </label>
-            <div
-              className={cn(
-                "group/search relative flex h-10 items-center gap-2 rounded-xl border border-sidebar-border/80",
-                "bg-sidebar-accent/35 px-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]",
-                "focus-within:border-sidebar-ring/60 focus-within:bg-sidebar-accent/55 focus-within:ring-2 focus-within:ring-sidebar-ring/35",
-              )}
-            >
-              <Search
-                className="size-[18px] shrink-0 text-sidebar-foreground/70"
-                strokeWidth={2}
-                aria-hidden
-              />
-              <input
-                id="sidebar-module-search"
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search modules…"
-                autoComplete="off"
-                tabIndex={collapsed ? -1 : 0}
+            <div className="min-h-0 overflow-hidden">
+              <label className="sr-only" htmlFor="sidebar-module-search">
+                Search modules
+              </label>
+              <div
                 className={cn(
-                  "min-w-0 flex-1 bg-transparent text-[13px] font-medium tracking-tight text-sidebar-foreground",
-                  "placeholder:font-normal placeholder:text-sidebar-foreground/45",
-                  "outline-none ring-0",
-                  "[&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden",
+                  "group/search relative flex h-10 items-center gap-2 rounded-xl border border-sidebar-border/80",
+                  "bg-white/5 px-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]",
+                  "focus-within:border-sidebar-ring/60 focus-within:bg-white/[0.08] focus-within:ring-2 focus-within:ring-sidebar-ring/35",
                 )}
-              />
-              {query ? (
-                <button
-                  type="button"
-                  onClick={() => setQuery("")}
-                  className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-foreground/55 transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                  aria-label="Clear search"
-                >
-                  <X className="size-3.5" strokeWidth={2} />
-                </button>
-              ) : null}
+              >
+                <Search
+                  className="size-[18px] shrink-0 text-sidebar-foreground/70"
+                  strokeWidth={2}
+                  aria-hidden
+                />
+                <input
+                  id="sidebar-module-search"
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search modules…"
+                  autoComplete="off"
+                  tabIndex={collapsed ? -1 : 0}
+                  className={cn(
+                    "min-w-0 flex-1 bg-transparent text-[13px] font-medium tracking-tight text-sidebar-foreground",
+                    "placeholder:font-normal placeholder:text-sidebar-foreground/45",
+                    "outline-none ring-0",
+                    "[&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden",
+                  )}
+                />
+                {query ? (
+                  <button
+                    type="button"
+                    onClick={() => setQuery("")}
+                    className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-foreground/55 transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                    aria-label="Clear search"
+                  >
+                    <X className="size-3.5" strokeWidth={2} />
+                  </button>
+                ) : null}
+              </div>
             </div>
-          </div>
           </div>
         ) : null}
 
@@ -295,45 +289,38 @@ export function AppSidebar() {
           )}
         </nav>
 
-        <div className="mt-auto border-t border-sidebar-border">
-          {signedIn ? (
-            <SidebarAccountSection
-              collapsed={collapsed}
-              className={cn(collapsed ? "flex justify-center px-0 py-3" : "px-3 py-3")}
-            />
-          ) : null}
-          <div
+        <div
+          className={cn(
+            "mt-auto border-t border-sidebar-border p-2.5",
+            collapsed && "flex justify-center",
+          )}
+        >
+          <Button
+            variant="ghost"
+            size="sm"
             className={cn(
-              signedIn && "border-t border-sidebar-border/80",
-              collapsed ? "flex justify-center p-2.5" : "p-2.5",
+              "cursor-pointer bg-transparent text-sidebar-foreground/70 shadow-none",
+              "transition-colors duration-200",
+              "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+              "aria-expanded:bg-transparent aria-expanded:text-sidebar-foreground/70",
+              "active:scale-100",
+              collapsed
+                ? "size-10 rounded-full bg-white/[0.08] p-0 hover:bg-white/[0.14] aria-expanded:bg-white/[0.08]"
+                : "w-full justify-center",
             )}
+            onClick={toggleCollapsed}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
           >
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "bg-transparent text-sidebar-foreground/70 shadow-none",
-                "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                "aria-expanded:bg-transparent aria-expanded:text-sidebar-foreground/70",
-                "active:scale-100",
-                collapsed
-                  ? "size-10 rounded-full bg-white/[0.08] p-0 hover:bg-white/[0.14] aria-expanded:bg-white/[0.08]"
-                  : "w-full justify-center",
-              )}
-              onClick={toggleCollapsed}
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-expanded={!collapsed}
-            >
-              <ChevronLeft
-                className="size-4 shrink-0 motion-reduce:!transition-none"
-                style={{
-                  transform: collapsed ? "rotate(180deg)" : "rotate(0deg)",
-                  transition: `transform ${WIDTH_MS}ms ${EASE}`,
-                }}
-              />
-              {!collapsed ? <span className="ml-1.5 text-xs">Collapse</span> : null}
-            </Button>
-          </div>
+            <ChevronLeft
+              className="size-4 shrink-0 motion-reduce:!transition-none"
+              style={{
+                transform: collapsed ? "rotate(180deg)" : "rotate(0deg)",
+                transition: `transform ${WIDTH_MS}ms ${EASE}`,
+              }}
+            />
+            {!collapsed ? <span className="ml-1.5 text-xs">Collapse</span> : null}
+          </Button>
         </div>
       </div>
     </SidebarRail>

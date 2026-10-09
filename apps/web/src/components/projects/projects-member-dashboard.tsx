@@ -21,8 +21,6 @@ import { siteDeliveryTypeLabel } from "@/components/projects/projects-domain";
 import {
   PROJECTS_CHART_COLORS,
   ProjectsCountBarChart,
-  ProjectsHeadlineBand,
-  ProjectsHeadlineStat,
   ProjectsIconBadge,
   ProjectsKpiCard,
   ProjectsListPanel,
@@ -194,37 +192,47 @@ export function ProjectsMemberDashboard() {
         </ProjectsWarnBanner>
       ) : null}
 
-      <ProjectsHeadlineBand>
-        <div className="grid divide-y divide-white/10 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
-          <ProjectsHeadlineStat
-            label="Open jobs"
-            value={String(openJobs.length)}
-            sub="Assigned to you"
-            loading={loading}
-          />
-          <ProjectsHeadlineStat
-            label="Ready to open"
-            value={String(readyJobs.length)}
-            sub="Can work now"
-            loading={loading}
-          />
-          <ProjectsHeadlineStat
-            label="Waiting"
-            value={String(waitingJobs.length)}
-            sub="Prior step not done"
-            loading={loading}
-          />
-          <ProjectsHeadlineStat
-            label="Completed"
-            value={String(completedJobs.length)}
-            sub="Finished steps"
-            loading={loading}
-          />
-        </div>
-      </ProjectsHeadlineBand>
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+        <ProjectsKpiCard
+          variant="hero"
+          label="Open jobs"
+          value={String(openJobs.length)}
+          hint="Assigned to you"
+          icon={Briefcase}
+          loading={loading}
+        />
+        <ProjectsKpiCard
+          variant="hero"
+          label="Ready to open"
+          value={String(readyJobs.length)}
+          hint="Can work now"
+          icon={MapPin}
+          tone={readyJobs.length > 0 ? "success" : "default"}
+          loading={loading}
+        />
+        <ProjectsKpiCard
+          variant="hero"
+          label="Waiting"
+          value={String(waitingJobs.length)}
+          hint="Prior step not done"
+          icon={Lock}
+          tone={waitingJobs.length > 0 ? "warning" : "default"}
+          loading={loading}
+        />
+        <ProjectsKpiCard
+          variant="hero"
+          label="Completed"
+          value={String(completedJobs.length)}
+          hint="Finished steps"
+          icon={CheckCircle2}
+          tone="success"
+          loading={loading}
+        />
+      </div>
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
         <ProjectsKpiCard
+          variant="hero"
           label="My Jobs"
           value={String(openJobs.length)}
           hint="Active assigned steps"
@@ -233,6 +241,7 @@ export function ProjectsMemberDashboard() {
           loading={loading}
         />
         <ProjectsKpiCard
+          variant="hero"
           label="Ready now"
           value={String(readyJobs.length)}
           hint="Open these first"
@@ -242,6 +251,7 @@ export function ProjectsMemberDashboard() {
           loading={loading}
         />
         <ProjectsKpiCard
+          variant="hero"
           label="Follow-ups"
           value={String(openFollowUps)}
           hint="Awaiting your reply"
@@ -251,6 +261,7 @@ export function ProjectsMemberDashboard() {
           loading={loading}
         />
         <ProjectsKpiCard
+          variant="hero"
           label="My projects"
           value={String(
             new Set([...openJobs, ...completedJobs].map((j) => j.project_id)).size,

@@ -151,28 +151,28 @@ export function FinanceDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open journals"
           value={loading ? "-" : String(kpis.openJournals)}
           hint={`${kpis.postedJournals} posted / approved`}
           icon={BookOpen}
           tone={kpis.openJournals > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="AR outstanding"
           value={loading ? "-" : formatInr(kpis.arOutstanding)}
           hint={`${data?.ar.length ?? 0} customer documents`}
           icon={Receipt}
           tone="default"
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="AP outstanding"
           value={loading ? "-" : formatInr(kpis.apOutstanding)}
           hint={`${data?.ap.length ?? 0} vendor documents`}
           icon={Wallet}
           tone="default"
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open periods"
           value={loading ? "-" : String(kpis.openPeriods)}
           hint={`${kpis.accounts} COA accounts`}

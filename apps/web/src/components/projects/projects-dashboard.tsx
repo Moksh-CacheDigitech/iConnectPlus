@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  Building2,
   Cable,
   CheckCircle2,
   ClipboardCheck,
@@ -24,8 +25,6 @@ import {
   ProjectsActivityTile,
   ProjectsCountBarChart,
   ProjectsDonutChart,
-  ProjectsHeadlineBand,
-  ProjectsHeadlineStat,
   ProjectsIconBadge,
   ProjectsKpiCard,
   ProjectsListPanel,
@@ -268,37 +267,46 @@ function ProjectsAdminDashboard() {
         </div>
       ) : null}
 
-      <ProjectsHeadlineBand>
-        <div className="grid divide-y divide-white/10 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
-          <ProjectsHeadlineStat
-            label="Total sites"
-            value={String(kpis.total)}
-            sub={`${kpis.projects} projects`}
-            loading={loading}
-          />
-          <ProjectsHeadlineStat
-            label="In delivery"
-            value={String(kpis.active)}
-            sub="Not yet completed"
-            loading={loading}
-          />
-          <ProjectsHeadlineStat
-            label="Need owners"
-            value={String(kpis.needsOwners)}
-            sub="Assign Survey owner"
-            loading={loading}
-          />
-          <ProjectsHeadlineStat
-            label="Completed"
-            value={String(kpis.completed)}
-            sub="Handover finished"
-            loading={loading}
-          />
-        </div>
-      </ProjectsHeadlineBand>
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+        <ProjectsKpiCard
+          variant="hero"
+          label="Total sites"
+          value={String(kpis.total)}
+          hint={`${kpis.projects} projects`}
+          icon={Building2}
+          loading={loading}
+        />
+        <ProjectsKpiCard
+          variant="hero"
+          label="In delivery"
+          value={String(kpis.active)}
+          hint="Not yet completed"
+          icon={Cable}
+          loading={loading}
+        />
+        <ProjectsKpiCard
+          variant="hero"
+          label="Need owners"
+          value={String(kpis.needsOwners)}
+          hint="Assign Survey owner"
+          icon={Users}
+          tone={kpis.needsOwners > 0 ? "warning" : "default"}
+          loading={loading}
+        />
+        <ProjectsKpiCard
+          variant="hero"
+          label="Completed"
+          value={String(kpis.completed)}
+          hint="Handover finished"
+          icon={CheckCircle2}
+          tone="success"
+          loading={loading}
+        />
+      </div>
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
         <ProjectsKpiCard
+          variant="hero"
           label="Survey queue"
           value={String(kpis.inSurvey)}
           hint="Sites in Survey"
@@ -307,6 +315,7 @@ function ProjectsAdminDashboard() {
           loading={loading}
         />
         <ProjectsKpiCard
+          variant="hero"
           label="SCM / Logistics"
           value={String(kpis.inScm)}
           hint="Material movement"
@@ -315,6 +324,7 @@ function ProjectsAdminDashboard() {
           loading={loading}
         />
         <ProjectsKpiCard
+          variant="hero"
           label="Installation"
           value={String(kpis.inInstall)}
           hint="Install & configure"
@@ -323,6 +333,7 @@ function ProjectsAdminDashboard() {
           loading={loading}
         />
         <ProjectsKpiCard
+          variant="hero"
           label="Acceptance"
           value={String(kpis.inAcceptance)}
           hint="Handover / HW-AT"

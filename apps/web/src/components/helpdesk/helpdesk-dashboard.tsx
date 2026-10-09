@@ -169,28 +169,28 @@ export function HelpdeskDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open tickets"
           value={loading ? "-" : String(kpis.openTickets)}
           hint={`${data?.tickets.length ?? 0} tickets · ${countByStatus(data?.tickets ?? [], ["in_progress", "assigned"])} active`}
           icon={Ticket}
           tone={kpis.openTickets > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active assignments"
           value={loading ? "-" : String(kpis.activeAssignments)}
           hint={`${data?.assignments.length ?? 0} assignments · ${countByStatus(data?.teams ?? [], ["active"])} teams`}
           icon={UserCheck}
           tone={kpis.activeAssignments > 0 ? "default" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open escalations"
           value={loading ? "-" : String(kpis.openEscalations)}
           hint={`${countByStatus(data?.slas ?? [], ["active"])} active SLAs · ${data?.escalations.length ?? 0} total`}
           icon={LifeBuoy}
           tone={kpis.openEscalations > 0 ? "danger" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Published articles"
           value={loading ? "-" : String(kpis.publishedArticles)}
           hint={`${data?.articles.length ?? 0} articles · ${data?.knowledgeBases.length ?? 0} KB spaces`}

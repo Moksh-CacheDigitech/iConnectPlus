@@ -74,23 +74,23 @@ export function MarketingOperationsBoard() {
         }
       />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Workload score"
           value={loading ? "-" : String(data.company.workload_score)}
           icon={Gauge}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Active tasks"
           value={loading ? "-" : String(data.company.active_tasks)}
           icon={Activity}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Delayed"
           value={loading ? "-" : String(data.company.delayed_tasks)}
           tone={data.company.delayed_tasks > 0 ? "warning" : "default"}
           icon={AlertTriangle}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Utilization"
           value={loading ? "-" : `${data.company.utilization_pct}%`}
           icon={Users}

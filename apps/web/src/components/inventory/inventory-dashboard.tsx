@@ -174,28 +174,28 @@ export function InventoryDashboard() {
       ) : null}
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="On hand qty"
           value={loading ? "-" : formatQty(kpis.onHand)}
           hint={`${kpis.skuCount} stock balances`}
           icon={Package}
           tone="default"
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Available qty"
           value={loading ? "-" : formatQty(kpis.available)}
           hint={`${formatQty(kpis.reserved)} reserved`}
           icon={Scale}
           tone="success"
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Open transfers"
           value={loading ? "-" : String(kpis.openTransfers)}
           hint={`${kpis.openAdjustments} open adjustments`}
           icon={Shuffle}
           tone={kpis.openTransfers > 0 ? "warning" : "success"}
         />
-        <FinanceKpiCard
+        <FinanceKpiCard variant="hero" 
           label="Valuation layers"
           value={loading ? "-" : formatInr(kpis.valuation)}
           hint={`${data?.valuation.length ?? 0} cost layers`}

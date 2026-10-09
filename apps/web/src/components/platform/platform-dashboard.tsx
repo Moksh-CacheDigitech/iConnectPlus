@@ -572,29 +572,31 @@ export function PlatformDashboard() {
       ) : null}
 
       <div
-        className="home-rise grid overflow-hidden rounded-2xl border border-[#e8e8ed] bg-white sm:grid-cols-2 lg:grid-cols-4"
+        className="home-rise grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
         style={{ animationDelay: "100ms" }}
       >
-        {kpis.map((stat, i) => (
+        {kpis.map((stat) => (
           <div
             key={stat.label}
-            className={cn(
-              "min-w-0 px-5 py-5",
-              i > 0 && "border-t border-[#e8e8ed] sm:border-t-0 sm:border-l",
-              i === 2 && "lg:border-l",
-            )}
+            className="relative min-w-0 overflow-hidden rounded-xl border border-white/10 px-5 py-5 text-white shadow-sm bg-[linear-gradient(135deg,var(--kpi-hero-from)_0%,var(--kpi-hero-via)_45%,var(--kpi-hero-to)_100%)]"
           >
-            <p className="text-[11px] font-medium tracking-[0.08em] text-[#86868b] uppercase">
+            <span
+              className="pointer-events-none absolute -top-10 -right-8 size-28 rounded-full bg-white/10 blur-2xl"
+              aria-hidden
+            />
+            <p className="relative text-[11px] font-medium tracking-[0.08em] text-white/75 uppercase">
               {stat.label}
             </p>
             {showLoading ? (
-              <div className="mt-2 h-8 w-24 animate-pulse rounded bg-[#f5f5f7]" />
+              <div className="relative mt-2 h-8 w-24 animate-pulse rounded bg-white/20 motion-reduce:animate-none" />
             ) : (
-              <p className="mt-1.5 truncate text-[1.75rem] font-semibold tracking-[-0.04em] text-[#1d1d1f] tabular-nums">
+              <p className="relative mt-1.5 truncate text-[1.75rem] font-semibold tracking-[-0.04em] text-white tabular-nums">
                 {stat.value}
               </p>
             )}
-            {stat.hint ? <p className="mt-1 text-[11px] text-[#86868b]">{stat.hint}</p> : null}
+            {stat.hint ? (
+              <p className="relative mt-1 text-[11px] text-white/65">{stat.hint}</p>
+            ) : null}
           </div>
         ))}
       </div>
@@ -633,7 +635,7 @@ export function PlatformDashboard() {
             {(data?.moduleActivity ?? []).slice(0, 6).map((row, index) => {
               const total = (data?.moduleActivity ?? []).reduce((sum, r) => sum + r.count, 0) || 1;
               const pct = Math.round((row.count / total) * 100);
-              const hues = ["#1d1d1f", "#4b5563", "#6b7280", "#9ca3af", "#0071e3", "#34c759"];
+              const hues = ["#1e2937", "#334155", "#0f766e", "#0d9488", "#14b8a6", "#5eead4"];
               return (
                 <li key={row.name} className="flex items-center justify-between gap-2 text-[11px]">
                   <span className="flex min-w-0 items-center gap-1.5 truncate text-[#6e6e73]">

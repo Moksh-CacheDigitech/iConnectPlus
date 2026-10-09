@@ -2,13 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { RefreshCw, TrendingUp } from "lucide-react";
+import { Clock3, IndianRupee, RefreshCw, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import {
   ProjectsErrorBanner,
-  ProjectsHeadlineBand,
-  ProjectsHeadlineStat,
+  ProjectsKpiCard,
   ProjectsListPanel,
   ProjectsListToolbar,
   ProjectsPage,
@@ -159,34 +158,41 @@ export function ProjectProfitabilityPage() {
 
       {error ? <ProjectsErrorBanner>{error}</ProjectsErrorBanner> : null}
 
-      <ProjectsHeadlineBand>
-        <div className="grid divide-y divide-white/10 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
-          <ProjectsHeadlineStat
-            label="Budget"
-            value={formatInr(totals.budget)}
-            sub={`${rows.length} projects`}
-            loading={loading}
-          />
-          <ProjectsHeadlineStat
-            label="Actual cost"
-            value={formatInr(totals.cost)}
-            sub={`${totals.burnPct}% consumed`}
-            loading={loading}
-          />
-          <ProjectsHeadlineStat
-            label="Variance"
-            value={formatInr(totals.variance)}
-            sub={`${totals.overrun} project(s) over budget`}
-            loading={loading}
-          />
-          <ProjectsHeadlineStat
-            label="Hours logged"
-            value={totals.hours.toFixed(1)}
-            sub="From approved and draft entries"
-            loading={loading}
-          />
-        </div>
-      </ProjectsHeadlineBand>
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+        <ProjectsKpiCard
+          variant="hero"
+          label="Budget"
+          value={formatInr(totals.budget)}
+          hint={`${rows.length} projects`}
+          icon={Wallet}
+          loading={loading}
+        />
+        <ProjectsKpiCard
+          variant="hero"
+          label="Actual cost"
+          value={formatInr(totals.cost)}
+          hint={`${totals.burnPct}% consumed`}
+          icon={IndianRupee}
+          loading={loading}
+        />
+        <ProjectsKpiCard
+          variant="hero"
+          label="Variance"
+          value={formatInr(totals.variance)}
+          hint={`${totals.overrun} project(s) over budget`}
+          icon={totals.variance < 0 ? TrendingDown : TrendingUp}
+          tone={totals.overrun > 0 ? "warning" : "success"}
+          loading={loading}
+        />
+        <ProjectsKpiCard
+          variant="hero"
+          label="Hours logged"
+          value={totals.hours.toFixed(1)}
+          hint="From approved and draft entries"
+          icon={Clock3}
+          loading={loading}
+        />
+      </div>
 
       <ProjectsListPanel>
         <ProjectsListToolbar

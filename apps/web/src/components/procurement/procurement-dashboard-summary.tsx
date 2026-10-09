@@ -107,62 +107,37 @@ function ChartCardHeader({
   );
 }
 
-const TINT: Record<Tint, { card: string; icon: string }> = {
-  amber: {
-    card: "border-amber-200/80 bg-amber-50/80",
-    icon: "bg-amber-100 text-amber-800",
-  },
-  sky: {
-    card: "border-sky-200/80 bg-sky-50/80",
-    icon: "bg-sky-100 text-sky-800",
-  },
-  teal: {
-    card: "border-teal-200/80 bg-teal-50/70",
-    icon: "bg-teal-100 text-teal-800",
-  },
-  emerald: {
-    card: "border-emerald-200/80 bg-emerald-50/80",
-    icon: "bg-emerald-100 text-emerald-800",
-  },
-  orange: {
-    card: "border-orange-200/80 bg-orange-50/80",
-    icon: "bg-orange-100 text-orange-800",
-  },
-};
-
 function KpiCard({
   label,
   value,
   href,
   icon: Icon,
-  tint,
   loading,
 }: SummaryCard & { loading?: boolean }) {
-  const styles = TINT[tint];
   return (
     <Link
       href={href}
       className={cn(
-        "group flex min-h-[5.25rem] cursor-pointer flex-col rounded-[1.25rem] border p-3.5 text-foreground shadow-sm transition-[box-shadow,transform,opacity] duration-200",
-        "hover:shadow-md motion-safe:hover:-translate-y-0.5",
+        "group relative flex min-h-[5.25rem] cursor-pointer flex-col overflow-hidden rounded-[1.25rem] border border-white/10 p-3.5 text-white shadow-sm",
+        "bg-[linear-gradient(135deg,var(--kpi-hero-from)_0%,var(--kpi-hero-via)_45%,var(--kpi-hero-to)_100%)]",
+        "transition-[box-shadow,filter] duration-200 hover:brightness-[1.06] hover:shadow-md",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-        styles.card,
+        "motion-reduce:transition-none",
       )}
     >
-      <div className="flex items-center gap-2.5">
-        <p className="min-w-0 flex-1 truncate text-[13px] font-semibold uppercase tracking-wide text-foreground">
+      <span
+        className="pointer-events-none absolute -top-10 -right-8 size-28 rounded-full bg-white/10 blur-2xl"
+        aria-hidden
+      />
+      <div className="relative flex items-center gap-2.5">
+        <p className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-wide text-white/80 uppercase">
           {label}
         </p>
-        <span
-          className={cn(
-            "inline-flex size-10 shrink-0 items-center justify-center rounded-xl",
-            styles.icon,
-          )}
-        >
+        <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/15 text-white">
           <Icon className="size-5" aria-hidden />
         </span>
       </div>
-      <p className="mt-2.5 text-[1.55rem] font-light leading-none tracking-tight text-foreground/85 tabular-nums">
+      <p className="relative mt-2.5 text-[1.55rem] leading-none font-light tracking-tight text-white tabular-nums">
         {loading ? "-" : value}
       </p>
     </Link>
