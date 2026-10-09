@@ -2,6 +2,7 @@ import { listSheetTrackers } from "@/services/sheet-tracker-service";
 import { getAccessToken } from "@/lib/auth";
 import { cachedFetch, invalidateClientCache, peekCachedValue } from "@/lib/client-cache";
 import { isInlineSafeAttachment, triggerBlobDownload } from "@/lib/safe-attachment";
+import { ApiClientError, apiClient, resourceService } from "@/services/api-client";
 import { env } from "@/utils/env";
 
 /** Short TTL so tab switches reuse in-flight / recent list responses. */
