@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from modules.crm.adapters.user_lookup_adapter import CrmUserLookupAdapter
+from modules.foundation.service.notification_service import NotificationService
 from modules.platform.compat.notify_facade import PlatformNotifyFacade
 
 
