@@ -10,58 +10,65 @@ alwaysApply: true
 | Remote | URL | Role |
 |--------|-----|------|
 | `origin` | `https://github.com/ronanop/enterprise-erp.git` | **Primary** — fetch + default push |
-| `iconnectplus` | `https://github.com/Moksh-CacheDigitech/iConnectPlus.git` | **Always-synced mirror** of origin |
-| `iconnectplus-erp` | `https://github.com/moksh-sharma/iConnectPlus-ERP.git` | **Always-synced mirror** of origin (code only) |
+| `iconnectplus` | `https://github.com/Moksh-CacheDigitech/iConnectPlus.git` | **Always-synced mirror** of origin (real history) |
+| `iconnectplus-erp` | `https://github.com/moksh-sharma/iConnectPlus-ERP.git` | **Always-synced owner-only mirror** (rewritten authors) |
 | `gitlab` | `https://172.16.200.77/cachedigitech/cache-erp-vapt-31-aug.git` | Mirror — update only on explicit request |
 
-GitHub `origin` is the source of truth. Both `iconnectplus` and `iconnectplus-erp` must stay matched to origin on every push.
+GitHub `origin` is the source of truth.
 
-Local `origin` is configured with **three push URLs** (primary + both iConnectPlus mirrors), so `git push origin …` updates all three. The named `iconnectplus` and `iconnectplus-erp` remotes remain available for explicit sync.
+Local `origin` has **two** push URLs (primary + `iconnectplus`). **`iconnectplus-erp` is not on origin pushurl** — it must be synced with the owner-rewrite script so GitHub Contributors on that repo stay as the owner only.
 
-**`iconnectplus-erp` sync scope:** git refs / code only. Do **not** sync collaborators, teams, webhooks, or other GitHub repo settings from origin onto this mirror. Keep collaborators cleared on that repo unless the user explicitly asks otherwise.
+**`iconnectplus-erp` rules**
+
+- Sync **code/refs only** — never sync collaborators, teams, or GitHub settings from origin.
+- Every commit on that remote must show owner: **Moksh Sharma** `<moksh-sharma@users.noreply.github.com>`.
+- Always sync via `scripts/sync-iconnectplus-erp.ps1` (rewrites author/committer on a temp branch, then `--force` pushes to `iconnectplus-erp`). Do **not** plain `git push iconnectplus-erp` (that would restore multi-author history).
 
 ## When the user asks to push / push to git
 
-1. Push to **origin** (this also syncs both iConnectPlus mirrors via extra push URLs).
-2. If dual/triple push URLs are missing or a mirror did not update, also push the same ref to `iconnectplus` and/or `iconnectplus-erp`.
-3. Do **not** push or sync GitLab unless they also asked to sync GitLab.
+1. Push to **origin** (also syncs `iconnectplus` via extra push URL).
+2. If the iConnectPlus org mirror did not update, also: `git push iconnectplus HEAD:<branch>`.
+3. Sync the personal ERP mirror with the owner rewrite:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-iconnectplus-erp.ps1
+```
+
+4. Do **not** push or sync GitLab unless they also asked to sync GitLab.
 
 ```bash
 git push -u origin HEAD
-# Fallback if a mirror did not update with origin:
+# Fallback org mirror:
 git push iconnectplus HEAD:<branch>
-git push iconnectplus-erp HEAD:<branch>
+# Personal owner-only mirror (required on every push-to-git):
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-iconnectplus-erp.ps1
 ```
 
-## When the user asks to sync iconnectplus / iconnectplus-erp / keep iConnectPlus synced
-
-1. Ensure local matches what should be on origin (push to `origin` first if needed).
-2. Push the same refs to `iconnectplus` and/or `iconnectplus-erp` as requested (or both when they said keep iConnectPlus synced).
+## When the user asks to sync iconnectplus / iconnectplus-erp
 
 ```bash
 git push origin HEAD
 git push iconnectplus HEAD:<branch>
-git push iconnectplus-erp HEAD:<branch>
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-iconnectplus-erp.ps1
 ```
 
 ## When the user asks to sync gitlab
-
-1. Ensure local branch matches what should be on GitHub (push to `origin` first if there are unpushed commits).
-2. Push the same refs to GitLab so it matches GitHub.
 
 ```bash
 git push origin HEAD
 git push gitlab HEAD:<branch> --force-with-lease
 ```
 
-Prefer matching the current branch name on both remotes. Use `--force-with-lease` only when histories diverged and the user intends the source remote to overwrite the target.
+Prefer matching the current branch name. Use `--force-with-lease` / force only when the user intends overwrite (the ERP owner-mirror sync uses `--force` by design).
 
 This GitLab host uses a self-signed cert. Local repo already has `http.https://172.16.200.77/.sslVerify=false`. Auth requires a GitLab username + PAT (or SSH key); do not prompt for passwords in non-interactive sessions — ask the user for a token/URL with credentials if push fails.
 
 ## Do not
 
 - Skip syncing `iconnectplus` or `iconnectplus-erp` when pushing to origin / "push to git"
-- Sync collaborators / GitHub settings onto `iconnectplus-erp` (code-only mirror)
+- Plain-push multi-author history to `iconnectplus-erp` (always use `scripts/sync-iconnectplus-erp.ps1`)
+- Sync collaborators / GitHub settings onto `iconnectplus-erp`
+- Rewrite authors on `origin` or `iconnectplus` unless the user explicitly asks
 - Auto-sync GitLab on every GitHub push
 - Treat GitLab or either iConnectPlus mirror as primary fetch when the user said "push to git"
 - Sync the other direction (GitLab → GitHub, or mirrors → origin) unless the user explicitly asks
