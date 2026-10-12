@@ -1,0 +1,1550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>iConnect Plus - Module Features (as built)</title>
+  <style>
+@page {
+  size: A4;
+  margin: 14mm 12mm 16mm 12mm;
+}
+* { box-sizing: border-box; }
+html, body {
+  font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+  font-size: 10pt;
+  line-height: 1.4;
+  color: #0f172a;
+  background: #fff;
+  margin: 0;
+  padding: 0;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+h1 {
+  font-size: 20pt;
+  color: #0f172a;
+  border-bottom: 2px solid #1e3a5f;
+  padding-bottom: 8px;
+  margin: 0 0 14px;
+  page-break-after: avoid;
+}
+h2 {
+  font-size: 14pt;
+  color: #1e3a5f;
+  margin: 22px 0 10px;
+  padding-top: 4px;
+  border-top: 1px solid #e2e8f0;
+  page-break-after: avoid;
+  break-after: avoid-page;
+}
+h3 {
+  font-size: 11.5pt;
+  color: #334155;
+  margin: 16px 0 8px;
+  page-break-after: avoid;
+  break-after: avoid-page;
+}
+h4 {
+  font-size: 10.5pt;
+  color: #475569;
+  margin: 12px 0 6px;
+  page-break-after: avoid;
+}
+p, li { orphans: 3; widows: 3; }
+ul, ol { padding-left: 1.6em; margin: 6px 0 10px; }
+ol { padding-left: 2.2em; list-style-position: outside; }
+li { margin: 2px 0; }
+ol li { padding-left: 0.35em; }
+table {
+  width: 100% !important;
+  max-width: 100% !important;
+  border-collapse: collapse;
+  margin: 10px 0 14px;
+  font-size: 8pt;
+  table-layout: fixed;
+  page-break-inside: auto;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; break-inside: avoid; }
+th, td {
+  border: 1px solid #94a3b8;
+  padding: 5px 6px;
+  vertical-align: top;
+  text-align: left;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+}
+th {
+  background: #e2e8f0 !important;
+  font-weight: 700;
+  color: #0f172a;
+}
+code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 8pt;
+  background: #f1f5f9;
+  padding: 1px 3px;
+  border-radius: 2px;
+}
+pre {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 7.5pt;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  page-break-inside: avoid;
+}
+a { color: #1e3a5f; text-decoration: none; }
+hr { border: none; border-top: 1px solid #cbd5e1; margin: 18px 0; }
+strong { color: #0f172a; }
+blockquote {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border-left: 3px solid #1e3a5f;
+  background: #f8fafc;
+  color: #334155;
+}
+.mermaid-note {
+  font-size: 8pt;
+  color: #64748b;
+  font-style: italic;
+  margin: 0 0 4px;
+}
+</style>
+</head>
+<body>
+<h1 id="iconnect-plus-module-features-as-built">iConnect Plus — Module Features (as built)</h1>
+<p><strong>Document type:</strong> Solution Features Inventory<br />
+<strong>Product:</strong> iConnect Plus (Enterprise ERP)<br />
+<strong>Baseline:</strong> Architecture Lock v1.1 · Addendum v1.2 · ADR-001 · ADR-002<br />
+<strong>Updated:</strong> 2026-10-09<br />
+<strong>Classification:</strong> Internal — Confidential<br />
+<strong>Audience:</strong> Engineering, Product, Architecture, Delivery  </p>
+<p>This document is the <strong>features companion</strong> to <a href="Enterprise_ERP_Master_Architecture.md"><code>Enterprise_ERP_Master_Architecture.md</code></a>. It uses the same module portfolio and section shape, but lists <strong>features implemented in code today</strong> (API + admin web + employee ESS surfaces), not the full FRD wishlist.</p>
+<p><strong>Sources of truth for this inventory</strong></p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>API mount</td>
+<td><code>apps/api/src/shared/router.py</code> → <code>/api/v1</code></td>
+</tr>
+<tr>
+<td>Module packages</td>
+<td><code>apps/api/src/modules/*</code></td>
+</tr>
+<tr>
+<td>UI registry</td>
+<td><code>apps/web/src/config/modules.ts</code></td>
+</tr>
+<tr>
+<td>Module nav / sidebars</td>
+<td><code>apps/web/src/config/*</code>, workspace nav components</td>
+</tr>
+<tr>
+<td>Living catalog (short)</td>
+<td><a href="../00_CURRENT/MODULE_CATALOG.md"><code>docs/00_CURRENT/MODULE_CATALOG.md</code></a></td>
+</tr>
+</tbody>
+</table>
+<p>When FRD and this document disagree on <em>what ships today</em>, treat <strong>code + this document</strong> as current and open an ADR / FRD change if the baseline must move.</p>
+<hr />
+<h2 id="contents">Contents</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Section</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><a href="#1-executive-summary">Executive Summary</a></td>
+</tr>
+<tr>
+<td>2</td>
+<td><a href="#2-how-to-read-this-document">How to Read This Document</a></td>
+</tr>
+<tr>
+<td>3</td>
+<td><a href="#3-product-scope-and-module-map">Product Scope and Module Map</a></td>
+</tr>
+<tr>
+<td>4</td>
+<td><a href="#4-platform--foundation-modules">Platform &amp; Foundation Modules</a></td>
+</tr>
+<tr>
+<td>5</td>
+<td><a href="#5-financial-modules">Financial Modules</a></td>
+</tr>
+<tr>
+<td>6</td>
+<td><a href="#6-commercial-modules">Commercial Modules</a></td>
+</tr>
+<tr>
+<td>7</td>
+<td><a href="#7-supply--operations-modules">Supply &amp; Operations Modules</a></td>
+</tr>
+<tr>
+<td>8</td>
+<td><a href="#8-people-modules">People Modules</a></td>
+</tr>
+<tr>
+<td>9</td>
+<td><a href="#9-delivery--support-modules">Delivery &amp; Support Modules</a></td>
+</tr>
+<tr>
+<td>10</td>
+<td><a href="#10-governance--insight-modules">Governance &amp; Insight Modules</a></td>
+</tr>
+<tr>
+<td>11</td>
+<td><a href="#11-cross-domain-flows-as-built">Cross-Domain Flows (as built)</a></td>
+</tr>
+<tr>
+<td>12</td>
+<td><a href="#12-roadmap--not-yet-product-features">Roadmap — Not Yet Product Features</a></td>
+</tr>
+<tr>
+<td>13</td>
+<td><a href="#13-document-hierarchy">Document Hierarchy</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="1-executive-summary">1. Executive Summary</h2>
+<p><strong>iConnect Plus</strong> ships as a <strong>modular monolith</strong> with twenty-plus business domains plus shared platform engines. Every module below is <strong>present in the API router</strong> and (except ESS / public portals) has an admin web entry.</p>
+<p><strong>Depth today falls into three bands:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Band</th>
+<th>Meaning</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Deep product UX</strong></td>
+<td>Bespoke dashboards, workflows, and multi-step screens beyond generic resource lists</td>
+<td>Finance, CRM, Procurement/SCM, Projects, Assets, HR, Marketing, Service (tickets), Email</td>
+</tr>
+<tr>
+<td><strong>API + list UI</strong></td>
+<td>Full (or broad) REST resource set with ModuleHub / workspace sidebar + <code>ResourceListView</code></td>
+<td>Sales, Inventory, Manufacturing, Quality, Payroll, Recruitment, Helpdesk, Analytics, Integration, Ecommerce, Portal, GRC, Documents</td>
+</tr>
+<tr>
+<td><strong>Thin / partial</strong></td>
+<td>Small intentional surface or scaffolding in progress</td>
+<td>Voice agent, Agent read, MCP bootstrap, Landing access-gate; Service generic registry routes disabled</td>
+</tr>
+</tbody>
+</table>
+<p>Shared across all modules: Microsoft Entra SSO + HttpOnly JWT cookies, RBAC permission catalogs, Workflow / Notification / Audit engines, <code>modules.platform</code> ports (outbox, numbering, finance posting, stock, approvals), dark slate-teal shell UI with hero KPI cards.</p>
+<hr />
+<h2 id="2-how-to-read-this-document">2. How to Read This Document</h2>
+<h3 id="21-maturity-legend">2.1 Maturity legend</h3>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Implemented</strong></td>
+<td>Primary flows usable in API + UI for the listed features</td>
+</tr>
+<tr>
+<td><strong>Partial</strong></td>
+<td>Core path works; adjacent FRD areas thin, list-only, or gated</td>
+</tr>
+<tr>
+<td><strong>Scaffold</strong></td>
+<td>Routers / registry keys exist; UX is mostly generic CRUD</td>
+</tr>
+<tr>
+<td><strong>Roadmap</strong></td>
+<td>Documented vision only — not shipped as a product module</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-section-template-per-module">2.2 Section template (per module)</h3>
+<p>Each module section mirrors the Master Architecture catalog:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td>Primary admin href(s)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td>Primary <code>/api/v1</code> prefixes</td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Legend above</td>
+</tr>
+<tr>
+<td><strong>Features</strong></td>
+<td>Implemented capabilities (API and/or UI)</td>
+</tr>
+<tr>
+<td><strong>Key flows</strong></td>
+<td>End-to-end paths that work today</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-product-scope-and-module-map">3. Product Scope and Module Map</h2>
+<h3 id="31-domain-grouping">3.1 Domain grouping</h3>
+<div class="mermaid-note">Architecture diagram (source)</div>
+
+<pre><code class="language-text">flowchart TB
+  subgraph platform [Platform]
+    FND[Foundation Auth RBAC Workflow Audit]
+    EMAIL[Email Notifications]
+    ORG[Organization]
+    MDM[Master Data]
+    PLAT[platform seams]
+    INT[Integration Hub]
+  end
+
+  subgraph financial [Financial]
+    FIN[Finance]
+    PAY[Payroll]
+  end
+
+  subgraph commercial [Commercial]
+    CRM[CRM]
+    SAL[Sales]
+    MKT[Marketing]
+    ECO[Ecommerce]
+    POR[Portal]
+  end
+
+  subgraph supply [Supply]
+    PRC[Procurement SCM]
+    INV[Inventory]
+    MFG[Manufacturing]
+    QLT[Quality]
+  end
+
+  subgraph people [People]
+    HR[HR]
+    REC[Recruitment]
+    ESS[ESS]
+  end
+
+  subgraph delivery [Delivery]
+    PRJ[Projects]
+    ASSET[Assets]
+    SVC[Service]
+    HD[Helpdesk]
+    DMS[Documents]
+  end
+
+  subgraph insight [Insight]
+    GRC[GRC]
+    BI[Analytics]
+    AI[Agent Voice MCP]
+  end
+
+  platform --&gt; financial
+  platform --&gt; commercial
+  platform --&gt; supply
+  platform --&gt; people
+  platform --&gt; delivery
+  platform --&gt; insight
+</code></pre>
+<h3 id="32-portfolio-summary-as-built">3.2 Portfolio summary (as built)</h3>
+<table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Modules</th>
+<th>Maturity (summary)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Platform</td>
+<td>Foundation, Email, Organization, Master Data, Platform seams, Integration</td>
+<td>Implemented (Master Data list UX scaffold-heavy)</td>
+</tr>
+<tr>
+<td>Financial</td>
+<td>Finance, Payroll</td>
+<td>Finance deep; Payroll Implemented (list + API)</td>
+</tr>
+<tr>
+<td>Commercial</td>
+<td>CRM, Sales, Marketing, Ecommerce, Portal</td>
+<td>CRM/Marketing deep; Sales/Ecommerce/Portal list+API</td>
+</tr>
+<tr>
+<td>Supply</td>
+<td>Procurement, Inventory, Manufacturing, Quality</td>
+<td>Procurement deep; others Implemented list+API</td>
+</tr>
+<tr>
+<td>People</td>
+<td>HR, Recruitment, ESS</td>
+<td>HR deep workspace; Recruitment list+API; ESS Implemented</td>
+</tr>
+<tr>
+<td>Delivery</td>
+<td>Projects, Assets, Service, Helpdesk, Documents</td>
+<td>Projects/Assets deep; Service Partial UI; Helpdesk/Documents mix</td>
+</tr>
+<tr>
+<td>Insight</td>
+<td>Analytics, GRC, Agent/Voice/MCP</td>
+<td>Analytics/GRC scaffold-rich; AI Partial</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4-platform-foundation-modules">4. Platform &amp; Foundation Modules</h2>
+<h3 id="41-foundation-auth-rbac-workflow-audit-settings">4.1 Foundation (Auth, RBAC, Workflow, Audit, Settings)</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/foundation</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/auth/*</code>, <code>/tenants</code>, <code>/users</code>, <code>/roles</code>, <code>/permissions</code>, <code>/modules</code>, <code>/workflows/*</code>, <code>/notifications/*</code>, <code>/audit/*</code>, <code>/settings</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Local login, MFA verify, refresh/logout, <code>/me</code> (+ avatar)  </li>
+<li>Microsoft Entra OAuth (config, login, callback, exchange)  </li>
+<li>Tenants, users, roles, permissions  </li>
+<li>Module membership / admin-member assignment  </li>
+<li>RBAC with Redis-cached permission resolution  </li>
+<li>Workflow definitions and instances  </li>
+<li>Notification engine API (templates/events used by Email UI)  </li>
+<li>Audit log read  </li>
+<li>System / tenant settings  </li>
+<li>Admin hub screens for all of the above (generic resource lists)</li>
+</ul>
+<p><strong>Key flows:</strong> Authenticate → session cookie → authorized API; submit → workflow approve/reject; mutations audited.</p>
+<hr />
+<h3 id="42-email-notification-system">4.2 Email &amp; Notification System</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/email</code> (+ compose, templates, deliveries, events)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/notifications/*</code> (foundation)</td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Email overview dashboard with KPIs  </li>
+<li>Compose UI  </li>
+<li>Templates, deliveries, and event logs  </li>
+<li>Microsoft Graph send path (async via Celery)  </li>
+<li>Device token registration path for push  </li>
+<li>Module user admin (<code>/email/users</code>)</li>
+</ul>
+<p><strong>Key flows:</strong> Event → template render → Graph delivery → status logging.</p>
+<hr />
+<h3 id="43-organization">4.3 Organization</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/organization</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/companies</code>, <code>/branches</code>, <code>/departments</code>, <code>/business-units</code>, <code>/locations</code>, <code>/cost-centers</code>, <code>/profit-centers</code>, <code>/organization</code> (tree), <code>/auth/context</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Multi-company hierarchy; branches; departments; BUs; locations  </li>
+<li>Cost centers and profit centers  </li>
+<li>Org tree view  </li>
+<li>Session org context (company / branch selection)  </li>
+<li>ERP users (<code>/organization/users</code>) and module-user mapping (<code>/organization/module-users</code>)</li>
+</ul>
+<p><strong>Key flows:</strong> Provision company → branches/depts → assign users → set org context.</p>
+<hr />
+<h3 id="44-master-data">4.4 Master Data</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/master-data</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/employees</code>, <code>/customers</code>, <code>/vendors</code>, <code>/products</code>, <code>/product-categories</code>, <code>/uoms</code>, <code>/currencies</code>, <code>/taxes</code>, <code>/assets</code> (MD stub), <code>/warehouses</code>, <code>/party-registrations</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented (party registration deep; other masters list scaffold)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Employee, customer, vendor, product masters  </li>
+<li>Product categories, UoMs, currencies, taxes, warehouses  </li>
+<li>Customer and vendor <strong>registration</strong> workflows (list / new / detail / edit) with KYC/credit via <code>/party-registrations</code>  </li>
+<li>Published read projections for other modules (<code>modules.master_data.published</code>)  </li>
+<li>Master-data asset stub (distinct from operational Asset Management)</li>
+</ul>
+<p><strong>Key flows:</strong> Party registration → approved master; other modules read masters via published ports (no cross-module ORM writes).</p>
+<hr />
+<h3 id="45-platform-seams-ops-api">4.5 Platform seams (ops API)</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td>(consumed by all modules; home KPIs/charts)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/platform/slo/*</code>, <code>/platform/metrics</code>, <code>/platform/ops/status</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Ports / adapters: finance posting, inventory stock, workflow, notify, audit, outbox, numbering, integration  </li>
+<li>Outbox drain/purge Celery tasks  </li>
+<li>Numbering SSOT; approval matrix + <code>workflow_gate</code>  </li>
+<li>Optimistic lock (<code>VersionMixin</code> → HTTP 409)  </li>
+<li>Field encryption helpers; idempotency records; system job runs  </li>
+<li>Read-model projections (finance / inventory / payroll facts)  </li>
+<li>SLO budgets/alerts/status and ops status surface  </li>
+<li>Architecture CI gates (cross-module ORM, permission catalog, tenant scope)</li>
+</ul>
+<p><strong>Key flows:</strong> Service action → number → optional workflow → outbox → Celery drain → adapters/projections.</p>
+<hr />
+<h3 id="46-integration-hub">4.6 Integration Hub</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/integration</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/integration/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>External systems, connectors, API credentials, OAuth clients  </li>
+<li>Webhooks, event definitions / subscriptions  </li>
+<li>Message queues, messages, retry queues, dead letters  </li>
+<li>Data mappings / transformations  </li>
+<li>Sync jobs and sync logs  </li>
+<li>API usage, rate limits, monitors, reports  </li>
+<li>Workspace sidebar: Overview, Systems, Connectors, Webhooks, Events, Queues, Sync Jobs, Dead Letters</li>
+</ul>
+<p><strong>Key flows:</strong> Connect → map → sync; webhook ingest → retry / DLQ.</p>
+<hr />
+<h2 id="5-financial-modules">5. Financial Modules</h2>
+<h3 id="51-finance-accounting">5.1 Finance &amp; Accounting</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/finance/**</code> (custom UX + reports)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/finance/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Account groups &amp; chart of accounts (list + create/detail)  </li>
+<li>Fiscal years and periods  </li>
+<li>Journals (create, submit, approve, reject, post, reverse)  </li>
+<li>General ledger inquiry and account drill-down  </li>
+<li>AR and AP workspaces (customer/vendor invoice detail routes)  </li>
+<li>Tax register, currency rates, asset transactions  </li>
+<li>Reports hub: Trial Balance, Balance Sheet, P&amp;L, Cash Flow, Cash Flow Forecast, Treasury Suggestions, GL report, Journal Register, AR/AP Aging, Tax Summary, Cost Center Summary  </li>
+<li>Posting via platform finance ports; SoD / finance-scope hooks  </li>
+<li>Module dashboard with hero KPIs</li>
+</ul>
+<p><strong>Key flows:</strong> Draft journal → approve → post → GL; subledger activity → statements; period close support.</p>
+<hr />
+<h3 id="52-payroll">5.2 Payroll</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/payroll</code> (+ <code>/hr/payroll</code> shell entry)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/payroll/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Payroll periods and policies  </li>
+<li>Salary structures, components, structure lines  </li>
+<li>Employee salaries and component overrides  </li>
+<li>Earning / deduction types; tax configurations; statutory contributions  </li>
+<li>Payroll runs, run lines, payslips  </li>
+<li>Bonuses, reimbursements, loans / installments, adjustments  </li>
+<li>Payroll postings and summaries; reports  </li>
+<li>Finance posting path for payroll journals  </li>
+<li>Sidebar: Periods, Salaries, Runs, Payslips, Bonuses, Loans, Summaries</li>
+</ul>
+<p><strong>Key flows:</strong> Attendance/leave inputs → run → approve → payslip → GL posting.</p>
+<hr />
+<h2 id="6-commercial-modules">6. Commercial Modules</h2>
+<h3 id="61-crm">6.1 CRM</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/crm</code> (custom sales workspace)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/crm/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li><strong>Sales CRM core:</strong> Companies (account workspace), leads, opportunities, quotes, OVF, contacts, products  </li>
+<li>My Jobs approval inbox; OEM quotes; customer POs; sales performance; stock &amp; aging (shared with Procurement)  </li>
+<li>Meetings, customer follow-ups, KYC / account mapping  </li>
+<li>OEM, distributors, BOQ, SOW, entities, end customers  </li>
+<li>Saved report builder (<code>/crm/reports</code>)  </li>
+<li>Classic CRM registry: lead sources/assignments/activities, pipelines, stages, campaigns, interactions, tasks, follow-ups, call/email/visit logs, CSAT/feedback  </li>
+<li>Blueprints / actions on leads, opportunities, quotes, OVF  </li>
+<li>GST registrations and customer expense (FOC) ledger paths on companies  </li>
+<li>Attachments, members, lookups, approval step owners, KYC records</li>
+</ul>
+<p><strong>Key flows:</strong> Company → Lead → Opportunity → Quote → OVF → Won/Lost / SCM share; My Jobs approve/reject.</p>
+<hr />
+<h3 id="62-sales">6.2 Sales</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/sales</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/sales/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Price lists, discount rules, customer credit  </li>
+<li>Quotations, sales orders, deliveries, invoices, returns  </li>
+<li>Module dashboard + workspace sidebar for primary O2C screens</li>
+</ul>
+<p><strong>Key flows:</strong> Quotation → Order → Delivery → Invoice → AR; returns / credit notes; credit holds.</p>
+<hr />
+<h3 id="63-marketing-social-media">6.3 Marketing &amp; Social Media</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/marketing</code> (custom workspace)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/marketing/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented (workspace) · Partial vs full FRD depth</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Campaigns (list + detail), operations board, my-work, inbox, tasks, workload  </li>
+<li>Content library, content requests, calendar, brand voices  </li>
+<li>Research, trends, competitors, marketing analytics  </li>
+<li>Social accounts, M365 channel integration  </li>
+<li>Platforms, pillars, publish jobs, approvals, AI/Celery generation pipeline (<code>/marketing/ai</code>)  </li>
+<li>Team members and ops surfaces</li>
+</ul>
+<p><strong>Key flows:</strong> Campaign → content request → generate → score → calendar → publish/approve.</p>
+<hr />
+<h3 id="64-ecommerce">6.4 Ecommerce</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/ecommerce</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/ecommerce/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Stores, sales channels, product listings (prices / inventory)  </li>
+<li>Customer carts and cart items  </li>
+<li>Orders / order items, payments / payment transactions  </li>
+<li>Shipments and shipping tracking  </li>
+<li>Return requests / return items  </li>
+<li>Coupons, promotions, marketplace connectors  </li>
+<li>Notifications and reports  </li>
+<li>Sidebar: Stores, Listings, Carts, Orders, Payments, Shipments, Returns</li>
+</ul>
+<p><strong>Key flows:</strong> Channel order → pay → fulfill → inventory/sales sync; returns.</p>
+<hr />
+<h3 id="65-customer-supplier-portal">6.5 Customer / Supplier Portal</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/portal</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/portal/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Portal accounts, customer profiles, sessions  </li>
+<li>Portal dashboards / widgets, notifications, message threads  </li>
+<li>Order and invoice views; document access; download history  </li>
+<li>Support tickets and service requests  </li>
+<li>Saved reports / searches, preferences, devices, login audits  </li>
+<li>Sidebar: Accounts, Profiles, Sessions, Orders, Invoices, Tickets, Service Requests</li>
+</ul>
+<p><strong>Key flows:</strong> Portal login → view commercial docs → raise ticket / service request.</p>
+<hr />
+<h2 id="7-supply-operations-modules">7. Supply &amp; Operations Modules</h2>
+<h3 id="71-procurement-scm">7.1 Procurement &amp; SCM</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/procurement</code> (custom SCM workspace)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/procurement/*</code> (+ public order/project tracking)</td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented (advanced FRD-15 planning Partial)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Classic P2P: requisitions, RFQs, vendor quotations, comparisons, POs, GRNs, vendor invoices, returns, contracts, vendor performance  </li>
+<li><strong>SCM workspace:</strong> queue, OVF detail/timeline/preview/hold/charges, PO create/finalize, vendor POs, fulfill-from-stock, item plan, negotiations, ETD, commercial attachments  </li>
+<li>Delivery challan, delivery status, delivery projects/sites  </li>
+<li>Installation and service contracts / service plans &amp; visits  </li>
+<li>Inventory ownership &amp; aging; assign-owner; open-for-sale  </li>
+<li>Sheet trackers; correspondence / mails; approvals; reports; analytics  </li>
+<li>Public: order tracking (PO + email), project tracking by token  </li>
+<li>Module dashboard + deep OVF/PO/GRN routes</li>
+</ul>
+<p><strong>Key flows:</strong> OVF → SCM queue → PO → GRN → challan / delivery project; classic P2P with workflow gates.</p>
+<hr />
+<h3 id="72-inventory-warehouse">7.2 Inventory &amp; Warehouse</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/inventory</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/inventory/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Stock balances (on-hand / reserved / available)  </li>
+<li>Bins, batches, serials, reservations  </li>
+<li>Transfers, adjustments, cycle counts  </li>
+<li>Policies (reorder / safety stock)  </li>
+<li>Valuation layers  </li>
+<li>Stock summary / batch expiry reports  </li>
+<li>Platform stock adapter used by GRN / issue / reservation paths</li>
+</ul>
+<p><strong>Key flows:</strong> GRN putaway → reserve → issue/transfer → count/adjust → valuation.</p>
+<hr />
+<h3 id="73-manufacturing">7.3 Manufacturing</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/manufacturing</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/manufacturing/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>BOMs, routings, work centers, machines  </li>
+<li>Production orders  </li>
+<li>Material issues / returns, production receipts  </li>
+<li>Scrap, WIP, variances, reports  </li>
+<li>Sidebar: BOMs, Production Orders, Issues/Receipts, WIP, Scrap, Machines</li>
+</ul>
+<p><strong>Key flows:</strong> Plan → WO → issue → execute → FG receipt → WIP/variance close.</p>
+<hr />
+<h3 id="74-quality-management">7.4 Quality Management</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/quality</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/quality/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Inspection plans, sampling plans, characteristics, defect types  </li>
+<li>Incoming / in-process / final inspections  </li>
+<li>Defects, NCRs, CAPAs  </li>
+<li>Supplier quality, complaints, audits, scores, reports  </li>
+<li>Sidebar: IQC / IPQC / FQC, NCRs, CAPAs, Audits, Complaints</li>
+</ul>
+<p><strong>Key flows:</strong> Plan → inspect → release/hold; NCR → CAPA.</p>
+<hr />
+<h2 id="8-people-modules">8. People Modules</h2>
+<h3 id="81-hrms">8.1 HRMS</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/hr</code> (custom HR workspace)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/hr/*</code> (+ <code>/public/onboarding/*</code>)</td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li><strong>Workforce:</strong> employee list/detail/new; designations, grades, job levels, employment, management groups, department/designation assignments  </li>
+<li><strong>Time:</strong> shifts, roster, holiday calendars, attendance, corrections, weekly-off policies, attendance rules, biometric devices, OT allotments, on-duty / comp-off, shift rotations/swaps  </li>
+<li><strong>Leave:</strong> leave types, balances, requests, adjustments (management page + setup)  </li>
+<li><strong>Talent / learning:</strong> performance reviews, goals, KPIs, OKRs, appraisals, training (+ rooms, attendance, requests)  </li>
+<li><strong>ESS bridge:</strong> ESS inbox, ESS policies, org docs; <code>/hr/ess</code> shell  </li>
+<li><strong>Lifecycle:</strong> separation, offboarding, digital onboarding (admin + public token portal)  </li>
+<li><strong>IT Admin:</strong> stocks, travel, requisition, meeting rooms, employee assets/documents  </li>
+<li>Reports, roster, setup, superadmin, module users  </li>
+<li>Registry CRUD mirrors for HR resource keys</li>
+</ul>
+<p><strong>Key flows:</strong> Hire-to-retire; leave/attendance approval; digital onboarding portal → HR case; ESS handoff.</p>
+<hr />
+<h3 id="82-recruitment">8.2 Recruitment</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/recruitment</code> (+ <code>/hr/recruitment</code> entry)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/recruitment/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Job requisitions and postings  </li>
+<li>Sources, recruiters, candidates, resumes, candidate documents/notes  </li>
+<li>Applications and application stages  </li>
+<li>Interviews and interview feedback  </li>
+<li>Offers and offer approvals  </li>
+<li>Background verification, reference checks, talent pools  </li>
+<li>Onboarding cases and onboarding tasks  </li>
+<li>Reports  </li>
+<li>Sidebar: Requisitions, Postings, Candidates, Applications, Interviews, Offers, Onboarding</li>
+</ul>
+<p><strong>Key flows:</strong> Requisition → apply → interview → offer → BGV → onboard → HR employee.</p>
+<hr />
+<h3 id="83-employee-self-service-ess">8.3 Employee Self-Service (ESS)</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td>Employee app / ESS surfaces (<code>/hr/ess*</code>; <code>apps/employee-app</code>)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/ess/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented (API + employee-app)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Profile (bank, KYC, emergency, education), change password, face security hooks  </li>
+<li>Leave types/balances/requests and corrections  </li>
+<li>Attendance punch + policy; WFH / on-duty / comp-off  </li>
+<li>Manager team approvals (leave, comp-off, on-duty, corrections, WFH)  </li>
+<li>Payslips, documents, holidays, announcements, notifications  </li>
+<li>Assets (+ tickets), training, performance, separation  </li>
+<li>Meeting rooms, support tickets, policies  </li>
+<li>Device tokens for push</li>
+</ul>
+<p><strong>Key flows:</strong> Employee self-serve leave/attendance → manager approve → HR/payroll consume.</p>
+<hr />
+<h2 id="9-delivery-support-modules">9. Delivery &amp; Support Modules</h2>
+<h3 id="91-project-management">9.1 Project Management</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/projects</code> (custom delivery workspace)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/projects/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Projects CRUD + detail workspace (assign, configuration, stage workflows)  </li>
+<li>Phases, milestones, tasks (dependencies/assignments), timesheets / entries  </li>
+<li>Resource plans / allocations; budgets, costs, profitability  </li>
+<li>Issues, risks, change requests, documents, comments, status history, notifications  </li>
+<li><strong>Site installation delivery:</strong> survey → SCM → onsite/material handover → installation → acceptance  </li>
+<li>My Jobs / completed jobs, follow-ups, stage alerts, PO queue, customer trackers  </li>
+<li>Member vs manager dashboards with hero KPI grids  </li>
+<li>Reports</li>
+</ul>
+<p><strong>Key flows:</strong> Approve project → plan → site workflow stages → timesheet cost → acceptance / close.</p>
+<hr />
+<h3 id="92-asset-management">9.2 Asset Management</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/assets</code> (+ Non-IT domain)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/assets/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li><strong>IT:</strong> categories/types, asset register (new/detail/edit), components  </li>
+<li>Incoming assets, QC, registration queue  </li>
+<li>Assignments (+ return), DC challans, transfers, maintenances  </li>
+<li>Locations / site locations / buildings; warranties; insurance  </li>
+<li>Maintenance plans, service histories, checklists, meter readings  </li>
+<li>Depreciation, disposals, revaluations, audits, documents, notifications, reports  </li>
+<li>Inventory import; information portal / self-service asset views  </li>
+<li>QR / barcode support  </li>
+<li><strong>Non-IT:</strong> dashboard, inventory, types, locations, asset detail, assign/unassign, maintain, dispose, import  </li>
+<li>Domain memberships</li>
+</ul>
+<p><strong>Key flows:</strong> Incoming → register → assign → maintain → depreciate → dispose; Non-IT parallel register.</p>
+<hr />
+<h3 id="93-service-management">9.3 Service Management</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/service</code> (SOP ticket UX)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/service/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Partial (ticket UX deep; generic registry UI disabled)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Service request tickets (list / new / detail / edit)  </li>
+<li>Mailbox (inbound email), field-engineer workspace, resolved tickets  </li>
+<li>Service SLAs  </li>
+<li>Full API also exposes: categories, requests, tickets, assignments, schedules, work orders, tasks, checklists, visits, materials, time entries, expenses, escalations, feedback, resolutions, documents, notifications, contracts, reports  </li>
+<li>Admin web intentionally <strong>does not</strong> expose generic <code>/service/{resource}</code> lists (<code>ALLOWED_SERVICE_RESOURCES</code> empty)</li>
+</ul>
+<p><strong>Key flows:</strong> Inbound/request → ticket → assign → resolve → SLA/feedback.</p>
+<hr />
+<h3 id="94-helpdesk">9.4 Helpdesk</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/helpdesk</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/helpdesk/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Ticket categories, priorities, tickets, assignments  </li>
+<li>Status history, comments, attachments, activities  </li>
+<li>SLAs, escalations  </li>
+<li>Knowledge bases / articles, resolutions  </li>
+<li>Support teams, shifts, schedules  </li>
+<li>Customer feedback, notifications, reports, dashboards  </li>
+<li>Sidebar: Tickets, Assignments, Escalations, Knowledge, Resolutions, Teams, Feedback</li>
+</ul>
+<p><strong>Key flows:</strong> Report → assign → resolve → CSAT; SLA breach → escalate.</p>
+<hr />
+<h3 id="95-document-management-dms">9.5 Document Management (DMS)</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/documents</code> (+ PDF editor)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/documents/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Partial / scaffold-rich (storage/OCR hardening ongoing)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Folders, documents, versions, metadata  </li>
+<li>Tags, permissions, shares, comments  </li>
+<li>Approvals, workflows, checkouts, audits, attachments  </li>
+<li>Templates / template fields  </li>
+<li>Retention policies, archives  </li>
+<li>Notifications, reports  </li>
+<li><strong>PDF editor</strong> (<code>/documents/pdf-editor</code>) for fill/sign  </li>
+<li>Object storage via MinIO/S3; ClamAV on upload  </li>
+<li>Sidebar: Folders, Documents, Versions, Approvals, Templates, Retention, Archives</li>
+</ul>
+<p><strong>Key flows:</strong> Upload → review → approve → publish; retain → archive.</p>
+<hr />
+<h2 id="10-governance-insight-modules">10. Governance &amp; Insight Modules</h2>
+<h3 id="101-grc-governance-risk-compliance">10.1 GRC (Governance, Risk, Compliance)</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/grc</code> (+ <code>/grc/compliance</code> hub)</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/grc/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Scaffold / broad CRUD (+ dashboard)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Overview / compliance monitor  </li>
+<li>Policies, versions, acknowledgements  </li>
+<li>Controls and control tests  </li>
+<li>Risk categories, registers, assessments, treatments  </li>
+<li>Compliance frameworks, requirements, assessments  </li>
+<li>Audit plans, audits, findings  </li>
+<li>Corrective actions, exceptions, incidents  </li>
+<li>Notifications, reports  </li>
+<li>Sidebar: Policies, Risks, Controls, Compliance, Audits, CAPA, Incidents</li>
+</ul>
+<p><strong>Key flows:</strong> Risk identify → assess → treat → control test; audit → finding → CAPA; policy lifecycle.</p>
+<hr />
+<h3 id="102-analytics-bi">10.2 Analytics (BI)</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/analytics</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/analytics/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Implemented</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Dashboards and dashboard widgets  </li>
+<li>Reports, schedules, executions  </li>
+<li>Datasets, dataset sources, fact tables, snapshots, refreshes  </li>
+<li>Metrics, KPIs, dimensions  </li>
+<li>Alert rules and alert notifications  </li>
+<li>Subscriptions, data exports / imports  </li>
+<li>Query history, usage audits  </li>
+<li>Sidebar: Dashboards, Reports, KPIs, Datasets, Metrics, Alerts, Exports  </li>
+<li>Platform home consumes module KPI feeds for executive view</li>
+</ul>
+<p><strong>Key flows:</strong> Dataset → metric/KPI → dashboard/report → schedule/alert.</p>
+<hr />
+<h3 id="103-platform-ai-surfaces-agent-voice-mcp">10.3 Platform AI surfaces (Agent / Voice / MCP)</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td><code>/voice-agent</code></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/voice-agent/*</code>, <code>/leads|/orders|/invoices</code> + <code>/agent/*</code> (agent_read), <code>/mcp</code> (separate mount)</td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Partial / in progress</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features</strong></p>
+<ul>
+<li>Voice assistant UI (ElevenLabs conversational)  </li>
+<li>Signed WebSocket URL API for voice agent  </li>
+<li>Read-only agent endpoints for leads, orders, invoices, customers, products  </li>
+<li>MCP streamable HTTP server mounted at <code>/mcp</code> (tools from OpenAPI config)  </li>
+<li>Full LLM gateway, permission-aware RAG, Virtual E.A. — <strong>roadmap</strong> (§12)</li>
+</ul>
+<p><strong>Key flows:</strong> Open voice agent → signed URL session; agent tools read curated APIs via MCP/agent_read.</p>
+<hr />
+<h3 id="104-landing-access-gate">10.4 Landing / access gate</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web</strong></td>
+<td>Marketing / landing surfaces</td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td><code>/public/access-gate/*</code></td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Scaffold-thin</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Features:</strong> Access-code verify + gated session for public marketing site.</p>
+<hr />
+<h2 id="11-cross-domain-flows-as-built">11. Cross-Domain Flows (as built)</h2>
+<h3 id="111-procure-to-pay">11.1 Procure-to-pay</h3>
+<pre><code class="language-text">Requisition → (workflow) → RFQ / Vendor quote → PO → GRN
+        → stock via IInventoryStock → AP invoice → Finance payment
+</code></pre>
+<p>OVF-driven path: <strong>CRM OVF → Procurement SCM queue → PO → GRN → Delivery challan</strong>.</p>
+<h3 id="112-order-to-cash">11.2 Order-to-cash</h3>
+<pre><code class="language-text">CRM lead / opportunity → Quote → OVF / Sales order → Delivery → Invoice
+        → AR / journal posting via IFinancePosting
+</code></pre>
+<h3 id="113-inventory-movement">11.3 Inventory movement</h3>
+<pre><code class="language-text">Reservation / transfer / adjustment / GRN / issue
+        → InventoryStockAdapter → stock ledger
+        → optional outbox domain.inventory.* → analytics facts
+</code></pre>
+<h3 id="114-hire-to-retire">11.4 Hire-to-retire</h3>
+<pre><code class="language-text">Recruitment → Master employee → HR employment / leave / attendance
+        → ESS self-service → Separation → F&amp;F via payroll → Finance
+</code></pre>
+<h3 id="115-asset-lifecycle">11.5 Asset lifecycle</h3>
+<pre><code class="language-text">Incoming / Register → Assignment / Transfer → Maintenance → Disposal / Revaluation
+DC challan ↔ SCM (see docs/09_OPS/dc-challan-scm-contract.md)
+</code></pre>
+<h3 id="116-project-site-delivery">11.6 Project site delivery</h3>
+<pre><code class="language-text">Project / site → Survey → SCM → Onsite / Material handover
+        → Installation → Acceptance → Tracker / My Jobs
+</code></pre>
+<h3 id="117-platform-side-effects">11.7 Platform side effects</h3>
+<pre><code class="language-text">Service action
+  ├─ number via SSOT numbering
+  ├─ start workflow if APPROVAL_POLICIES mode=workflow
+  ├─ enqueue outbox (notify / audit / finance / integration / domain)
+  └─ Celery drain → adapters → projections
+</code></pre>
+<hr />
+<h2 id="12-roadmap-not-yet-product-features">12. Roadmap — Not Yet Product Features</h2>
+<p>These remain product vision for full GA (also §12 in the Master Architecture). Thin API/UI already exists for agent/voice/MCP (§10.3).</p>
+<table>
+<thead>
+<tr>
+<th>Extension</th>
+<th>Target (not shipped as full module)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AI Assistant &amp; AI Infra</td>
+<td>LLM gateway, permission-aware RAG, in-module copilots, guardrails</td>
+</tr>
+<tr>
+<td>Virtual E.A.</td>
+<td>Executive assistant across modules</td>
+</tr>
+<tr>
+<td>Licensing &amp; Activation</td>
+<td>Entitlement service disabling unlicensed APIs/UI/jobs</td>
+</tr>
+<tr>
+<td>Backup &amp; DR</td>
+<td>Productized backup jobs, restore runbooks UI</td>
+</tr>
+</tbody>
+</table>
+<p>OpenSearch, Kubernetes/EKS extraction, and warehouse extract remain <strong>evolution-gated</strong> (<code>modules/platform/evolution.py</code>).</p>
+<hr />
+<h2 id="13-document-hierarchy">13. Document Hierarchy</h2>
+<table>
+<thead>
+<tr>
+<th>Document</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="Enterprise_ERP_Master_Architecture.md"><code>Enterprise_ERP_Master_Architecture.md</code></a></td>
+<td>Solution architecture, deploy topology, principles</td>
+</tr>
+<tr>
+<td><strong>This document</strong></td>
+<td>Per-module <strong>as-built features</strong> inventory</td>
+</tr>
+<tr>
+<td><a href="../00_CURRENT/SYSTEM_OVERVIEW.md"><code>docs/00_CURRENT/SYSTEM_OVERVIEW.md</code></a></td>
+<td>Stack, platform seams, request/async paths</td>
+</tr>
+<tr>
+<td><a href="../00_CURRENT/MODULE_CATALOG.md"><code>docs/00_CURRENT/MODULE_CATALOG.md</code></a></td>
+<td>Short API/UI mount map + primary flows</td>
+</tr>
+<tr>
+<td><code>docs/02_FRD/*</code></td>
+<td>Baseline functional requirements (intent)</td>
+</tr>
+<tr>
+<td><code>docs/05_ARCHITECTURE_LOCK/*</code></td>
+<td>Locked decisions</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Maintenance:</strong> When a module gains a material feature (new bespoke workflow screen or API domain), update the matching section here and the short row in <code>MODULE_CATALOG.md</code> in the same change set when practical.</p>
+</body>
+</html>

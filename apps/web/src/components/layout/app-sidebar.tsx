@@ -7,7 +7,6 @@ import { ChevronLeft, Search, X } from "lucide-react";
 
 import { navigation } from "@/config/navigation";
 import { filterNavigationGroups, hasModuleAssignments } from "@/lib/module-access";
-import { AppLogo } from "@/components/brand/app-logo";
 import { SidebarAccountSection } from "@/components/layout/sidebar-account-section";
 import {
   SIDEBAR_EASE as EASE,
@@ -20,7 +19,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAuthUser } from "@/hooks/use-auth-user";
 import { cn } from "@/lib/utils";
-import { env } from "@/utils/env";
 
 function isActivePath(pathname: string, href: string) {
   if (href === "/home") return pathname === "/home";
@@ -82,27 +80,11 @@ export function AppSidebar() {
     [filtered],
   );
 
-  const brand = (
-    <div className="flex items-center gap-2">
-      <AppLogo size={28} className="shrink-0" />
-      <div className="min-w-0">
-        <p className="truncate text-xs font-semibold text-sidebar-foreground">{env.appName}</p>
-        <p className="truncate text-[10px] text-sidebar-foreground/60">
-          {sessionPending
-            ? "Loading session…"
-            : authStatus === "error"
-              ? "Session retry needed"
-              : "23 modules · live API"}
-        </p>
-      </div>
-    </div>
-  );
-
   return (
     <SidebarRail collapsed={collapsed} layoutCollapsed={layoutCollapsed} aria-label="ERP modules">
       {/* Fill the animated rail — icons must live in the visible width (not a clipped 260px column). */}
       <div className="flex h-full w-full flex-col">
-        <SidebarAccountSection collapsed={collapsed}>{brand}</SidebarAccountSection>
+        <SidebarAccountSection collapsed={collapsed} />
 
         {!collapsed ? (
           <div

@@ -9,7 +9,7 @@
 
 This is the **master architecture document** for **iConnect Plus** as implemented and as locked. It consolidates system design, the locked technology stack, platform seams, module features and flows, Mermaid architecture diagrams, and shipping strategies for **Coolify/AWS**, **Compose**, and **on-premise**. Calendar timelines and month-based phase dates are intentionally omitted.
 
-For day-to-day module detail prefer [`docs/00_CURRENT/`](../00_CURRENT/). This document is the consolidated architecture view aligned with Addendum v1.2.
+For day-to-day module detail prefer [`docs/00_CURRENT/`](../00_CURRENT/). For the expanded **as-built feature list per module**, see [`Enterprise_ERP_Module_Features.md`](Enterprise_ERP_Module_Features.md). This document is the consolidated architecture view aligned with Addendum v1.2.
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Product:** iConnect Plus (enterprise ERP)  
 **Architecture baseline:** v1.1 (locked) · **Implementation reality:** see `00_CURRENT/`  
-**Last doc refresh:** 2026-10-08
+**Last doc refresh:** 2026-10-12
 
 ## How to read these docs
 
@@ -15,7 +15,7 @@
 | 4 | [`04_DBS/`](04_DBS/) | Database standards (baseline v1.1; filename still `*_v1.0.md`) |
 | 5 | [`05_ARCHITECTURE_LOCK/`](05_ARCHITECTURE_LOCK/) | Locked decisions + Addendum v1.2 |
 | 6 | [`06_ERD/`](06_ERD/) | Logical ERDs by domain |
-| 7 | [`07_MASTER_ARCHITECTURE/`](07_MASTER_ARCHITECTURE/) | Consolidated solution architecture (current) |
+| 7 | [`07_MASTER_ARCHITECTURE/`](07_MASTER_ARCHITECTURE/) | Consolidated solution architecture + [module features as built](07_MASTER_ARCHITECTURE/Enterprise_ERP_Module_Features.md) + [Cache scope & improvement report](07_MASTER_ARCHITECTURE/Cache_Technologies_Scope_and_Improvement_Report.md) ([PDF](07_MASTER_ARCHITECTURE/Cache_Technologies_Scope_and_Improvement_Report.pdf)) |
 | 8 | [`07_RELEASES/`](07_RELEASES/) | Latest release notes and demo guides |
 | 9 | [`ADR/`](ADR/) | Architecture Decision Records (asset / domain ADRs) |
 | 10 | [`09_OPS/`](09_OPS/) | Deploy contracts and operational runbooks |

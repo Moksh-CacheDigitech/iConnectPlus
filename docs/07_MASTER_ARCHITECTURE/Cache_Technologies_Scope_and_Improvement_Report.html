@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Cache Technologies - Scope and Improvement Report</title>
+  <style>
+@page {
+  size: A4;
+  margin: 14mm 12mm 16mm 12mm;
+}
+* { box-sizing: border-box; }
+html, body {
+  font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+  font-size: 10pt;
+  line-height: 1.4;
+  color: #0f172a;
+  background: #fff;
+  margin: 0;
+  padding: 0;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+h1 {
+  font-size: 18pt;
+  color: #0f172a;
+  border-bottom: 2px solid #1e3a5f;
+  padding-bottom: 8px;
+  margin: 0 0 14px;
+  page-break-after: avoid;
+}
+h2 {
+  font-size: 13pt;
+  color: #1e3a5f;
+  margin: 22px 0 10px;
+  padding-top: 4px;
+  border-top: 1px solid #e2e8f0;
+  page-break-after: avoid;
+}
+h3 {
+  font-size: 11pt;
+  color: #334155;
+  margin: 16px 0 8px;
+  page-break-after: avoid;
+}
+h4 {
+  font-size: 10.5pt;
+  color: #475569;
+  margin: 12px 0 6px;
+  page-break-after: avoid;
+}
+p, li { orphans: 3; widows: 3; }
+ul, ol { padding-left: 1.6em; margin: 6px 0 10px; }
+li { margin: 2px 0; }
+table {
+  width: 100% !important;
+  max-width: 100% !important;
+  border-collapse: collapse;
+  margin: 10px 0 14px;
+  font-size: 8pt;
+  table-layout: fixed;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; break-inside: avoid; }
+th, td {
+  border: 1px solid #94a3b8;
+  padding: 5px 6px;
+  vertical-align: top;
+  text-align: left;
+  word-break: break-word;
+}
+th {
+  background: #e2e8f0 !important;
+  font-weight: 700;
+  color: #0f172a;
+}
+code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 8pt;
+  background: #f1f5f9;
+  padding: 1px 3px;
+  border-radius: 2px;
+}
+pre {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 7pt;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  page-break-inside: avoid;
+}
+blockquote {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border-left: 3px solid #0f766e;
+  background: #f0fdfa;
+  color: #134e4a;
+}
+a { color: #1e3a5f; text-decoration: none; }
+hr { border: none; border-top: 1px solid #cbd5e1; margin: 18px 0; }
+strong { color: #0f172a; }
+</style>
+</head>
+<body>
+<h1 id="cache-technologies-scope-improvement-brief">Cache Technologies — Scope &amp; Improvement Brief</h1>
+<p><strong>Date:</strong> 2026-10-12<br />
+<strong>Audience:</strong> Management / Service Delivery<br />
+<strong>Product:</strong> iConnect Plus  </p>
+<hr />
+<h2 id="observation">Observation</h2>
+<p>After review of the shared architecture and module documents:</p>
+<ul>
+<li>Certain sections describe a <strong>generic ERP framework</strong></li>
+<li>Some modules are <strong>not applicable</strong> to Cache Technologies’ business model today</li>
+<li>Cache’s operating model is sales → supply → site delivery → people → assets — not full plant/ecommerce ERP</li>
+</ul>
+<hr />
+<h2 id="cache-applicable-modules-as-of-now">Cache-applicable modules (as of now)</h2>
+<p>Only these five modules are in scope for Cache Technologies:</p>
+<ul>
+<li><strong>CRM</strong> — Company → Lead → Opportunity → Quote → OVF → deal won / share to SCM</li>
+<li><strong>Procurement</strong> — SCM queue → vendor PO → GRN → delivery challan / delivery projects</li>
+<li><strong>Projects</strong> — PO queue → site stages (survey → SCM → onsite → handover → install → acceptance)</li>
+<li><strong>HRMS</strong> — Workforce, attendance, leave, onboarding / offboarding, ESS</li>
+<li><strong>Assets</strong> — Incoming (from GRN) → register → assign → DC challan / Non-IT register</li>
+</ul>
+<p><strong>Foundation (always required, not “extra modules”):</strong></p>
+<ul>
+<li>Auth / RBAC</li>
+<li>Workflow / Notification / Audit</li>
+<li>Organization</li>
+<li>Master Data (employees, products, parties as needed)</li>
+</ul>
+<p><strong>Out of Cache day-1 focus (framework only):</strong></p>
+<ul>
+<li>Manufacturing, Ecommerce, Portal, full GRC / plant Quality, Marketing suite, classic Sales O2C UI, deep Finance ops UI (keep posting path when needed)</li>
+</ul>
+<hr />
+<h2 id="end-to-end-workflows">End-to-end workflows</h2>
+<h3 id="master-chain">Master chain</h3>
+<pre><code class="language-text">CRM (OVF share)
+  - Procurement / SCM (PO → GRN → challan)
+  - Projects (PO queue → site install → acceptance)
+  - Assets (incoming from GRN → assign / DC)
+  - HRMS (people assigned to sites / ESS assets)
+</code></pre>
+<h3 id="scenarios-for-service-delivery-anurag-ashwani">Scenarios for Service Delivery (Anurag / Ashwani)</h3>
+<p>Fill / confirm each with happy path, exceptions, actors, and mandatory fields:</p>
+<ul>
+<li><strong>S1</strong> — Standard HW deal: OVF → SCM → PO → GRN → site → acceptance</li>
+<li><strong>S2</strong> — Services-heavy deal (margin / little HW)</li>
+<li><strong>S3</strong> — Partial GRN / multi-site delivery</li>
+<li><strong>S4</strong> — Fulfil from stock (no new vendor PO)</li>
+<li><strong>S5</strong> — OVF hold / charge change after SCM share</li>
+<li><strong>S6</strong> — Lost deal / My Jobs reject / quote rework</li>
+<li><strong>S7</strong> — Asset assign + DC challan lifecycle</li>
+<li><strong>S8</strong> — Non-IT assets</li>
+<li><strong>S9</strong> — New joiner for project deployment</li>
+<li><strong>S10</strong> — Separation + asset recovery</li>
+<li><strong>S11</strong> — Customer tracker / external status</li>
+<li><strong>S12</strong> — Multi-OEM / multi-vendor BOQ</li>
+</ul>
+<h3 id="sd-input-needed-per-scenario">SD input needed per scenario</h3>
+<ul>
+<li>Business trigger</li>
+<li>Actors / RACI</li>
+<li>Happy-path steps</li>
+<li>Exception paths</li>
+<li>Extra mandatory fields</li>
+<li>SLA / TAT</li>
+<li>Reports required</li>
+</ul>
+<hr />
+<h2 id="module-integration-key-handoffs">Module integration (key handoffs)</h2>
+<h3 id="crm-procurement">CRM → Procurement</h3>
+<ul>
+<li>OVF status <code>shared_scm</code></li>
+<li><code>po_number</code>, delivery period</li>
+<li>Vendor / customer payment days → <code>finance_cost_pct</code></li>
+<li>Line sides (customer vs vendor)</li>
+<li>Freight / additional / finance % (editable in SCM; syncs to CRM)</li>
+<li>Branch / company</li>
+</ul>
+<h3 id="procurement-projects">Procurement → Projects</h3>
+<ul>
+<li>Issued PO / company PO number</li>
+<li>Site / circle / contact</li>
+<li>Rack / server flags</li>
+<li>Optional challan id</li>
+<li>CRM customer / opportunity prefill</li>
+</ul>
+<h3 id="procurement-assets">Procurement → Assets</h3>
+<ul>
+<li>GRN / receipt line</li>
+<li>Serials / qty</li>
+<li>Branch / company</li>
+</ul>
+<h3 id="assets-scm-dc-challan">Assets → SCM (DC challan)</h3>
+<ul>
+<li><code>dc_number</code>, asset snapshot (tag, make, model, serial, cost)</li>
+<li>Employee snapshot (directory vs manual + <code>deployed_to</code>)</li>
+<li>Status: PENDING → SENT_TO_SCM → DOCUMENT_RECEIVED → SIGNED → RECEIVED</li>
+<li>Note: live SCM HTTP still partial (callback contract; outbound log-only this phase)</li>
+</ul>
+<h3 id="hrms-projects-assets">HRMS ↔ Projects / Assets</h3>
+<ul>
+<li>Stage assignees / <code>owner_employee_id</code></li>
+<li>Employee identity on DC / CRM</li>
+<li>ESS / workforce asset custody</li>
+</ul>
+<hr />
+<h2 id="reporting-and-dashboards">Reporting and dashboards</h2>
+<h3 id="exists-today">Exists today</h3>
+<ul>
+<li><strong>CRM</strong> — pipeline KPIs, sales performance (OVF margin), saved reports, stock aging</li>
+<li><strong>Procurement</strong> — SCM/PO/GRN funnel, exports, aging, timeline</li>
+<li><strong>Projects</strong> — site KPIs / stage queues, member jobs, profitability</li>
+<li><strong>HRMS</strong> — executive headcount / attendance / leave / hiring dashboard</li>
+<li><strong>Assets</strong> — ops KPIs + reports workspace (IT / Non-IT)</li>
+</ul>
+<h3 id="gaps-to-close-priority">Gaps to close (priority)</h3>
+<ul>
+<li><strong>R1</strong> — One Cache Ops view: open OVFs, SCM holds, stuck sites, pending DC</li>
+<li><strong>R2</strong> — Deal-to-acceptance cycle time by stage</li>
+<li><strong>R3</strong> — Site SLA board (survey / install / acceptance TAT)</li>
+<li><strong>R4</strong> — PO vs GRN vs site material readiness</li>
+<li><strong>R5</strong> — Asset custody vs site / employee</li>
+<li><strong>R6</strong> — Workforce on project (assignees vs attendance)</li>
+<li><strong>R7</strong> — Weekly management export / email of the above</li>
+</ul>
+<hr />
+<h2 id="next-actions">Next actions</h2>
+<ul>
+<li>Confirm Cache shortlist: CRM, Procurement, Projects, HRMS, Assets</li>
+<li>Service Delivery workshop (Anurag, Ashwani) on S1–S12</li>
+<li>Sign integration field list above (+ any SD extras)</li>
+<li>Build dashboards R1–R3 first</li>
+<li>Close live DC challan ↔ SCM loop</li>
+<li>Label other modules as Framework in shared decks to avoid confusion</li>
+</ul>
+</body>
+</html>
