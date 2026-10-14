@@ -1,9 +1,9 @@
 ---
-description: GitHub origin primary; owner-attributed history on all GitHub remotes; GitLab on demand
+description: GitHub origin primary; push all three GitHub remotes; GitLab on demand
 alwaysApply: true
 ---
 
-# Git remotes — GitHub primary, owner-only authors, GitLab on demand
+# Git remotes — GitHub primary, GitLab on demand
 
 ## Remotes
 
@@ -14,33 +14,24 @@ alwaysApply: true
 | `iconnectplus-erp` | `https://github.com/moksh-sharma/iConnectPlus-ERP.git` | Always-synced mirror |
 | `gitlab` | `https://172.16.200.77/cachedigitech/cache-erp-vapt-31-aug.git` | Mirror — only on explicit request |
 
-GitHub `origin` is the source of truth for **content**. All three GitHub remotes must keep **owner-only commit attribution**:
-
-- Author / committer: **Moksh Sharma** `<moksh-sharma@users.noreply.github.com>`
-
-Do **not** leave multi-author history on `origin`, `iconnectplus`, or `iconnectplus-erp`.
-
-**Settings scope:** sync **code/refs only** to mirrors — never sync collaborators, teams, or other GitHub repo settings.
+GitHub `origin` is the source of truth for **content**. Sync **code/refs only** to mirrors — never sync collaborators, teams, or other GitHub repo settings.
 
 ## When the user asks to push / push to git
 
 1. Commit on the current branch as usual.
-2. Sync **owner-rewritten** history to all GitHub remotes (force-push as needed):
+2. Push the current branch tip to all three GitHub remotes (no history rewrite):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-iconnectplus-erp.ps1
+git push origin HEAD:main
+git push iconnectplus HEAD:main
+git push iconnectplus-erp HEAD:main
 ```
 
-That script rewrites author/committer to the owner, force-pushes `origin` (+ its push URLs), `iconnectplus`, and `iconnectplus-erp`, then resets local `main` to the rewritten tip.
-
-3. Do **not** plain `git push origin` alone if that would publish multi-author commits — prefer the script above after any push-to-git request.
-4. Do **not** push GitLab unless explicitly asked.
+3. Do **not** push GitLab unless explicitly asked.
 
 ## When the user asks to sync iconnectplus / iconnectplus-erp / keep remotes synced
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-iconnectplus-erp.ps1
-```
+Same three pushes as above.
 
 ## When the user asks to sync gitlab
 
@@ -49,17 +40,14 @@ git push origin HEAD
 git push gitlab HEAD:<branch> --force-with-lease
 ```
 
-(After an owner rewrite, `origin` tip already matches local; push GitLab to that tip.)
-
-Prefer matching branch names. Owner-history sync uses `--force` by design on the GitHub remotes.
+Prefer matching branch names.
 
 This GitLab host uses a self-signed cert. Local repo already has `http.https://172.16.200.77/.sslVerify=false`. Auth requires a GitLab username + PAT; ask the user if push fails.
 
 ## Do not
 
-- Leave or re-introduce multi-author history on `origin` / `iconnectplus` / `iconnectplus-erp`
-- Skip the owner-rewrite sync on "push to git"
 - Sync collaborators / GitHub settings onto mirrors
 - Auto-sync GitLab on every GitHub push
 - Treat mirrors as primary fetch when the user said "push to git"
 - Sync mirrors → origin unless the user explicitly asks
+- Rewrite commit authors / force-push rewritten history unless the user explicitly asks
