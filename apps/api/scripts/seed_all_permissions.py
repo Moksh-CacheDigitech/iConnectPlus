@@ -28,21 +28,17 @@ from modules.finance.permissions import FINANCE_PERMISSIONS  # noqa: E402
 from modules.foundation.models.security import SecRole, SecTenant, SecUser  # noqa: E402
 from modules.foundation.permissions import FOUNDATION_PERMISSIONS  # noqa: E402
 from modules.foundation.service.rbac_service import RBACService  # noqa: E402
-from modules.grc.permissions import GRC_PERMISSIONS  # noqa: E402
 from modules.helpdesk.permissions import HELPDESK_PERMISSIONS  # noqa: E402
 from modules.hr.permissions import HR_PERMISSIONS  # noqa: E402
-from modules.integration.permissions import INTEGRATION_PERMISSIONS  # noqa: E402
 from modules.inventory.permissions import INV_PERMISSIONS  # noqa: E402
 from modules.manufacturing.permissions import MFG_PERMISSIONS  # noqa: E402
 from modules.master_data.permissions import MASTER_PERMISSIONS  # noqa: E402
 from modules.organization.permissions import ORGANIZATION_PERMISSIONS  # noqa: E402
 from modules.payroll.permissions import PAYROLL_PERMISSIONS  # noqa: E402
-from modules.portal.permissions import PORTAL_PERMISSIONS  # noqa: E402
 from modules.procurement.permissions import PROC_PERMISSIONS  # noqa: E402
 from modules.project.permissions import PROJECT_PERMISSIONS  # noqa: E402
 from modules.quality.permissions import QM_PERMISSIONS  # noqa: E402
 from modules.recruitment.permissions import RECRUITMENT_PERMISSIONS  # noqa: E402
-from modules.sales.permissions import SALES_PERMISSIONS  # noqa: E402
 from modules.service.permissions import SERVICE_PERMISSIONS  # noqa: E402
 
 ALL_PERMISSION_SETS: list[tuple[str, list[tuple[str, str, str, str]]]] = [
@@ -50,7 +46,6 @@ ALL_PERMISSION_SETS: list[tuple[str, list[tuple[str, str, str, str]]]] = [
     ("organization", ORGANIZATION_PERMISSIONS),
     ("master_data", MASTER_PERMISSIONS),
     ("finance", FINANCE_PERMISSIONS),
-    ("sales", SALES_PERMISSIONS),
     ("procurement", PROC_PERMISSIONS),
     ("inventory", INV_PERMISSIONS),
     ("manufacturing", MFG_PERMISSIONS),
@@ -64,11 +59,8 @@ ALL_PERMISSION_SETS: list[tuple[str, list[tuple[str, str, str, str]]]] = [
     ("service", SERVICE_PERMISSIONS),
     ("helpdesk", HELPDESK_PERMISSIONS),
     ("document", DOCUMENT_PERMISSIONS),
-    ("grc", GRC_PERMISSIONS),
     ("analytics", ANALYTICS_PERMISSIONS),
-    ("integration", INTEGRATION_PERMISSIONS),
     ("ecommerce", ECOMMERCE_PERMISSIONS),
-    ("portal", PORTAL_PERMISSIONS),
 ]
 
 DEMO_ROLE_CODES = ("SUPER_ADMIN", "TENANT_ADMIN")

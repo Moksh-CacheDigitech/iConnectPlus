@@ -16,13 +16,10 @@ from modules.crm.schemas import LeadResponse
 from modules.foundation.dependencies import require_permission
 from modules.foundation.domain.value_objects import TenantContext
 from modules.master_data.schemas import CustomerResponse, ProductResponse
-from modules.sales.schemas import InvoiceResponse, SalesOrderResponse
 from shared.schemas import APIResponse
 
 leads_router = APIRouter(prefix="/leads", tags=["Agent Read - Leads"])
-orders_router = APIRouter(prefix="/orders", tags=["Agent Read - Orders"])
 customers_router = APIRouter(prefix="/agent/customers", tags=["Agent Read - Customers"])
-invoices_router = APIRouter(prefix="/invoices", tags=["Agent Read - Invoices"])
 products_router = APIRouter(prefix="/agent/products", tags=["Agent Read - Products"])
 
 
@@ -92,30 +89,6 @@ def get_lead(
     return APIResponse(message="Lead retrieved", data=LeadResponse.model_validate(row))
 
 
-@orders_router.get("", response_model=PaginatedListResponse)
-def list_orders(
-    ctx: Annotated[TenantContext, Depends(require_permission("sales.order:read"))],
-    db: Annotated[Session, Depends(get_db)],
-    query: Annotated[AgentListQuery, Depends(get_agent_list_query)],
-) -> PaginatedListResponse:
-    rows, meta = AgentReadService(db).list_orders(ctx, query)
-    return PaginatedListResponse(
-        message="Orders retrieved",
-        data=[SalesOrderResponse.model_validate(r) for r in rows],
-        meta=meta,
-    )
-
-
-@orders_router.get("/{id}", response_model=APIResponse[SalesOrderResponse])
-def get_order(
-    id: UUID,
-    ctx: Annotated[TenantContext, Depends(require_permission("sales.order:read"))],
-    db: Annotated[Session, Depends(get_db)],
-) -> APIResponse[SalesOrderResponse]:
-    row = AgentReadService(db).get_order(ctx, id)
-    return APIResponse(message="Order retrieved", data=SalesOrderResponse.model_validate(row))
-
-
 @customers_router.get("", response_model=PaginatedListResponse)
 def list_customers(
     ctx: Annotated[TenantContext, Depends(require_permission("master.customer:read"))],
@@ -138,30 +111,6 @@ def get_customer(
 ) -> APIResponse[CustomerResponse]:
     row = AgentReadService(db).get_customer(ctx, id)
     return APIResponse(message="Customer retrieved", data=CustomerResponse(**row.__dict__))
-
-
-@invoices_router.get("", response_model=PaginatedListResponse)
-def list_invoices(
-    ctx: Annotated[TenantContext, Depends(require_permission("sales.invoice:read"))],
-    db: Annotated[Session, Depends(get_db)],
-    query: Annotated[AgentListQuery, Depends(get_agent_list_query)],
-) -> PaginatedListResponse:
-    rows, meta = AgentReadService(db).list_invoices(ctx, query)
-    return PaginatedListResponse(
-        message="Invoices retrieved",
-        data=[InvoiceResponse.model_validate(r) for r in rows],
-        meta=meta,
-    )
-
-
-@invoices_router.get("/{id}", response_model=APIResponse[InvoiceResponse])
-def get_invoice(
-    id: UUID,
-    ctx: Annotated[TenantContext, Depends(require_permission("sales.invoice:read"))],
-    db: Annotated[Session, Depends(get_db)],
-) -> APIResponse[InvoiceResponse]:
-    row = AgentReadService(db).get_invoice(ctx, id)
-    return APIResponse(message="Invoice retrieved", data=InvoiceResponse.model_validate(row))
 
 
 @products_router.get("", response_model=PaginatedListResponse)

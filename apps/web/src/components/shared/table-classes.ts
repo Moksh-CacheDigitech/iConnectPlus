@@ -4,7 +4,8 @@
  */
 export const dataTableClasses = {
   shell: "overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm",
-  scroll: "erp-scroll overflow-x-auto",
+  /* overscroll-y-auto: let vertical wheel chain to the page scroller */
+  scroll: "erp-scroll overflow-x-auto overscroll-y-auto",
   table: "w-full text-left text-[13px] leading-5",
   thead:
     "border-b border-border/80 bg-muted/60 text-xs font-semibold tracking-wide text-foreground uppercase",

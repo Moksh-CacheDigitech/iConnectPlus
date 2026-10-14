@@ -26,22 +26,6 @@
       "permission": "crm.lead:read"
     },
     {
-      "tool_name": "list_orders",
-      "method": "GET",
-      "path": "/api/v1/orders",
-      "access": "read",
-      "description": "List sales orders. Optional filters: q (document number search), status, limit, offset.",
-      "permission": "sales.order:read"
-    },
-    {
-      "tool_name": "get_order",
-      "method": "GET",
-      "path": "/api/v1/orders/{id}",
-      "access": "read",
-      "description": "Fetch a single sales order by UUID, including line items.",
-      "permission": "sales.order:read"
-    },
-    {
       "tool_name": "list_customers",
       "method": "GET",
       "path": "/api/v1/agent/customers",
@@ -56,22 +40,6 @@
       "access": "read",
       "description": "Fetch a single customer record by UUID.",
       "permission": "master.customer:read"
-    },
-    {
-      "tool_name": "list_invoices",
-      "method": "GET",
-      "path": "/api/v1/invoices",
-      "access": "read",
-      "description": "List sales invoices. Optional filters: q (document number), status, limit, offset.",
-      "permission": "sales.invoice:read"
-    },
-    {
-      "tool_name": "get_invoice",
-      "method": "GET",
-      "path": "/api/v1/invoices/{id}",
-      "access": "read",
-      "description": "Fetch a single sales invoice by UUID.",
-      "permission": "sales.invoice:read"
     },
     {
       "tool_name": "list_products",

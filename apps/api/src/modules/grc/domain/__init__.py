@@ -1,1 +1,0 @@
-"""GRC domain layer."""

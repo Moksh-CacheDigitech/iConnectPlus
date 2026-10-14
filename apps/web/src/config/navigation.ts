@@ -1,6 +1,5 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  Activity,
   BarChart3,
   Boxes,
   Building2,
@@ -14,8 +13,6 @@ import {
   Megaphone,
   Mic,
   Package,
-  Plug,
-  Scale,
   Shield,
   ShoppingCart,
   Store,
@@ -68,11 +65,8 @@ export const moduleIconMap: Record<ErpModule["icon"], LucideIcon> = {
   helpdesk: Headphones,
   document: FileText,
   marketing: Megaphone,
-  grc: Scale,
   analytics: BarChart3,
-  integration: Plug,
   ecommerce: Store,
-  portal: Activity,
 };
 
 const groupTitles: Record<ErpModule["group"], string> = {
@@ -85,6 +79,9 @@ const groupTitles: Record<ErpModule["group"], string> = {
 
 /** Foundation, organization, and master data stay in the ERP shell; operations open in a new tab. */
 const IN_APP_NAV_GROUPS = new Set<ErpModule["group"]>(["foundation", "organization", "master-data"]);
+
+/** Modules kept in the registry but omitted from the ERP shell sidebar. */
+const HIDDEN_FROM_SHELL_NAV = new Set<string>(["recruitment", "payroll", "inventory"]);
 
 export const navigation: NavGroup[] = [
   {
@@ -108,7 +105,7 @@ export const navigation: NavGroup[] = [
   },
   ...(["foundation", "organization", "master-data", "operations"] as const).map((group) => {
     const moduleItems = erpModules
-      .filter((m) => m.group === group)
+      .filter((m) => m.group === group && !HIDDEN_FROM_SHELL_NAV.has(m.key))
       .map((m) => ({
         title: m.title,
         href: m.href,

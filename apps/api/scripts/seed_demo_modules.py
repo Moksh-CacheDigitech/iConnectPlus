@@ -87,13 +87,6 @@ from modules.crm.models.lead_activity import CrmLeadActivity  # noqa: E402
 from modules.crm.models.opportunity_stage import CrmOpportunityStage  # noqa: E402
 
 # Sales
-from modules.sales.models.invoice import SalesInvoiceHeader  # noqa: E402
-from modules.sales.models.order import SalesOrderHeader, SalesOrderLine  # noqa: E402
-from modules.sales.models.pricing import SalesPriceList, SalesDiscountRule  # noqa: E402
-from modules.sales.models.quotation import SalesQuotationHeader  # noqa: E402
-from modules.sales.models.credit import SalesCustomerCredit  # noqa: E402
-from modules.sales.models.delivery import SalesDeliveryHeader, SalesDeliveryLine  # noqa: E402
-from modules.sales.models.return_doc import SalesReturnHeader, SalesReturnLine  # noqa: E402
 
 # Helpdesk
 from modules.helpdesk.models.ticket import HdTicket  # noqa: E402
@@ -204,23 +197,6 @@ from modules.document.models.document_approval import DocDocumentApproval  # noq
 from modules.document.models.document_workflow import DocDocumentWorkflow  # noqa: E402
 
 # GRC
-from modules.grc.models.policy import GrcPolicy  # noqa: E402
-from modules.grc.models.risk_category import GrcRiskCategory  # noqa: E402
-from modules.grc.models.risk_register import GrcRiskRegister  # noqa: E402
-from modules.grc.models.control import GrcControl  # noqa: E402
-from modules.grc.models.compliance_framework import GrcComplianceFramework  # noqa: E402
-from modules.grc.models.compliance_requirement import GrcComplianceRequirement  # noqa: E402
-from modules.grc.models.compliance_assessment import GrcComplianceAssessment  # noqa: E402
-from modules.grc.models.audit_plan import GrcAuditPlan  # noqa: E402
-from modules.grc.models.audit import GrcAudit  # noqa: E402
-from modules.grc.models.corrective_action import GrcCorrectiveAction  # noqa: E402
-from modules.grc.models.exception import GrcException  # noqa: E402
-from modules.grc.models.incident import GrcIncident  # noqa: E402
-from modules.grc.models.policy_version import GrcPolicyVersion  # noqa: E402
-from modules.grc.models.control_test import GrcControlTest  # noqa: E402
-from modules.grc.models.risk_assessment import GrcRiskAssessment  # noqa: E402
-from modules.grc.models.risk_treatment import GrcRiskTreatment  # noqa: E402
-from modules.grc.models.audit_finding import GrcAuditFinding  # noqa: E402
 
 # Recruitment
 from modules.recruitment.models.candidate import RecCandidate  # noqa: E402
@@ -297,29 +273,6 @@ from modules.ecommerce.models.return_request import EcReturnRequest  # noqa: E40
 from modules.ecommerce.models.coupon import EcCoupon  # noqa: E402
 from modules.ecommerce.models.promotion import EcPromotion  # noqa: E402
 from modules.ecommerce.models.marketplace_connector import EcMarketplaceConnector  # noqa: E402
-from modules.integration.models.connector import IntConnector  # noqa: E402
-from modules.integration.models.external_system import IntExternalSystem  # noqa: E402
-from modules.integration.models.api_credential import IntApiCredential  # noqa: E402
-from modules.integration.models.oauth_client import IntOauthClient  # noqa: E402
-from modules.integration.models.webhook import IntWebhook  # noqa: E402
-from modules.integration.models.event_definition import IntEventDefinition  # noqa: E402
-from modules.integration.models.message_queue import IntMessageQueue  # noqa: E402
-from modules.integration.models.data_mapping import IntDataMapping  # noqa: E402
-from modules.integration.models.sync_job import IntSyncJob  # noqa: E402
-from modules.integration.models.rate_limit import IntRateLimit  # noqa: E402
-from modules.portal.models.portal_account import PtPortalAccount  # noqa: E402
-from modules.portal.models.customer_profile import PtCustomerProfile  # noqa: E402
-from modules.portal.models.dashboard import PtDashboard  # noqa: E402
-from modules.portal.models.notification import PtNotification  # noqa: E402
-from modules.portal.models.message_thread import PtMessageThread  # noqa: E402
-from modules.portal.models.support_ticket import PtSupportTicket  # noqa: E402
-from modules.portal.models.service_request import PtServiceRequest  # noqa: E402
-from modules.portal.models.document_access import PtDocumentAccess  # noqa: E402
-from modules.portal.models.invoice_view import PtInvoiceView  # noqa: E402
-from modules.portal.models.order_view import PtOrderView  # noqa: E402
-from modules.portal.models.portal_session import PtPortalSession  # noqa: E402
-from modules.portal.models.preference import PtPreference  # noqa: E402
-from modules.portal.models.login_audit import PtLoginAudit  # noqa: E402
 
 # Foundation extras
 from modules.foundation.models.notification import NtfTemplate  # noqa: E402
@@ -1710,6 +1663,7 @@ def seed_crm(db, tenant_id, company_id, branch_id, admin_id, employees, customer
 
 
 def seed_sales(db, tenant_id, company_id, branch_id, admin_id, customer, fy, period, product, uom):
+    return  # module removed
     price_list = ensure(
         db,
         SalesPriceList,
@@ -4841,6 +4795,7 @@ def seed_documents(db, tenant_id, company_id, branch_id, admin_id, employees):
 
 
 def seed_grc(db, tenant_id, company_id, branch_id, admin_id, employees):
+    return  # module removed
     policy = ensure(
         db,
         GrcPolicy,
@@ -5439,6 +5394,7 @@ def seed_analytics(db, tenant_id, company_id, branch_id, admin_id, employees):
 
 
 def seed_integration(db, tenant_id, company_id, admin_id, employees):
+    return  # module removed
     system = ensure(
         db,
         IntExternalSystem,
@@ -5950,6 +5906,7 @@ def seed_foundation_extras(db, tenant_id, company_id, branch_id, admin_id):
 
 
 def seed_portal(db, tenant_id, company_id, admin_id, customer, employees):
+    return  # module removed
     account = ensure(
         db,
         PtPortalAccount,
@@ -6302,12 +6259,6 @@ def main() -> None:
             lambda: seed_crm(db, tenant.id, company.id, branch.id, admin.id, employees, customer),
         )
         run(
-            "sales",
-            lambda: seed_sales(
-                db, tenant.id, company.id, branch.id, admin.id, customer, fy, period, product, uom
-            ),
-        )
-        run(
             "procurement",
             lambda: seed_procurement(
                 db, tenant.id, company.id, branch.id, admin.id, vendor, employees, dept.id, cc.id
@@ -6383,22 +6334,6 @@ def main() -> None:
         run(
             "documents",
             lambda: seed_documents(db, tenant.id, company.id, branch.id, admin.id, employees),
-        )
-        run("grc", lambda: seed_grc(db, tenant.id, company.id, branch.id, admin.id, employees))
-        run(
-            "analytics",
-            lambda: seed_analytics(db, tenant.id, company.id, branch.id, admin.id, employees),
-        )
-        run("integration", lambda: seed_integration(db, tenant.id, company.id, admin.id, employees))
-        run(
-            "ecommerce",
-            lambda: seed_ecommerce(
-                db, tenant.id, company.id, admin.id, product, employees, customer, extra_products
-            ),
-        )
-        run(
-            "portal",
-            lambda: seed_portal(db, tenant.id, company.id, admin.id, customer, employees),
         )
         run(
             "foundation extras",

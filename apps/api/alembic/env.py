@@ -17,7 +17,6 @@ import modules.finance.models  # noqa: F401 - register ORM metadata
 import modules.master_data.models  # noqa: F401 - register ORM metadata
 import modules.organization.models  # noqa: F401 - register ORM metadata
 import modules.procurement.models  # noqa: F401 - register ORM metadata
-import modules.sales.models  # noqa: F401 - register ORM metadata
 import modules.inventory.models  # noqa: F401 - register ORM metadata
 import modules.manufacturing.models  # noqa: F401 - register ORM metadata
 import modules.quality.models  # noqa: F401 - register ORM metadata
@@ -31,11 +30,8 @@ import modules.service.models  # noqa: F401 - register ORM metadata
 import modules.helpdesk.models  # noqa: F401 - register ORM metadata
 import modules.document.models  # noqa: F401 - register ORM metadata
 import modules.marketing.models  # noqa: F401 - register ORM metadata
-import modules.grc.models  # noqa: F401 - register ORM metadata
 import modules.analytics.models  # noqa: F401 - register ORM metadata
-import modules.integration.models  # noqa: F401 - register ORM metadata
 import modules.ecommerce.models  # noqa: F401 - register ORM metadata
-import modules.portal.models  # noqa: F401 - register ORM metadata
 
 config = context.config
 

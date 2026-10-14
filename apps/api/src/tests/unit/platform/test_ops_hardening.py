@@ -82,9 +82,8 @@ def test_policy_matrix_matches_module_workflow_codes() -> None:
     from modules.master_data.domain.enums import WORKFLOW_CODES as MDM
     from modules.platform.policies import policy_for_entity
     from modules.procurement.domain.enums import WORKFLOW_CODES as PROC
-    from modules.sales.domain.enums import WORKFLOW_CODES as SALES
 
-    for codes in (AST, FIN, MDM, PROC, SALES):
+    for codes in (AST, FIN, MDM, PROC):
         for entity, code in codes.items():
             policy = policy_for_entity(entity)
             assert policy is not None, f"{entity} missing from APPROVAL_POLICIES"

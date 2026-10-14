@@ -1,12 +1,13 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
 import { ElevenLabsConvaiWidget } from "@/components/elevenlabs/convai-widget";
 import { AppTopbar } from "@/components/layout/app-topbar";
 import { ShellSidebar } from "@/components/layout/module-sidebar-registry";
 import { isHrPath } from "@/config/hr-nav";
+import { useMainScrollChain } from "@/hooks/use-main-scroll-chain";
 import { useStandaloneChrome } from "@/hooks/use-standalone-chrome";
 
 interface AppShellProps {
@@ -18,6 +19,8 @@ export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const standalone = useStandaloneChrome();
+  const mainRef = useRef<HTMLElement>(null);
+  useMainScrollChain(mainRef);
   const hrMode = isHrPath(pathname);
   /** QR scan focus mode — full portal without the assets dock (better on phones). */
   const qrScanMode =
@@ -28,6 +31,7 @@ export function AppShell({ children }: AppShellProps) {
       <div id="erp-workspace-main" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <AppTopbar />
         <main
+          ref={mainRef}
           className={`erp-scroll min-h-0 min-w-0 flex-1 overflow-x-clip overflow-y-auto overscroll-contain px-3 py-4 sm:px-6 sm:py-6 lg:px-8 ${qrScanMode ? "pb-[max(1.5rem,env(safe-area-inset-bottom))]" : ""
             }`}
         >

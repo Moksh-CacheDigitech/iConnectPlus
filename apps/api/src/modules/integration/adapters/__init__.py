@@ -1,1 +1,0 @@
-"""Integration cross-module adapters."""

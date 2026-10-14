@@ -18,18 +18,15 @@ import {
   openPeriodCount,
   sumBalances,
 } from "@/services/finance-service";
-import { loadGrcOverviewApi } from "@/services/grc-service";
 import {
   countOpenDocs as helpdeskCountOpenDocs,
   loadHelpdeskOverview,
 } from "@/services/helpdesk-service";
 import { loadHrOverview } from "@/services/hr-service";
-import { loadIntegrationOverview } from "@/services/integration-service";
 import { loadInventoryOverview } from "@/services/inventory-service";
 import { loadManufacturingOverview } from "@/services/manufacturing-service";
 import { loadMarketingOverview } from "@/services/marketing-service";
 import { loadPayrollOverview } from "@/services/payroll-service";
-import { loadPortalOverview } from "@/services/portal-service";
 import {
   asStatus as procAsStatus,
   loadProcurementOverview,
@@ -38,7 +35,6 @@ import { loadProjectsOverview } from "@/services/projects-service";
 import { loadQualityOverview } from "@/services/quality-service";
 import { loadRecruitmentOverview } from "@/services/recruitment-service";
 import { listOvfs, listQuotes } from "@/services/sales-crm-service";
-import { loadSalesOverview } from "@/services/sales-service";
 import { loadServiceOverview } from "@/services/service-mgmt-service";
 import { buildProcurementPipelineMetrics } from "@/utils/procurement-pipeline-metrics";
 
@@ -589,49 +585,6 @@ const MODULE_LOADERS: Record<string, () => Promise<ModuleLoaderResult>> = {
       };
     }
   },
-  grc: async () => {
-    try {
-      const overview = await loadGrcOverviewApi();
-      const kpis = overview.kpis;
-      return {
-        key: "grc",
-        ...moduleMeta("grc"),
-        analytics: {
-          status: "ok",
-          recordCount:
-            kpis.total_risks +
-            kpis.total_controls +
-            kpis.total_audits +
-            kpis.total_policies,
-          kpis: [
-            { label: "Open risks", value: formatCount(kpis.open_risks) },
-            { label: "Active controls", value: formatCount(kpis.active_controls) },
-            { label: "Planned audits", value: formatCount(kpis.planned_audits) },
-            { label: "Open CAPAs", value: formatCount(kpis.open_capas) },
-          ],
-          errors: [],
-        },
-      };
-    } catch (err) {
-      if (isAccessDeniedError(err)) {
-        return {
-          key: "grc",
-          ...moduleMeta("grc"),
-          analytics: { status: "ok", recordCount: 0, kpis: [], errors: [] },
-        };
-      }
-      return {
-        key: "grc",
-        ...moduleMeta("grc"),
-        analytics: {
-          status: "error",
-          recordCount: 0,
-          kpis: [],
-          errors: [err instanceof Error ? err.message : "Failed to load GRC overview"],
-        },
-      };
-    }
-  },
   documents: () =>
     loadGenericOverviewAnalytics(
       "documents",
@@ -681,17 +634,6 @@ const MODULE_LOADERS: Record<string, () => Promise<ModuleLoaderResult>> = {
         ];
       },
     ),
-  sales: () =>
-    loadGenericOverviewAnalytics(
-      "sales",
-      loadSalesOverview,
-      ["orders", "deliveries", "invoices", "returns"],
-      (overview) => [
-        { label: "Sales orders", value: formatCount((overview.orders as unknown[]).length) },
-        { label: "Deliveries", value: formatCount((overview.deliveries as unknown[]).length) },
-        { label: "Invoices", value: formatCount((overview.invoices as unknown[]).length) },
-      ],
-    ),
   ecommerce: () =>
     loadGenericOverviewAnalytics(
       "ecommerce",
@@ -701,27 +643,6 @@ const MODULE_LOADERS: Record<string, () => Promise<ModuleLoaderResult>> = {
         { label: "Orders", value: formatCount((overview.orders as unknown[]).length) },
         { label: "Listings", value: formatCount((overview.listings as unknown[]).length) },
         { label: "Stores", value: formatCount((overview.stores as unknown[]).length) },
-      ],
-    ),
-  portal: () =>
-    loadGenericOverviewAnalytics(
-      "portal",
-      loadPortalOverview,
-      ["accounts", "dashboards", "notifications", "tickets"],
-      (overview) => [
-        { label: "Portal accounts", value: formatCount((overview.accounts as unknown[]).length) },
-        { label: "Dashboards", value: formatCount((overview.dashboards as unknown[]).length) },
-      ],
-    ),
-  integration: () =>
-    loadGenericOverviewAnalytics(
-      "integration",
-      loadIntegrationOverview,
-      ["connectors", "syncJobs", "mappings", "events"],
-      (overview) => [
-        { label: "Connectors", value: formatCount((overview.connectors as unknown[]).length) },
-        { label: "Sync jobs", value: formatCount((overview.syncJobs as unknown[]).length) },
-        { label: "Mappings", value: formatCount((overview.mappings as unknown[]).length) },
       ],
     ),
   email: async () => {

@@ -78,6 +78,8 @@ class CRMIntegrationService:
             opportunity_id=opp.id,
             currency_code=currency_code,
         )
+        if quotation is None:
+            return None
         self._opps.update(ctx, opportunity_id, sales_quotation_id=quotation.id)
         return quotation
 

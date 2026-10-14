@@ -19,7 +19,7 @@ import { WORKSPACE_SIDEBARS } from "@/config/workspace-sidebars";
 
 describe("resolveShellSidebarKey", () => {
   it("gives every standalone module workspace a left sidebar", () => {
-    for (const root of ["/crm", "/finance", "/grc", "/documents", "/assets", "/procurement"]) {
+    for (const root of ["/crm", "/finance", "/documents", "/assets", "/procurement"]) {
       expect(resolveShellSidebarKey({ pathname: `${root}/x`, standalone: true })).toBe(root);
     }
     expect(resolveShellSidebarKey({ pathname: "/finance", standalone: true })).toBe("/finance");

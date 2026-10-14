@@ -9,10 +9,8 @@ from modules.document import permissions as document_permissions
 from modules.ecommerce import permissions as ecommerce_permissions
 from modules.finance import permissions as finance_permissions
 from modules.foundation import permissions as foundation_permissions
-from modules.grc import permissions as grc_permissions
 from modules.helpdesk import permissions as helpdesk_permissions
 from modules.hr import permissions as hr_permissions
-from modules.integration import permissions as integration_permissions
 from modules.inventory import permissions as inventory_permissions
 from modules.manufacturing import permissions as manufacturing_permissions
 from modules.marketing import permissions as marketing_permissions
@@ -20,12 +18,10 @@ from modules.master_data import permissions as master_data_permissions
 from modules.organization import permissions as organization_permissions
 from modules.payroll import permissions as payroll_permissions
 from modules.platform import permissions as platform_permissions
-from modules.portal import permissions as portal_permissions
 from modules.procurement import permissions as procurement_permissions
 from modules.project import permissions as project_permissions
 from modules.quality import permissions as quality_permissions
 from modules.recruitment import permissions as recruitment_permissions
-from modules.sales import permissions as sales_permissions
 from modules.service import permissions as service_permissions
 
 _PERMISSION_MODULES = (
@@ -36,10 +32,8 @@ _PERMISSION_MODULES = (
     ecommerce_permissions,
     finance_permissions,
     foundation_permissions,
-    grc_permissions,
     helpdesk_permissions,
     hr_permissions,
-    integration_permissions,
     inventory_permissions,
     manufacturing_permissions,
     marketing_permissions,
@@ -47,12 +41,10 @@ _PERMISSION_MODULES = (
     organization_permissions,
     payroll_permissions,
     platform_permissions,
-    portal_permissions,
     procurement_permissions,
     project_permissions,
     quality_permissions,
     recruitment_permissions,
-    sales_permissions,
     service_permissions,
 )
 

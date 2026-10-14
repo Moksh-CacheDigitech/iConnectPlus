@@ -196,10 +196,13 @@
     transform: scale(0.985);
   }
 
+  /* Scrollbar styling only — do not set overscroll-behavior here.
+     Horizontal table wrappers use erp-scroll + overflow-x-auto; contain on both
+     axes traps vertical wheel and blocks page scroll when the cursor is on a table.
+     Vertical scrollports that need isolation opt in with Tailwind overscroll-contain. */
   .erp-scroll {
     scrollbar-width: thin;
     scrollbar-color: oklch(0.75 0.03 160 / 55%) transparent;
-    overscroll-behavior: contain;
   }
 
   .erp-scroll::-webkit-scrollbar {

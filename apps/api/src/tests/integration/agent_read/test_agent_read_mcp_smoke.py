@@ -33,9 +33,7 @@ def _auth_headers(client: TestClient) -> dict[str, str] | None:
     ("path", "tool_name"),
     [
         ("/api/v1/leads", "list_leads"),
-        ("/api/v1/orders", "list_orders"),
         ("/api/v1/agent/customers", "list_customers"),
-        ("/api/v1/invoices", "list_invoices"),
         ("/api/v1/agent/products", "list_products"),
     ],
 )
@@ -50,9 +48,7 @@ def test_mcp_registers_read_tools(client: TestClient, path: str, tool_name: str)
     "path",
     [
         "/api/v1/leads",
-        "/api/v1/orders",
         "/api/v1/agent/customers",
-        "/api/v1/invoices",
         "/api/v1/agent/products",
     ],
 )

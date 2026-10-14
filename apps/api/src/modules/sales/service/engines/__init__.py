@@ -1,1 +1,0 @@
-"""Sales accounting engines."""

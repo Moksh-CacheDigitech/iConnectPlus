@@ -1,1 +1,0 @@
-"""Customer Portal domain layer."""

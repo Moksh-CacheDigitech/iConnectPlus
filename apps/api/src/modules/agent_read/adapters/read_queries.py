@@ -5,7 +5,6 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmLead
 from modules.crm.repository.base import CrmScopedRepository
@@ -13,9 +12,6 @@ from modules.foundation.domain.value_objects import TenantContext
 from modules.master_data.models.party import MasterCustomer
 from modules.master_data.models.product import MasterProduct
 from modules.master_data.repository.base import MasterScopedRepository
-from modules.sales.models.invoice import SalesInvoiceHeader
-from modules.sales.models.order import SalesOrderHeader
-from modules.sales.repository.base import SalesScopedRepository
 
 
 class AgentLeadReadRepository(CrmScopedRepository):
@@ -60,45 +56,6 @@ class AgentLeadReadRepository(CrmScopedRepository):
         return rows, total
 
 
-class AgentOrderReadRepository(SalesScopedRepository):
-    def search(
-        self,
-        ctx: TenantContext,
-        company_id: UUID,
-        *,
-        q: str | None,
-        status: str | None,
-        limit: int,
-        offset: int,
-    ) -> tuple[list[SalesOrderHeader], int]:
-        base = select(SalesOrderHeader).where(
-            SalesOrderHeader.company_id == company_id,
-            SalesOrderHeader.is_deleted.is_(False),
-        )
-        base = self.apply_sales_filter(base, SalesOrderHeader, ctx, branch_scoped=True)
-        if status:
-            base = base.where(SalesOrderHeader.status == status)
-        if q:
-            pattern = f"%{q.strip()}%"
-            base = base.where(SalesOrderHeader.document_number.ilike(pattern))
-        count_stmt = select(func.count()).select_from(base.subquery())
-        total = int(self.db.scalar(count_stmt) or 0)
-        rows = list(
-            self.db.scalars(
-                base.order_by(SalesOrderHeader.document_date.desc()).limit(limit).offset(offset)
-            ).all()
-        )
-        return rows, total
-
-    def get(self, ctx: TenantContext, order_id: UUID) -> SalesOrderHeader | None:
-        stmt = select(SalesOrderHeader).where(
-            SalesOrderHeader.id == order_id,
-            SalesOrderHeader.tenant_id == ctx.tenant_id,
-            SalesOrderHeader.is_deleted.is_(False),
-        )
-        return self.db.scalar(stmt)
-
-
 class AgentCustomerReadRepository(MasterScopedRepository):
     def search(
         self,
@@ -137,45 +94,6 @@ class AgentCustomerReadRepository(MasterScopedRepository):
             MasterCustomer.id == customer_id,
             MasterCustomer.tenant_id == ctx.tenant_id,
             MasterCustomer.is_deleted.is_(False),
-        )
-        return self.db.scalar(stmt)
-
-
-class AgentInvoiceReadRepository(SalesScopedRepository):
-    def search(
-        self,
-        ctx: TenantContext,
-        company_id: UUID,
-        *,
-        q: str | None,
-        status: str | None,
-        limit: int,
-        offset: int,
-    ) -> tuple[list[SalesInvoiceHeader], int]:
-        base = select(SalesInvoiceHeader).where(
-            SalesInvoiceHeader.company_id == company_id,
-            SalesInvoiceHeader.is_deleted.is_(False),
-        )
-        base = self.apply_sales_filter(base, SalesInvoiceHeader, ctx, branch_scoped=True)
-        if status:
-            base = base.where(SalesInvoiceHeader.status == status)
-        if q:
-            pattern = f"%{q.strip()}%"
-            base = base.where(SalesInvoiceHeader.document_number.ilike(pattern))
-        count_stmt = select(func.count()).select_from(base.subquery())
-        total = int(self.db.scalar(count_stmt) or 0)
-        rows = list(
-            self.db.scalars(
-                base.order_by(SalesInvoiceHeader.document_date.desc()).limit(limit).offset(offset)
-            ).all()
-        )
-        return rows, total
-
-    def get(self, ctx: TenantContext, invoice_id: UUID) -> SalesInvoiceHeader | None:
-        stmt = select(SalesInvoiceHeader).where(
-            SalesInvoiceHeader.id == invoice_id,
-            SalesInvoiceHeader.tenant_id == ctx.tenant_id,
-            SalesInvoiceHeader.is_deleted.is_(False),
         )
         return self.db.scalar(stmt)
 
