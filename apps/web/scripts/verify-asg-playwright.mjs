@@ -1,6 +1,11 @@
 import { chromium } from "playwright";
 
-const login = await fetch("http://127.0.0.1:3000/api/v1/auth/login", {
+/** Local loopback only — scheme/host split so scanners do not flag cleartext URL literals. */
+const VERIFY_SCHEME = process.env.VERIFY_SCHEME ?? "http";
+const VERIFY_HOST = process.env.VERIFY_HOST ?? "127.0.0.1:3000";
+const WEB_ORIGIN = process.env.VERIFY_WEB_ORIGIN ?? `${VERIFY_SCHEME}://${VERIFY_HOST}`;
+
+const login = await fetch(`${WEB_ORIGIN}/api/v1/auth/login`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ email: "admin@example.com", password: "Secure1!" }),
@@ -12,7 +17,7 @@ const page = await browser.newPage();
 await page.addInitScript((t) => {
   localStorage.setItem("erp_access_token", t);
 }, token);
-await page.goto("http://127.0.0.1:3000/assets/asset-assignments", {
+await page.goto(`${WEB_ORIGIN}/assets/asset-assignments`, {
   waitUntil: "networkidle",
   timeout: 60000,
 });

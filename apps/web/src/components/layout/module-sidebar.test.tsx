@@ -32,7 +32,6 @@ function renderSidebar(activeHref: string, onNavigate = vi.fn()) {
       icon={Wallet}
       groups={GROUPS}
       isActive={(item) => item.href === activeHref}
-      searchPlaceholder="Search Finance…"
       showAccount={false}
       onItemNavigate={onNavigate}
       testId="finance-sidebar"
@@ -69,15 +68,9 @@ describe("ModuleSidebar", () => {
     );
   });
 
-  it("filters panes with search and exposes badge counts in the link name", async () => {
-    const user = userEvent.setup();
+  it("exposes badge counts in the link accessible name", () => {
     renderSidebar("/finance");
     expect(screen.getByRole("link", { name: "Approvals (4)" })).toBeInTheDocument();
-
-    await user.type(screen.getByRole("searchbox", { name: "Search Finance panes" }), "trial");
-    const nav = screen.getByTestId("finance-sidebar-nav");
-    expect(within(nav).getByRole("link", { name: "Trial Balance" })).toBeInTheDocument();
-    expect(within(nav).queryByRole("link", { name: "Overview" })).not.toBeInTheDocument();
   });
 
   it("collapses to the 72px icon rail without moving off the left edge", async () => {
@@ -87,7 +80,6 @@ describe("ModuleSidebar", () => {
     const rail = screen.getByTestId("finance-sidebar");
     expect(rail.className).toMatch(/w-\[72px\]/);
     expect(rail.className).toMatch(/left-0/);
-    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
   });
 

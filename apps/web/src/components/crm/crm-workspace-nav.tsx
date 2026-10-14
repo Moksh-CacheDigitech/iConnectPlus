@@ -149,7 +149,6 @@ export function CrmSidebar() {
       aria-label="CRM workspace"
       groups={[{ label: "Workspace", items: navItems }]}
       isActive={(item) => isCrmNavActive(pathname, item.href)}
-      searchPlaceholder="Search CRM…"
       onItemNavigate={onCrmNavigate}
     />
   );

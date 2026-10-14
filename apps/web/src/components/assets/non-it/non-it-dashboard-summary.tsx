@@ -78,7 +78,7 @@ function KpiCard({
         aria-hidden
       />
       <div className="relative flex items-start justify-between gap-2">
-        <p className="text-[11px] font-semibold tracking-wide text-white/75 uppercase">{title}</p>
+        <p className="text-[11px] font-normal tracking-wide text-white/75 uppercase">{title}</p>
         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/15 text-white">
           <Icon className="size-3.5" aria-hidden />
         </div>
@@ -87,7 +87,7 @@ function KpiCard({
         {loading ? (
           <div className="h-8 w-16 animate-pulse rounded bg-white/20 motion-reduce:animate-none" />
         ) : (
-          <p className="text-2xl font-semibold tracking-tight text-white tabular-nums">{value}</p>
+          <p className="text-2xl font-normal tracking-tight text-white tabular-nums">{value}</p>
         )}
         {share != null && !loading ? (
           <div className="mt-2 space-y-1.5">

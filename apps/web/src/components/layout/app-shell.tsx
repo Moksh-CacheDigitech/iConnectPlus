@@ -23,12 +23,12 @@ export function AppShell({ children }: AppShellProps) {
   const qrScanMode =
     searchParams.get("from") === "qr" && pathname.startsWith("/assets/information-portal/");
   return (
-    <div className="flex min-h-dvh w-full max-w-[100dvw] overflow-x-clip bg-background">
+    <div className="flex h-dvh w-full max-w-[100dvw] overflow-hidden bg-background">
       <ShellSidebar pathname={pathname} standalone={standalone} hideSidebar={qrScanMode} />
-      <div id="erp-workspace-main" className="flex min-w-0 flex-1 flex-col overflow-x-clip">
+      <div id="erp-workspace-main" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <AppTopbar />
         <main
-          className={`min-w-0 flex-1 overflow-x-clip px-3 py-4 sm:px-6 sm:py-6 lg:px-8 ${qrScanMode ? "pb-[max(1.5rem,env(safe-area-inset-bottom))]" : ""
+          className={`erp-scroll min-h-0 min-w-0 flex-1 overflow-x-clip overflow-y-auto overscroll-contain px-3 py-4 sm:px-6 sm:py-6 lg:px-8 ${qrScanMode ? "pb-[max(1.5rem,env(safe-area-inset-bottom))]" : ""
             }`}
         >
           <div className="mx-auto w-full min-w-0 max-w-[1400px] animate-in fade-in-50 slide-in-from-bottom-2 duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:animate-none">

@@ -199,6 +199,7 @@
   .erp-scroll {
     scrollbar-width: thin;
     scrollbar-color: oklch(0.75 0.03 160 / 55%) transparent;
+    overscroll-behavior: contain;
   }
 
   .erp-scroll::-webkit-scrollbar {

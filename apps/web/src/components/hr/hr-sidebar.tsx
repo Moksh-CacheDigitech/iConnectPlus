@@ -86,7 +86,6 @@ export function HrSidebar() {
       aria-label="HR workspace"
       groups={groups}
       isActive={(item) => item.href === activeHref}
-      searchPlaceholder="Search HR…"
     />
   );
 }

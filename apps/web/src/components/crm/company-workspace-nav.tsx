@@ -386,7 +386,8 @@ export function CompanyWorkspaceNav({
         </div>
         <nav
           aria-label={isOpportunityScope ? "Opportunity workspace" : "Company workspace"}
-          className="erp-scroll min-h-0 flex-1 overflow-y-auto px-1.5 py-2"
+          data-sidebar-scroll
+          className="erp-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 py-2"
         >
           <ul className="space-y-0.5">
             {items.map((item) => {

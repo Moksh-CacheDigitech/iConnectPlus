@@ -166,11 +166,11 @@ export function HeadlineStat({
 }) {
   return (
     <div className={cn("min-w-0 px-5 py-4", className)}>
-      <p className="text-[11px] font-medium tracking-wide text-white/70 uppercase">{label}</p>
+      <p className="text-[11px] font-normal tracking-wide text-white/70 uppercase">{label}</p>
       {loading ? (
         <div className="mt-2 h-8 w-32 animate-pulse rounded bg-white/15 motion-reduce:animate-none" />
       ) : (
-        <p className="mt-1.5 truncate text-2xl font-semibold tracking-tight text-white tabular-nums sm:text-3xl">
+        <p className="mt-1.5 truncate text-2xl font-normal tracking-tight text-white tabular-nums sm:text-3xl">
           {value}
         </p>
       )}
@@ -201,10 +201,10 @@ export function ActivityTile({
         <Icon className="size-4" aria-hidden />
       </span>
       <div className="min-w-0">
-        <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+        <p className="text-[11px] font-normal tracking-wide text-muted-foreground uppercase">
           {label}
         </p>
-        <p className="text-lg font-semibold tabular-nums text-foreground">{value}</p>
+        <p className="text-lg font-normal tabular-nums text-foreground">{value}</p>
       </div>
       <ArrowUpRight
         className="ml-auto size-4 text-muted-foreground/50 transition-colors duration-200 group-hover:text-primary"
@@ -267,8 +267,8 @@ export function Metric({
 }) {
   return (
     <div className="min-w-0">
-      <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{label}</p>
-      <p className="mt-1 text-lg font-semibold tracking-tight text-foreground tabular-nums">{value}</p>
+      <p className="text-[11px] font-normal tracking-wide text-muted-foreground uppercase">{label}</p>
+      <p className="mt-1 text-lg font-normal tracking-tight text-foreground tabular-nums">{value}</p>
       {hint ? <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p> : null}
     </div>
   );

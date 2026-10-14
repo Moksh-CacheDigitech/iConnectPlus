@@ -159,10 +159,10 @@ export function HrKpiGrid({
               className="pointer-events-none absolute -top-10 -right-8 size-28 rounded-full bg-white/10 blur-2xl"
               aria-hidden
             />
-            <p className="relative text-[11px] font-medium tracking-wide text-white/75 uppercase">
+            <p className="relative text-[11px] font-normal tracking-wide text-white/75 uppercase">
               {item.label}
             </p>
-            <p className="relative mt-1 text-2xl font-semibold tracking-tight text-white tabular-nums">
+            <p className="relative mt-1 text-2xl font-normal tracking-tight text-white tabular-nums">
               {item.value}
             </p>
             {item.hint ? (

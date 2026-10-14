@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
-import { ChevronLeft, Search, X } from "lucide-react";
+import { useMemo } from "react";
+import { ChevronLeft } from "lucide-react";
 
 import { navigation } from "@/config/navigation";
 import { filterNavigationGroups, hasModuleAssignments } from "@/lib/module-access";
@@ -11,7 +11,6 @@ import { SidebarAccountSection } from "@/components/layout/sidebar-account-secti
 import {
   SIDEBAR_EASE as EASE,
   SIDEBAR_LABEL_MS as LABEL_MS,
-  SIDEBAR_SEARCH_MS as SEARCH_MS,
   SIDEBAR_WIDTH_MS as WIDTH_MS,
   SidebarRail,
   useSidebarCollapse,
@@ -28,7 +27,6 @@ function isActivePath(pathname: string, href: string) {
 export function AppSidebar() {
   const pathname = usePathname();
   const { collapsed, layoutCollapsed, toggle: toggleCollapsed } = useSidebarCollapse();
-  const [query, setQuery] = useState("");
   const {
     user,
     loading: userLoading,
@@ -59,25 +57,10 @@ export function AppSidebar() {
     return filterNavigationGroups(navigation, moduleKeys, user?.userType, adminModuleKeys);
   }, [adminModuleKeys, moduleKeys, user?.userType, sessionPending, authStatus]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return navGroups;
-    return navGroups
-      .map((group) => ({
-        ...group,
-        items: group.items.filter(
-          (item) =>
-            item.title.toLowerCase().includes(q) ||
-            item.description?.toLowerCase().includes(q),
-        ),
-      }))
-      .filter((group) => group.items.length > 0);
-  }, [query, navGroups]);
-
   /** Flat list for collapsed icon rail — equal gaps, no section spacing. */
   const flatItems = useMemo(
-    () => filtered.flatMap((group) => group.items),
-    [filtered],
+    () => navGroups.flatMap((group) => group.items),
+    [navGroups],
   );
 
   return (
@@ -86,64 +69,10 @@ export function AppSidebar() {
       <div className="flex h-full w-full flex-col">
         <SidebarAccountSection collapsed={collapsed} />
 
-        {!collapsed ? (
-          <div
-            className="grid overflow-hidden px-3 pb-3 opacity-100"
-            style={{
-              transitionProperty: "opacity",
-              transitionDuration: `${SEARCH_MS}ms`,
-              transitionTimingFunction: EASE,
-            }}
-          >
-            <div className="min-h-0 overflow-hidden">
-              <label className="sr-only" htmlFor="sidebar-module-search">
-                Search modules
-              </label>
-              <div
-                className={cn(
-                  "group/search relative flex h-10 items-center gap-2 rounded-xl border border-sidebar-border/80",
-                  "bg-white/5 px-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]",
-                  "focus-within:border-sidebar-ring/60 focus-within:bg-white/[0.08] focus-within:ring-2 focus-within:ring-sidebar-ring/35",
-                )}
-              >
-                <Search
-                  className="size-[18px] shrink-0 text-sidebar-foreground/70"
-                  strokeWidth={2}
-                  aria-hidden
-                />
-                <input
-                  id="sidebar-module-search"
-                  type="search"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search modules…"
-                  autoComplete="off"
-                  tabIndex={collapsed ? -1 : 0}
-                  className={cn(
-                    "min-w-0 flex-1 bg-transparent text-[13px] font-medium tracking-tight text-sidebar-foreground",
-                    "placeholder:font-normal placeholder:text-sidebar-foreground/45",
-                    "outline-none ring-0",
-                    "[&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden",
-                  )}
-                />
-                {query ? (
-                  <button
-                    type="button"
-                    onClick={() => setQuery("")}
-                    className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-foreground/55 transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                    aria-label="Clear search"
-                  >
-                    <X className="size-3.5" strokeWidth={2} />
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        ) : null}
-
         <nav
+          data-sidebar-scroll
           className={cn(
-            "min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-2",
+            "min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-none py-2",
             "scrollbar-none [-ms-overflow-style:none] [scrollbar-width:none]",
             "[&::-webkit-scrollbar]:hidden",
             collapsed ? "px-0" : "px-2.5",
@@ -216,7 +145,7 @@ export function AppSidebar() {
               })}
             </ul>
           ) : (
-            filtered.map((group) => (
+            navGroups.map((group) => (
               <div key={group.title} className="mb-5">
                 <p className="mb-2 px-2.5 text-[11px] font-semibold tracking-[0.12em] text-sidebar-foreground/55 uppercase">
                   {group.title}

@@ -13,6 +13,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell, CheckCheck, X } from "lucide-react";
 
+import { GlobalNotificationBell } from "@/components/layout/global-notification-bell";
 import { Button } from "@/components/ui/button";
 import { useAuthUser } from "@/hooks/use-auth-user";
 import { formatNotificationDateTime } from "@/lib/format-notification-datetime";
@@ -47,7 +48,7 @@ const PANEL_WIDTH = 352;
 const PANEL_GAP = 8;
 const VIEWPORT_PAD = 8;
 
-type NotificationMode = "projects" | "crm" | "none";
+type NotificationMode = "projects" | "crm" | "platform";
 
 type CrmBellItem = {
   id: string;
@@ -64,7 +65,7 @@ type CrmBellItem = {
 function resolveMode(pathname: string): NotificationMode {
   if (pathname === "/projects" || pathname.startsWith("/projects/")) return "projects";
   if (pathname === "/crm" || pathname.startsWith("/crm/")) return "crm";
-  return "none";
+  return "platform";
 }
 
 function readIdSet(key: string): Set<string> {
@@ -189,9 +190,17 @@ function CrmAlertBody({ item }: { item: CrmBellItem }) {
   );
 }
 
+/** Topbar bell for every module: CRM/Projects specialized feeds, otherwise platform inbox. */
 export function AppTopbarNotifications() {
   const pathname = usePathname() ?? "";
   const mode = resolveMode(pathname);
+  if (mode === "platform") {
+    return <GlobalNotificationBell variant="topbar" />;
+  }
+  return <CrmProjectsTopbarNotifications mode={mode} />;
+}
+
+function CrmProjectsTopbarNotifications({ mode }: { mode: "projects" | "crm" }) {
   const { signedIn, loading: authLoading } = useAuthUser();
 
   const [open, setOpen] = useState(false);
@@ -228,17 +237,8 @@ export function AppTopbarNotifications() {
     setMounted(true);
   }, []);
 
-  // Drop cross-module panels when leaving a workspace.
   useEffect(() => {
     setOpen(false);
-    if (mode !== "projects") {
-      setProjectAlerts([]);
-      setProjectPopups([]);
-    }
-    if (mode !== "crm") {
-      setCrmAlerts([]);
-      setCrmPopups([]);
-    }
   }, [mode]);
 
   const pollProjects = useCallback(async () => {

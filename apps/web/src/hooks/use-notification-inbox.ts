@@ -25,10 +25,14 @@ const initialState: InboxState = {
   error: null,
 };
 
-export function useNotificationInbox() {
-  const [state, setState] = useState<InboxState>(initialState);
+export function useNotificationInbox(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
+  const [state, setState] = useState<InboxState>(
+    enabled ? initialState : { ...initialState, loading: false },
+  );
 
   const refresh = useCallback(async () => {
+    if (!enabled) return;
     try {
       const [items, unreadCount] = await Promise.all([
         listNotificationInbox(),
@@ -48,9 +52,14 @@ export function useNotificationInbox() {
         error: message,
       }));
     }
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      setState({ items: [], unreadCount: 0, loading: false, error: null });
+      return;
+    }
+
     let active = true;
 
     async function load() {
@@ -83,7 +92,7 @@ export function useNotificationInbox() {
       window.clearInterval(intervalId);
       window.removeEventListener("focus", onFocus);
     };
-  }, []);
+  }, [enabled]);
 
   const markRead = useCallback(async (id: string) => {
     setState((prev) => {

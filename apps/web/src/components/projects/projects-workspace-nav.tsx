@@ -78,7 +78,6 @@ export function ProjectsSidebar() {
       aria-label="Projects workspace"
       groups={groups}
       isActive={(item) => isProjectsNavActive(pathname, item.href)}
-      searchPlaceholder="Search Projects…"
     />
   );
 }

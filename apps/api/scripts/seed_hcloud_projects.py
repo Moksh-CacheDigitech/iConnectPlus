@@ -23,7 +23,13 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
-from xml.etree import ElementTree as ET
+try:
+    from defusedxml import ElementTree as ET
+except ImportError as exc:  # pragma: no cover - install via requirements-prod
+    raise SystemExit(
+        "defusedxml is required for safe XLSX XML parsing. "
+        "Install with: pip install defusedxml==0.7.1"
+    ) from exc
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session

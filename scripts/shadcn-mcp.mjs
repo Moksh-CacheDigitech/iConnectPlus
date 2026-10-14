@@ -5,10 +5,12 @@ import { fileURLToPath } from "node:url"
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../apps/web")
 process.chdir(root)
 
-const child = spawn("npx", ["-y", "shadcn@latest", "mcp"], {
+// Avoid shell:true (CWE-78). On Windows, spawn the npx.cmd shim directly.
+const npxBin = process.platform === "win32" ? "npx.cmd" : "npx"
+const child = spawn(npxBin, ["-y", "shadcn@latest", "mcp"], {
   cwd: root,
   stdio: "inherit",
-  shell: true,
+  shell: false,
   env: process.env,
 })
 

@@ -109,7 +109,7 @@ export function KpiCard({
       <div className={cn("flex items-start justify-between gap-2", !isHero && "pl-1.5")}>
         <p
           className={cn(
-            "text-[11px] font-medium tracking-wide uppercase",
+            "text-[11px] font-normal tracking-wide uppercase",
             isHero ? "text-white/75" : "text-muted-foreground",
           )}
         >
@@ -136,7 +136,7 @@ export function KpiCard({
       ) : (
         <p
           className={cn(
-            "mt-1.5 text-2xl font-semibold tracking-tight tabular-nums",
+            "mt-1.5 text-2xl font-normal tracking-tight tabular-nums",
             isHero ? "text-white" : "pl-1.5 text-foreground",
           )}
         >

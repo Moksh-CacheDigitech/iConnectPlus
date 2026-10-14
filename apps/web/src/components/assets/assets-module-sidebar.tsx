@@ -123,7 +123,6 @@ export function AssetsModuleSidebar() {
       testId="assets-module-sidebar"
       groups={groups}
       isActive={isActive}
-      searchPlaceholder="Search Assets…"
       showAccount={false}
     />
   );

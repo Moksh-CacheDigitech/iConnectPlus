@@ -139,7 +139,9 @@ class MicrosoftOAuthService:
         issuer = metadata.get("issuer")
         if not isinstance(issuer, str) or not issuer:
             raise MicrosoftLoginNotConfiguredException("Microsoft issuer metadata unavailable")
-        # Microsoft Entra ID id_tokens are RS256-signed; algorithm is fixed by issuer metadata.
+        # Microsoft Entra ID id_tokens are RS256-signed (OIDC issuer requirement).
+        # Informational SAST "quantum-vulnerable" finding: no PQC JWT alg from Entra yet;
+        # keep short-lived tokens and rotate keys via JWKS. Do not widen algorithms=[].
         decoded = jwt.decode(
             id_token,
             signing_key.key,

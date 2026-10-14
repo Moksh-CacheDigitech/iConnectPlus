@@ -130,7 +130,7 @@ function KpiCard({
         aria-hidden
       />
       <div className="relative flex items-center gap-2.5">
-        <p className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-wide text-white/80 uppercase">
+        <p className="min-w-0 flex-1 truncate text-[13px] font-normal tracking-wide text-white/80 uppercase">
           {label}
         </p>
         <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/15 text-white">
@@ -603,12 +603,12 @@ function InventoryStat({
         <Icon className="size-5" aria-hidden />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-foreground">
+        <p className="text-[11px] font-normal uppercase tracking-wide text-foreground">
           {label}
         </p>
         <p
           className={cn(
-            "mt-1 text-lg font-medium tabular-nums tracking-tight sm:text-xl",
+            "mt-1 text-lg font-normal tabular-nums tracking-tight sm:text-xl",
             styles.value,
           )}
         >

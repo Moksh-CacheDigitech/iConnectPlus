@@ -129,8 +129,8 @@ export function LeaveManagementPage() {
               (href?.includes("view=on-leave-today") && onLeaveTodayView);
             const inner = (
               <>
-                <p className="text-[10px] font-medium tracking-wide text-white/75 uppercase">{label}</p>
-                <p className="mt-0.5 text-lg font-semibold text-white tabular-nums">{value}</p>
+                <p className="text-[10px] font-normal tracking-wide text-white/75 uppercase">{label}</p>
+                <p className="mt-0.5 text-lg font-normal text-white tabular-nums">{value}</p>
               </>
             );
             const hero =

@@ -14,20 +14,41 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    mapping = {
-        "IAudit": "modules.platform.ports.audit",
-        "IDocumentNumbering": "modules.platform.ports.numbering",
-        "IFinancePosting": "modules.platform.ports.finance",
-        "IIntegrationGateway": "modules.platform.ports.integration",
-        "IInventoryStock": "modules.platform.ports.inventory",
-        "IMasterDataLookup": "modules.platform.ports.master_data",
-        "INotify": "modules.platform.ports.notify",
-        "IOutbox": "modules.platform.ports.outbox",
-        "IWorkflow": "modules.platform.ports.workflow",
-    }
-    if name not in mapping:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    import importlib
+    # Explicit per-symbol imports keep lazy-load without dynamic module names.
+    if name == "IAudit":
+        from modules.platform.ports.audit import IAudit
 
-    mod = importlib.import_module(mapping[name])
-    return getattr(mod, name)
+        return IAudit
+    if name == "IDocumentNumbering":
+        from modules.platform.ports.numbering import IDocumentNumbering
+
+        return IDocumentNumbering
+    if name == "IFinancePosting":
+        from modules.platform.ports.finance import IFinancePosting
+
+        return IFinancePosting
+    if name == "IIntegrationGateway":
+        from modules.platform.ports.integration import IIntegrationGateway
+
+        return IIntegrationGateway
+    if name == "IInventoryStock":
+        from modules.platform.ports.inventory import IInventoryStock
+
+        return IInventoryStock
+    if name == "IMasterDataLookup":
+        from modules.platform.ports.master_data import IMasterDataLookup
+
+        return IMasterDataLookup
+    if name == "INotify":
+        from modules.platform.ports.notify import INotify
+
+        return INotify
+    if name == "IOutbox":
+        from modules.platform.ports.outbox import IOutbox
+
+        return IOutbox
+    if name == "IWorkflow":
+        from modules.platform.ports.workflow import IWorkflow
+
+        return IWorkflow
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

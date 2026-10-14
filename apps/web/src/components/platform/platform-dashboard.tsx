@@ -584,13 +584,13 @@ export function PlatformDashboard() {
               className="pointer-events-none absolute -top-10 -right-8 size-28 rounded-full bg-white/10 blur-2xl"
               aria-hidden
             />
-            <p className="relative text-[11px] font-medium tracking-[0.08em] text-white/75 uppercase">
+            <p className="relative text-[11px] font-normal tracking-[0.08em] text-white/75 uppercase">
               {stat.label}
             </p>
             {showLoading ? (
               <div className="relative mt-2 h-8 w-24 animate-pulse rounded bg-white/20 motion-reduce:animate-none" />
             ) : (
-              <p className="relative mt-1.5 truncate text-[1.75rem] font-semibold tracking-[-0.04em] text-white tabular-nums">
+              <p className="relative mt-1.5 truncate text-[1.75rem] font-normal tracking-[-0.04em] text-white tabular-nums">
                 {stat.value}
               </p>
             )}

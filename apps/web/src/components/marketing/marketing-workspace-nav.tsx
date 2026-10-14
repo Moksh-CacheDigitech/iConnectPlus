@@ -117,7 +117,6 @@ export function MarketingSidebar() {
       aria-label="Marketing workspace"
       groups={groups}
       isActive={(item) => isMarketingNavActive(pathname, item.href)}
-      searchPlaceholder="Search Marketing…"
     />
   );
 }

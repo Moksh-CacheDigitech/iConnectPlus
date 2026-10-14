@@ -231,10 +231,10 @@ export function AttendanceManagementPage() {
                     active && "ring-2 ring-white/40 ring-offset-2 ring-offset-background",
                   )}
                 >
-                  <p className="text-[10px] font-medium tracking-wide text-white/75 uppercase">
+                  <p className="text-[10px] font-normal tracking-wide text-white/75 uppercase">
                     {card.label}
                   </p>
-                  <p className="mt-0.5 text-xl font-semibold text-white tabular-nums">{stats[card.key]}</p>
+                  <p className="mt-0.5 text-xl font-normal text-white tabular-nums">{stats[card.key]}</p>
                 </button>
               );
             })}

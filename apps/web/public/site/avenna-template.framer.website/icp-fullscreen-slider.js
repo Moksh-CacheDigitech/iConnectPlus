@@ -30,14 +30,6 @@
     },
   ];
 
-  function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
   function mount(target, options) {
     if (!target || target.dataset.icpFsMounted) return;
     target.dataset.icpFsMounted = "1";
@@ -64,7 +56,7 @@
     const slides = cfg.slides.filter((s) => s && s.image && s.title);
     if (!slides.length) return;
 
-    target.innerHTML = "";
+    target.replaceChildren();
     target.style.cssText =
       "position:relative;width:100%;background:" +
       cfg.backgroundColor +
@@ -85,10 +77,12 @@
         ";color:" +
         cfg.textColor +
         ";padding:clamp(1.25rem,4vw,2rem);box-sizing:border-box;";
-      intro.innerHTML =
-        '<h1 class="icp-fs-intro-title" style="width:min(92%,36rem);text-align:center;margin:0 auto;font-size:clamp(1.45rem,5.5vw,3rem);font-weight:600;letter-spacing:-0.04em;line-height:1.2;">' +
-        escapeHtml(cfg.introText) +
-        "</h1>";
+      const introTitle = document.createElement("h1");
+      introTitle.className = "icp-fs-intro-title";
+      introTitle.style.cssText =
+        "width:min(92%,36rem);text-align:center;margin:0 auto;font-size:clamp(1.45rem,5.5vw,3rem);font-weight:600;letter-spacing:-0.04em;line-height:1.2;";
+      introTitle.textContent = String(cfg.introText ?? "");
+      intro.appendChild(introTitle);
       root.appendChild(intro);
     }
 
@@ -110,28 +104,58 @@
     // Absolute inside track; JS pins to viewport (CSS sticky fails under Framer overflow:clip)
     sliderSection.style.cssText =
       "position:absolute;top:0;left:0;width:100%;height:100vh;height:100dvh;overflow:hidden;background:#000;z-index:2;";
-    sliderSection.innerHTML =
-      '<div class="icp-fs-images" style="position:absolute;inset:0;z-index:0;"></div>' +
-      '<div style="position:absolute;inset:0;z-index:1;background:rgba(0,0,0,' +
+    const imagesLayer = document.createElement("div");
+    imagesLayer.className = "icp-fs-images";
+    imagesLayer.style.cssText = "position:absolute;inset:0;z-index:0;";
+    const overlayLayer = document.createElement("div");
+    overlayLayer.style.cssText =
+      "position:absolute;inset:0;z-index:1;background:rgba(0,0,0," +
       cfg.overlayOpacity +
-      ');pointer-events:none;"></div>' +
-      '<div class="icp-fs-chrome" style="position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;justify-content:space-between;padding:1.25rem 1.25rem 14vh 1.25rem;box-sizing:border-box;pointer-events:none;">' +
-      '<div style="display:flex;justify-content:flex-end;align-items:flex-start;gap:1rem;">' +
-      (cfg.navLabel
-        ? '<p style="margin:0;font-size:0.75rem;letter-spacing:0.08em;opacity:0.7;">' +
-          escapeHtml(cfg.navLabel) +
-          "</p>"
-        : "<div></div>") +
-      (cfg.showIndices
-        ? '<div class="icp-fs-indices" style="display:flex;flex-direction:column;gap:0.55rem;align-items:flex-end;"></div>'
-        : "<div></div>") +
-      "</div>" +
-      '<div class="icp-fs-title" style="width:min(92%,40rem);max-width:100%;"></div>' +
-      "</div>" +
-      '<div class="icp-fs-rail" style="position:absolute;top:0;right:0;width:1px;height:100%;background:rgba(255,255,255,0.35);z-index:3;">' +
-      '<div class="icp-fs-progress" style="position:absolute;top:0;left:50%;width:3px;height:100%;background:' +
+      ");pointer-events:none;";
+    const chrome = document.createElement("div");
+    chrome.className = "icp-fs-chrome";
+    chrome.style.cssText =
+      "position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;justify-content:space-between;padding:1.25rem 1.25rem 14vh 1.25rem;box-sizing:border-box;pointer-events:none;";
+    const chromeTop = document.createElement("div");
+    chromeTop.style.cssText =
+      "display:flex;justify-content:flex-end;align-items:flex-start;gap:1rem;";
+    if (cfg.navLabel) {
+      const nav = document.createElement("p");
+      nav.style.cssText = "margin:0;font-size:0.75rem;letter-spacing:0.08em;opacity:0.7;";
+      nav.textContent = String(cfg.navLabel);
+      chromeTop.appendChild(nav);
+    } else {
+      chromeTop.appendChild(document.createElement("div"));
+    }
+    if (cfg.showIndices) {
+      const indices = document.createElement("div");
+      indices.className = "icp-fs-indices";
+      indices.style.cssText =
+        "display:flex;flex-direction:column;gap:0.55rem;align-items:flex-end;";
+      chromeTop.appendChild(indices);
+    } else {
+      chromeTop.appendChild(document.createElement("div"));
+    }
+    const titleLayer = document.createElement("div");
+    titleLayer.className = "icp-fs-title";
+    titleLayer.style.cssText = "width:min(92%,40rem);max-width:100%;";
+    chrome.appendChild(chromeTop);
+    chrome.appendChild(titleLayer);
+    const rail = document.createElement("div");
+    rail.className = "icp-fs-rail";
+    rail.style.cssText =
+      "position:absolute;top:0;right:0;width:1px;height:100%;background:rgba(255,255,255,0.35);z-index:3;";
+    const progress = document.createElement("div");
+    progress.className = "icp-fs-progress";
+    progress.style.cssText =
+      "position:absolute;top:0;left:50%;width:3px;height:100%;background:" +
       cfg.accentColor +
-      ';transform-origin:top;transform:translateX(-50%) scaleY(0);"></div></div>';
+      ";transform-origin:top;transform:translateX(-50%) scaleY(0);";
+    rail.appendChild(progress);
+    sliderSection.appendChild(imagesLayer);
+    sliderSection.appendChild(overlayLayer);
+    sliderSection.appendChild(chrome);
+    sliderSection.appendChild(rail);
 
     track.appendChild(sliderSection);
     root.appendChild(track);
@@ -150,14 +174,19 @@
         const el = document.createElement("p");
         el.style.cssText =
           "display:flex;align-items:center;gap:0.75rem;margin:0;font-size:0.75rem;letter-spacing:0.05em;";
-        el.innerHTML =
-          '<span class="fs-marker" style="display:inline-block;width:0.75rem;height:1px;background:' +
+        const marker = document.createElement("span");
+        marker.className = "fs-marker";
+        marker.style.cssText =
+          "display:inline-block;width:0.75rem;height:1px;background:" +
           cfg.accentColor +
-          ';transform-origin:right;transform:scaleX(0);transition:transform 0.3s ease;"></span><span class="fs-index" style="opacity:0.35;color:' +
-          cfg.textColor +
-          ';transition:opacity 0.3s ease;">' +
-          num +
-          "</span>";
+          ";transform-origin:right;transform:scaleX(0);transition:transform 0.3s ease;";
+        const idx = document.createElement("span");
+        idx.className = "fs-index";
+        idx.style.cssText =
+          "opacity:0.35;color:" + cfg.textColor + ";transition:opacity 0.3s ease;";
+        idx.textContent = num;
+        el.appendChild(marker);
+        el.appendChild(idx);
         indicesWrap.appendChild(el);
       });
     }
@@ -173,7 +202,7 @@
     }
 
     function animateNewTitle(index) {
-      titleWrap.innerHTML = "";
+      titleWrap.replaceChildren();
       const h1 = document.createElement("h1");
       h1.style.cssText =
         "margin:0;color:" +
@@ -328,7 +357,7 @@
         if (!targets.length && fill.childNodes.length && !fill.querySelector(".accent")) {
           const text = fill.textContent || "";
           if (text.trim()) {
-            fill.innerHTML = "";
+            fill.replaceChildren();
             text.split(/(\s+)/).forEach((token) => {
               if (!token) return;
               if (/^\s+$/.test(token)) {

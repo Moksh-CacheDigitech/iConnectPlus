@@ -33,24 +33,31 @@ export function safeEntityHref(basePath: string, id: string): string {
   return safeAppHref(`${base}/${id}`);
 }
 
-/** Open a print preview without injecting a <script> tag into the document. */
+/** Open a print preview via blob URL (no document.write / injected script tags). */
 export function openPrintDocument(html: string, width = 1200, height = 800): void {
-  const win = window.open("", "_blank", `noopener,noreferrer,width=${width},height=${height}`);
-  if (!win) return;
-  win.document.open();
-  win.document.write(html);
-  win.document.close();
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, "_blank", `noopener,noreferrer,width=${width},height=${height}`);
+  if (!win) {
+    URL.revokeObjectURL(url);
+    return;
+  }
+  let printed = false;
   const print = () => {
+    if (printed) return;
+    printed = true;
     try {
       win.focus();
       win.print();
     } catch {
       /* popup blockers / closed window */
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     }
   };
+  win.addEventListener("load", print, { once: true });
+  // Fallback if load already fired before listener attached.
   if (win.document.readyState === "complete") {
     print();
-    return;
   }
-  win.addEventListener("load", print, { once: true });
 }

@@ -426,10 +426,10 @@ export function HrExecutiveDashboardPage() {
                       <Icon className="size-5" />
                     </span>
                     <div className="relative min-w-0 flex-1">
-                      <p className="text-[10px] font-semibold tracking-wide text-white/75 uppercase">
+                      <p className="text-[10px] font-normal tracking-wide text-white/75 uppercase">
                         {k.label}
                       </p>
-                      <p className="mt-0.5 text-2xl leading-none font-semibold text-white tabular-nums">
+                      <p className="mt-0.5 text-2xl leading-none font-normal text-white tabular-nums">
                         {loading ? "-" : (k.value ?? 0).toLocaleString("en-IN")}
                       </p>
                     </div>
