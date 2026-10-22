@@ -9,14 +9,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from modules.foundation.domain.erp_modules import (
-    MARKETING_ROLE_APPROVAL_HEAD,
-    MARKETING_ROLE_CONTENT_CREATOR,
-    MARKETING_ROLE_GRAPHIC_DESIGNER,
-    MARKETING_ROLE_SUPPORTING_MEMBER,
-    MARKETING_ROLE_VIDEO_EDITOR,
-    MODULE_ROLE_MEMBER,
-)
+from modules.foundation.domain.erp_modules import MODULE_ROLE_MEMBER
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecUser
 from modules.foundation.repository.user_module_repository import UserModuleRepository
@@ -28,17 +21,6 @@ from modules.marketing.models import MktCampaign, MktTask
 from modules.marketing.repository.base import MktScopedRepository
 from modules.marketing.service.number_service import MarketingNumberService
 from modules.marketing.service.ops_service import M365Service, TaskService
-
-CONTENT_PROVIDER_ROLES = frozenset({MARKETING_ROLE_CONTENT_CREATOR})
-APPROVAL_HEAD_ROLES = frozenset({MARKETING_ROLE_APPROVAL_HEAD})
-EDITOR_ROLES = frozenset(
-    {
-        MARKETING_ROLE_VIDEO_EDITOR,
-        MARKETING_ROLE_GRAPHIC_DESIGNER,
-        MARKETING_ROLE_SUPPORTING_MEMBER,
-    }
-)
-
 
 def _slug_deliverable_type(value: str) -> str:
     cleaned = re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
@@ -154,7 +136,7 @@ class CampaignService:
                     "role": row.role or MODULE_ROLE_MEMBER,
                 }
             )
-        out.sort(key=lambda item: (str(item["role"]), str(item["display_name"]).lower()))
+        out.sort(key=lambda item: str(item["display_name"]).lower())
         return out
 
     def list_deliverables(self, ctx: TenantContext, campaign_id: UUID) -> list[MktTask]:
@@ -194,19 +176,16 @@ class CampaignService:
         content_provider = self._resolve_assignee(
             ctx,
             content_provider_user_id,
-            allowed_roles=CONTENT_PROVIDER_ROLES,
             label="Content provider",
         )
         approval_head = self._resolve_assignee(
             ctx,
             approval_head_user_id,
-            allowed_roles=APPROVAL_HEAD_ROLES,
             label="Approval head",
         )
         editor = self._resolve_assignee(
             ctx,
             editor_user_id,
-            allowed_roles=EDITOR_ROLES,
             label="Editor",
         )
 
@@ -242,18 +221,15 @@ class CampaignService:
         ctx: TenantContext,
         user_id: UUID | None,
         *,
-        allowed_roles: frozenset[str],
         label: str,
     ) -> dict | None:
+        """Any Marketing module-assigned user may be picked, whatever their role."""
         if user_id is None:
             return None
         assignment = self._modules.get_assignment(ctx.tenant_id, user_id, "marketing")
         if assignment is None:
             raise ValidationException(f"{label} must be a Marketing module member")
         role = assignment.role or MODULE_ROLE_MEMBER
-        if role not in allowed_roles:
-            allowed = ", ".join(sorted(allowed_roles))
-            raise ValidationException(f"{label} must have one of these roles: {allowed}")
         user = self.db.scalar(
             select(SecUser).where(
                 SecUser.tenant_id == ctx.tenant_id,

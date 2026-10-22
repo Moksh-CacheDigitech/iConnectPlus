@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>iConnect Plus - HRMS Module User Manual</title>
+<style>
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap");
+:root{
+  --ink:#1c2430;--muted:#5b6b7c;--line:#d5dde5;--card:#fff;
+  --brand:#2a5f6e;--brand-dark:#1e4a56;--brand-soft:#e8f3f5;
+  --warn:#b45309;--warn-bg:#fffbeb;--radius:10px;
+}
+*{box-sizing:border-box}
+@page{size:A4;margin:16mm 14mm 18mm 14mm}
+html{font-size:10.5pt}
+body{
+  margin:0;color:var(--ink);
+  font-family:"Plus Jakarta Sans","Segoe UI",Calibri,Arial,sans-serif;
+  line-height:1.5;background:#fff;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact;
+}
+.page{max-width:190mm;margin:0 auto}
+h1,h2,h3,h4{
+  font-family:"Plus Jakarta Sans","Segoe UI",sans-serif;
+  color:var(--brand-dark);line-height:1.25;font-weight:700;
+  break-after:avoid;page-break-after:avoid;orphans:3;widows:3;
+}
+h1{font-size:1.85rem;margin:0 0 .4rem;letter-spacing:-.02em}
+h2{
+  font-size:1.18rem;margin:1.15rem 0 .45rem;padding:.32rem 0 .32rem .65rem;
+  border-left:4px solid var(--brand);border-bottom:1px solid var(--line);
+  background:linear-gradient(90deg,var(--brand-soft) 0%,transparent 72%);
+}
+h3{font-size:1.02rem;margin:.9rem 0 .32rem;color:var(--ink);font-weight:650}
+h4{font-size:.95rem;margin:.55rem 0 .25rem;color:var(--brand-dark);font-weight:600}
+p{margin:.28rem 0 .48rem}
+ul,ol{margin:.22rem 0 .6rem;padding-left:1.2rem}
+li{margin:.14rem 0}
+.muted{color:var(--muted)}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.88em;background:var(--brand-soft);padding:.05rem .3rem;border-radius:4px;color:var(--brand-dark)}
+.cover{
+  position:relative;height:262mm;display:flex;flex-direction:column;justify-content:center;
+  padding:36px 40px 40px 48px;
+  background:linear-gradient(165deg,#1a2836 0%,#243746 38%,#2a5f6e 100%);
+  color:#f8fafc;break-after:page;page-break-after:always;overflow:hidden;
+}
+.cover::before{content:"";position:absolute;right:-40px;top:-40px;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,.06)}
+.cover::after{content:"";position:absolute;left:0;bottom:0;right:0;height:8px;background:linear-gradient(90deg,#3d7a8a,#7dd3c7,#3d7a8a)}
+.cover-kicker{letter-spacing:.16em;text-transform:uppercase;font-size:.72rem;color:#7dd3c7;font-weight:700;margin-bottom:.9rem}
+.cover h1{font-size:2.35rem;margin-bottom:.45rem;color:#fff}
+.cover .subtitle{font-size:1.05rem;color:#c5d4de;margin-bottom:1.4rem;max-width:34rem}
+.cover .muted{color:#9fb0bd}
+.meta-box{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);padding:14px 16px;margin-top:1.4rem;width:fit-content;min-width:300px;border-radius:var(--radius)}
+.meta-box table{border-collapse:collapse;width:100%}
+.meta-box td{padding:5px 10px 5px 0;vertical-align:top;color:#e8eef2;font-size:.92rem}
+.meta-box td:first-child{color:#7dd3c7;width:120px;font-weight:600}
+.badge-row{margin-top:1.15rem;display:flex;gap:8px;flex-wrap:wrap}
+.badge{display:inline-block;border:1px solid rgba(125,211,199,.55);color:#e8fffb;background:rgba(125,211,199,.12);padding:4px 11px;border-radius:999px;font-size:.72rem;font-weight:600}
+.toc{break-after:page;page-break-after:always;padding-top:.35rem}
+.toc ol{padding-left:1.3rem}
+.toc li{margin:.36rem 0}
+.figure-group,.table-block,.role-grid,.callout,.flowchart,.keep{break-inside:avoid;page-break-inside:avoid}
+.figure-group{margin:.45rem 0 .85rem;padding:.5rem .6rem .6rem;border:1px solid var(--line);border-radius:var(--radius);background:var(--card)}
+.figure-group>h2,.figure-group>h3{margin-top:.08rem;background:none;border-left:none;border-bottom:none;padding-left:0}
+.figure-group>h2{padding-left:.55rem;border-left:4px solid var(--brand);background:linear-gradient(90deg,var(--brand-soft) 0%,transparent 80%)}
+.role-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:.6rem 0 .85rem}
+.role-grid.three{grid-template-columns:1fr 1fr 1fr}
+.role-card{border:1px solid var(--line);padding:12px 14px;background:var(--brand-soft);border-radius:var(--radius);break-inside:avoid;page-break-inside:avoid}
+.role-card h3{margin-top:0;margin-bottom:.32rem;color:var(--brand-dark);font-size:.98rem}
+.role-card ul{margin-bottom:0;font-size:.9rem}
+.table-block{margin:.45rem 0 .85rem;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:#fff}
+.table-block>.table-heading{padding:.5rem .7rem .15rem;margin:0;background:linear-gradient(90deg,var(--brand-soft) 0%,transparent 80%);border-left:4px solid var(--brand);border-bottom:none}
+.table-block>p{margin:.3rem .7rem .4rem}
+table.data{width:100%;border-collapse:collapse;margin:0;font-size:.84rem}
+table.data th,table.data td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+table.data th{background:var(--brand-dark);color:#f8fafc;font-weight:600;font-size:.7rem;letter-spacing:.04em;text-transform:uppercase}
+table.data tr:nth-child(even) td{background:#f7fafb}
+.table-block table.data{border:0}
+.table-block table.data th:first-child,.table-block table.data td:first-child{border-left:0}
+.table-block table.data th:last-child,.table-block table.data td:last-child{border-right:0}
+.callout{border-left:4px solid var(--brand);background:var(--brand-soft);padding:10px 12px;margin:.55rem 0 .75rem;border-radius:0 var(--radius) var(--radius) 0;font-size:.92rem}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)}
+.screenshot{margin:.35rem 0 .2rem;break-inside:avoid;page-break-inside:avoid}
+.screenshot img{display:block;width:100%;max-height:120mm;object-fit:contain;object-position:top left;border:1px solid var(--line);border-radius:8px;background:#eef2f5}
+.screenshot figcaption{font-size:.76rem;color:var(--muted);margin-top:.28rem;font-style:italic;break-before:avoid;page-break-before:avoid}
+.steps{counter-reset:step;list-style:none;padding-left:0}
+.steps li{counter-increment:step;position:relative;padding-left:2rem;margin:.32rem 0}
+.steps li::before{content:counter(step);position:absolute;left:0;top:.05rem;width:1.3rem;height:1.3rem;border-radius:50%;background:var(--brand);color:#fff;font-size:.68rem;font-weight:700;line-height:1.3rem;text-align:center}
+.flowchart{border:1px solid var(--line);background:linear-gradient(180deg,#f7fafb 0%,#fff 100%);padding:12px 14px;margin:.55rem 0 .8rem;border-radius:var(--radius)}
+.flowchart h4{margin-top:0}
+.flowchart svg{width:100%;height:auto;display:block}
+.footer-note{margin-top:1.2rem;padding:.75rem .85rem;border-top:2px solid var(--brand);background:var(--brand-soft);border-radius:0 0 var(--radius) var(--radius);font-size:.76rem;color:var(--muted)}
+@media print{
+  .cover{break-after:page;page-break-after:always}
+  h2,h3,h4{break-after:avoid;page-break-after:avoid}
+  .figure-group,.table-block,.screenshot,.flowchart,.role-grid,.role-card,.callout,.keep{break-inside:avoid!important;page-break-inside:avoid!important}
+  .screenshot img{max-height:115mm}
+  table.data,tr{break-inside:avoid;page-break-inside:avoid}
+  thead{display:table-header-group}
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<section class="cover">
+  <div class="cover-kicker">iConnect Plus / CACHE Digitech</div>
+  <h1>HRMS Module<br/>User Manual</h1>
+  <p class="subtitle">Workforce lifecycle from recruitment and onboarding through attendance, talent, payroll, and exit</p>
+  <div class="badge-row">
+    <span class="badge">HR admins</span>
+    <span class="badge">HR members</span>
+    <span class="badge">Full module reference</span>
+  </div>
+  <div class="meta-box">
+    <table>
+      <tr><td>Product</td><td>iConnect Plus ERP</td></tr>
+      <tr><td>Module</td><td>HRMS</td></tr>
+      <tr><td>Document</td><td>User Manual v1.0</td></tr>
+      <tr><td>Audience</td><td>HR admins and assigned members</td></tr>
+      <tr><td>Demo employee</td><td>Moksh Sharma (CT5345)</td></tr>
+      <tr><td>Date</td><td>17 October 2026</td></tr>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:2rem;">Part A follows the hire-to-exit path. Part B lists primary sidebar panes.</p>
+</section>
+
+<section class="toc">
+  <h2>Table of contents</h2>
+  <ol>
+    <li>Who this manual is for and access</li>
+    <li>End-to-end HR lifecycle overview</li>
+    <li>Part A - Process walkthrough (steps 01-13)</li>
+    <li>Part B - Sidebar reference (17 panes)</li>
+    <li>Roles and responsibilities</li>
+    <li>Typical checkpoints</li>
+    <li>Demo assets and rebuild</li>
+  </ol>
+</section>
+
+<h2>Who this manual is for and access</h2>
+<p>This manual is for <strong>HRMS admins</strong> and <strong>assigned HR members</strong> who hire, manage attendance and leave, run payroll, and process exits.</p>
+<div class="callout warn">Sign in with <strong>Microsoft Entra SSO</strong>. Passwords are not stored in iConnect Plus for Entra users. If HRMS is missing from your module hub, ask a Superadmin to grant access on Superadmin Panel.</div>
+<ol class="steps">
+  <li>Open iConnect Plus and complete Entra sign-in.</li>
+  <li>Open the HRMS module from the ERP module hub.</li>
+  <li>Use the left sidebar. Expand Org Setup and IT &amp; Admin for nested panes.</li>
+  <li>Start configuration from Org Setup before bulk hiring.</li>
+</ol>
+<div class="callout">Business rule: employees can enter via Recruitment - Onboarding or direct Add Employee. Attendance and payroll depend on an Active employment record.</div>
+
+<h2>End-to-end HR lifecycle overview</h2>
+<p>Part A walks hire-to-exit screens. Use Org Setup and Leave Setup early so masters exist before you create employees.</p>
+
+    <div class="flowchart">
+      <h4>HR lifecycle (demo walkthrough)</h4>
+      <svg viewBox="0 0 780 160" xmlns="http://www.w3.org/2000/svg">
+        <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#2a5f6e"/></marker></defs>
+        <rect x="4" y="28" width="88" height="32" rx="6" fill="#e8f3f5" stroke="#2a5f6e"/>
+        <text x="48" y="49" text-anchor="middle" font-size="10" fill="#1e4a56">Recruitment</text>
+        <line x1="92" y1="44" x2="108" y2="44" stroke="#2a5f6e" marker-end="url(#arrow)"/>
+        <rect x="108" y="28" width="80" height="32" rx="6" fill="#e8f3f5" stroke="#2a5f6e"/>
+        <text x="148" y="49" text-anchor="middle" font-size="10" fill="#1e4a56">Onboarding</text>
+        <line x1="188" y1="44" x2="204" y2="44" stroke="#2a5f6e" marker-end="url(#arrow)"/>
+        <rect x="204" y="28" width="80" height="32" rx="6" fill="#e8f3f5" stroke="#2a5f6e"/>
+        <text x="244" y="49" text-anchor="middle" font-size="10" fill="#1e4a56">Employees</text>
+        <line x1="284" y1="44" x2="300" y2="44" stroke="#2a5f6e" marker-end="url(#arrow)"/>
+        <rect x="300" y="28" width="80" height="32" rx="6" fill="#e8f3f5" stroke="#2a5f6e"/>
+        <text x="340" y="49" text-anchor="middle" font-size="10" fill="#1e4a56">Attendance</text>
+        <line x1="380" y1="44" x2="396" y2="44" stroke="#2a5f6e" marker-end="url(#arrow)"/>
+        <rect x="396" y="28" width="88" height="32" rx="6" fill="#e8f3f5" stroke="#2a5f6e"/>
+        <text x="440" y="49" text-anchor="middle" font-size="10" fill="#1e4a56">Performance</text>
+        <line x1="484" y1="44" x2="500" y2="44" stroke="#2a5f6e" marker-end="url(#arrow)"/>
+        <rect x="500" y="28" width="72" height="32" rx="6" fill="#e8f3f5" stroke="#2a5f6e"/>
+        <text x="536" y="49" text-anchor="middle" font-size="10" fill="#1e4a56">Payroll</text>
+        <line x1="572" y1="44" x2="588" y2="44" stroke="#2a5f6e" marker-end="url(#arrow)"/>
+        <rect x="588" y="28" width="96" height="32" rx="6" fill="#2a5f6e" stroke="#2a5f6e"/>
+        <text x="636" y="49" text-anchor="middle" font-size="10" fill="#fff">Offboarding</text>
+        <text x="390" y="100" text-anchor="middle" font-size="10" fill="#5b6b7c">Demo employee: Moksh Sharma (CT5345) - Junior AI Developer, Technical</text>
+        <text x="390" y="118" text-anchor="middle" font-size="10" fill="#5b6b7c">Org Setup and Leave Setup run before hire; ESS requests and EDoc support day-to-day HR</text>
+      </svg>
+    </div>
+
+<h2>Part A - Process walkthrough</h2>
+<p>Follow these steps in order. Demo profile used in screenshots:</p>
+<ul>
+  <li><strong>Employee:</strong> Moksh Sharma</li>
+  <li><strong>Code:</strong> <code>CT5345</code></li>
+  <li><strong>Designation:</strong> Junior AI Developer</li>
+  <li><strong>Department:</strong> Technical</li>
+  <li><strong>Entity:</strong> Cache Digitech</li>
+</ul>
+
+    <div class="figure-group">
+      <h3>Step 01 - Recruitment</h3>
+      <p>Open <strong>Recruitment</strong> to create job openings, add candidates, run the pipeline, schedule interviews, and generate offers. After offer acceptance, continue in Onboarding.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-01-recruitment.png" alt="Step 01 - Recruitment" />
+        <figcaption>Figure A-01 - Recruitment dashboard with pipeline snapshot and quick actions.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>Step 02 - Onboarding</h3>
+      <p>Start an onboarding case from <strong>Onboarding</strong>. Track invitations, forms, document verification, and ready-to-join status before the employee appears as Active.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-02-onboarding.png" alt="Step 02 - Onboarding" />
+        <figcaption>Figure A-02 - Employee Onboarding cases board.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>Step 03 - Employees directory</h3>
+      <p>Open <strong>Employees</strong> for the workforce register. Filter by entity, department, and designation. Use Add Employee for direct hire when recruitment is not used.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-03-employees.png" alt="Step 03 - Employees directory" />
+        <figcaption>Figure A-03 - Employee Management list with headcount KPIs.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>Step 04 - Add Employee wizard</h3>
+      <p>Complete the nine-step wizard: Personal, Employment, Government IDs, Bank, Education, Previous Job, Salary, Documents, and Review. You can also load details from an onboarding case.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-04-add-employee.png" alt="Step 04 - Add Employee wizard" />
+        <figcaption>Figure A-04 - Add Employee form - Personal step.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>Step 05 - Employee profile</h3>
+      <p>Open a profile (demo: <strong>Moksh Sharma</strong> / <code>CT5345</code>). Tabs cover Overview, Employment, Gov IDs, Bank, Docs, Assets, Attendance, Leave, Payroll, and Offboarding.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-05-employee-profile.png" alt="Step 05 - Employee profile" />
+        <figcaption>Figure A-05 - Profile overview for Moksh Sharma.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>Step 06 - Attendance</h3>
+      <p>Use <strong>Attendance</strong> to mark daily attendance, review missing punches and late arrivals, or explore by employee and calendar. Biometric devices sync punches into this register.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-06-attendance.png" alt="Step 06 - Attendance" />
+        <figcaption>Figure A-06 - Attendance Management list and filters.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>Step 07 - Performance</h3>
+      <p>In <strong>Performance</strong>, create review cycles, assign goals and KPIs, run appraisals, and track PIP or probation when needed.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-07-performance.png" alt="Step 07 - Performance" />
+        <figcaption>Figure A-07 - Performance Management dashboard.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>Step 08 - Training</h3>
+      <p>Schedule programs under <strong>Training</strong>, assign attendees, and track planned vs completed sessions.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-08-training.png" alt="Step 08 - Training" />
+        <figcaption>Figure A-08 - Training list with planned programs.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>Step 09 - Payroll</h3>
+      <p>Open <strong>Payroll</strong> for salary structures, monthly runs, approvals, month lock, revisions, bonuses, loans, and payslips.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-09-payroll.png" alt="Step 09 - Payroll" />
+        <figcaption>Figure A-09 - Payroll Management dashboard.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>Step 10 - Employee Requests</h3>
+      <p>Managers and HR review team requests on <strong>Employee Requests</strong>: attendance corrections, on tour / on duty, leaves, and other ESS items.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-10-employee-requests.png" alt="Step 10 - Employee Requests" />
+        <figcaption>Figure A-10 - Employee Requests inbox cards.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>Step 11 - Org Setup</h3>
+      <p>Configure branches, departments, designations, grades, and legal entities under <strong>Org Setup - Organisation</strong> before hiring at scale.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-11-org-setup.png" alt="Step 11 - Org Setup" />
+        <figcaption>Figure A-11 - Org Setup Branches master.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>Step 12 - Leave Setup</h3>
+      <p>Define leave types, holiday calendars, and attendance policy under <strong>Org Setup - Leave Setup</strong>.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-12-leave-setup.png" alt="Step 12 - Leave Setup" />
+        <figcaption>Figure A-12 - Leave Types catalog (Casual Leave, Sick Leave).</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>Step 13 - Offboarding</h3>
+      <p>Raise exits on <strong>Offboarding</strong>: on notice, clearance, exit interview, documents, and FNF. Direct exits can skip notice when policy allows.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/process/process-13-offboarding.png" alt="Step 13 - Offboarding" />
+        <figcaption>Figure A-13 - Offboarding register with exit cases.</figcaption>
+      </figure>
+    </div>
+
+<h2>Part B - Sidebar reference</h2>
+<p>Pane-by-pane glossary matching the HRMS left navigation. IT &amp; Admin also includes Stocks Manage, Travel Desk, and Requisition under the same parent as Meeting Room.</p>
+
+    <div class="figure-group">
+      <h3>B.01 Dashboard & Reports</h3>
+      <p>Executive overview - events, holidays, attendance, and quick actions.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/01-dashboard.png" alt="HRMS sidebar - Dashboard & Reports" />
+        <figcaption>Figure B-01 - Dashboard & Reports pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.02 Recruitment</h3>
+      <p>ATS - jobs, candidates, pipeline, interviews, and offers.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/02-recruitment.png" alt="HRMS sidebar - Recruitment" />
+        <figcaption>Figure B-02 - Recruitment pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.03 Onboarding</h3>
+      <p>Pre-joining cases, portal invites, and document checks.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/03-onboarding.png" alt="HRMS sidebar - Onboarding" />
+        <figcaption>Figure B-03 - Onboarding pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.04 Employees</h3>
+      <p>Workforce directory and Add Employee wizard.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/04-employees.png" alt="HRMS sidebar - Employees" />
+        <figcaption>Figure B-04 - Employees pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.05 Attendance</h3>
+      <p>Daily register, by-employee view, and calendar.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/05-attendance.png" alt="HRMS sidebar - Attendance" />
+        <figcaption>Figure B-05 - Attendance pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.06 Biometric Devices</h3>
+      <p>Fingerprint device registry and punch sync.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/06-biometric-devices.png" alt="HRMS sidebar - Biometric Devices" />
+        <figcaption>Figure B-06 - Biometric Devices pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.07 Performance</h3>
+      <p>Goals, KPIs, reviews, appraisals, and PIP.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/07-performance.png" alt="HRMS sidebar - Performance" />
+        <figcaption>Figure B-07 - Performance pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.08 Training</h3>
+      <p>Training programs and completion tracking.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/08-training.png" alt="HRMS sidebar - Training" />
+        <figcaption>Figure B-08 - Training pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.09 Payroll</h3>
+      <p>Structures, runs, payslips, and compliance tabs.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/09-payroll.png" alt="HRMS sidebar - Payroll" />
+        <figcaption>Figure B-09 - Payroll pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.10 Employee Requests</h3>
+      <p>Team ESS approvals - attendance, leave, on tour.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/10-employee-requests.png" alt="HRMS sidebar - Employee Requests" />
+        <figcaption>Figure B-10 - Employee Requests pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.11 EDoc</h3>
+      <p>Employee document vault, types, and onboarding policies.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/11-edoc.png" alt="HRMS sidebar - EDoc" />
+        <figcaption>Figure B-11 - EDoc pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.12 Org Setup</h3>
+      <p>Organisation masters - branches, departments, designations.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/12-org-setup.png" alt="HRMS sidebar - Org Setup" />
+        <figcaption>Figure B-12 - Org Setup pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.13 Leave Setup</h3>
+      <p>Leave types, holidays, and attendance policy.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/13-leave-setup.png" alt="HRMS sidebar - Leave Setup" />
+        <figcaption>Figure B-13 - Leave Setup pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.14 Shifts & Roster</h3>
+      <p>Shift master, assignments, rotations, and roster calendar.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/14-shifts-roster.png" alt="HRMS sidebar - Shifts & Roster" />
+        <figcaption>Figure B-14 - Shifts & Roster pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.15 Offboarding</h3>
+      <p>Resignation, clearance, exit interview, and FNF.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/15-offboarding.png" alt="HRMS sidebar - Offboarding" />
+        <figcaption>Figure B-15 - Offboarding pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.16 Meeting Room</h3>
+      <p>IT & Admin - rooms and meeting requests (also Stocks, Travel, Requisition).</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/16-meeting-rooms.png" alt="HRMS sidebar - Meeting Room" />
+        <figcaption>Figure B-16 - Meeting Room pane.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figure-group">
+      <h3>B.17 Superadmin Panel</h3>
+      <p>Grant HRMS access to Entra / employee users by entity.</p>
+      <figure class="screenshot">
+        <img src="assets/screenshots/sidebar/17-superadmin.png" alt="HRMS sidebar - Superadmin Panel" />
+        <figcaption>Figure B-17 - Superadmin Panel pane.</figcaption>
+      </figure>
+    </div>
+
+<h2>Roles and responsibilities</h2>
+<div class="role-grid three">
+  <div class="role-card">
+    <h3>HR admin / Superadmin</h3>
+    <ul>
+      <li>Own Org Setup and Leave Setup</li>
+      <li>Grant HRMS access on Superadmin Panel</li>
+      <li>Approve payroll month lock and sensitive exits</li>
+      <li>Configure biometric devices and policies</li>
+    </ul>
+  </div>
+  <div class="role-card">
+    <h3>HR executive</h3>
+    <ul>
+      <li>Run Recruitment and Onboarding</li>
+      <li>Maintain Employees and EDoc</li>
+      <li>Process Employee Requests</li>
+      <li>Coordinate Offboarding clearance</li>
+    </ul>
+  </div>
+  <div class="role-card">
+    <h3>Manager / payroll ops</h3>
+    <ul>
+      <li>Approve team leave and attendance requests</li>
+      <li>Assign goals and complete reviews</li>
+      <li>Run payroll cycles and payslips</li>
+      <li>Book meeting rooms and travel as needed</li>
+    </ul>
+  </div>
+</div>
+
+    <div class="table-block">
+      <h2 class="table-heading">Typical checkpoints</h2>
+      <p>Your tenant policies may vary. These are the usual HRMS checkpoints.</p>
+      <table class="data">
+
+        <tr><th>Stage</th><th>Owner</th><th>Action in UI</th></tr>
+        <tr><td>Org / Leave Setup</td><td>HR admin</td><td>Create branches, designations, leave types, holidays</td></tr>
+        <tr><td>Recruit - Onboard</td><td>HR executive</td><td>Job opening - offer - Start Onboarding</td></tr>
+        <tr><td>Employee record</td><td>HR executive</td><td>Add Employee or activate from onboarding</td></tr>
+        <tr><td>Time &amp; attendance</td><td>HR / manager</td><td>Mark attendance or sync biometric punches</td></tr>
+        <tr><td>Payroll</td><td>Payroll ops</td><td>Structure - run - approve - payslip</td></tr>
+        <tr><td>Exit</td><td>HR + managers</td><td>Offboarding case - clearance - FNF</td></tr>
+            
+      </table>
+    </div>
+
+<div class="footer-note">
+  <p><strong>Document control</strong> - iConnect Plus HRMS User Manual v1.0 - HTML generated by <code>_build_hrms_manual.py</code>.</p>
+  <p>Regenerate after UI changes: run the build script, refresh screenshots under <code>assets/screenshots/</code>, then print to PDF (see README).</p>
+</div>
+</div>
+</body>
+</html>

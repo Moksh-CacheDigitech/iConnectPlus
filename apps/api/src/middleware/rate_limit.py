@@ -1,4 +1,4 @@
-"""Simple Redis-backed API rate limiting (AppScan / VAPT resource exhaustion)."""
+"""Redis-backed API rate limiting for reads, writes, and uploads (VAPT)."""
 
 from collections.abc import Awaitable, Callable
 
@@ -28,6 +28,27 @@ _EXEMPT_SUFFIXES = (
 
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
+# Path fragments that indicate an upload / file-ingest endpoint (JSON base64 or multipart).
+_UPLOAD_PATH_MARKERS = (
+    "/upload",
+    "/uploads",
+    "/attachment",
+    "/attachments",
+    "/document",
+    "/documents",
+    "/import",
+    "/submission-file",
+    "/content_base64",
+    "/files",
+    "/avatar",
+    "/photo",
+    "/challan",
+    "/tracker",
+    "/sheet-tracker",
+    "/vendor-quote",
+    "/boq",
+)
+
 
 def _client_key(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
@@ -36,6 +57,14 @@ def _client_key(request: Request) -> str:
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
+
+
+def _is_upload_request(request: Request) -> bool:
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "multipart/form-data" in content_type:
+        return True
+    path = (request.url.path or "").lower()
+    return any(marker in path for marker in _UPLOAD_PATH_MARKERS)
 
 
 def _limit_response(limit: int, window: int, ttl: int) -> JSONResponse:
@@ -70,14 +99,29 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         method = (request.method or "GET").upper()
         is_write = method in _WRITE_METHODS
-        if is_write:
-            limit = int(getattr(settings, "api_write_rate_limit", 0) or 0)
-            window = int(getattr(settings, "api_write_rate_window_seconds", 60) or 60)
-            # Fall back to global API limit when write limit disabled.
+        is_upload = is_write and _is_upload_request(request)
+
+        if is_upload:
+            limit = int(getattr(settings, "api_upload_rate_limit", 0) or 0)
+            window = int(getattr(settings, "api_upload_rate_window_seconds", 60) or 60)
+            bucket = "upload"
+            # Fall back to write, then global, when upload limit disabled.
+            if limit <= 0:
+                limit = int(getattr(settings, "api_write_rate_limit", 0) or 0)
+                window = int(getattr(settings, "api_write_rate_window_seconds", 60) or 60)
+                bucket = "write"
             if limit <= 0:
                 limit = int(getattr(settings, "api_rate_limit", 0) or 0)
                 window = int(getattr(settings, "api_rate_window_seconds", 60) or 60)
+                bucket = "api"
+        elif is_write:
+            limit = int(getattr(settings, "api_write_rate_limit", 0) or 0)
+            window = int(getattr(settings, "api_write_rate_window_seconds", 60) or 60)
             bucket = "write"
+            if limit <= 0:
+                limit = int(getattr(settings, "api_rate_limit", 0) or 0)
+                window = int(getattr(settings, "api_rate_window_seconds", 60) or 60)
+                bucket = "api"
         else:
             limit = int(getattr(settings, "api_rate_limit", 0) or 0)
             window = int(getattr(settings, "api_rate_window_seconds", 60) or 60)
@@ -100,6 +144,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             response.headers["X-RateLimit-Limit"] = str(limit)
             response.headers["X-RateLimit-Remaining"] = str(remaining)
+            response.headers["X-RateLimit-Bucket"] = bucket
             return response
         except RedisError as exc:
             logger.warning("API rate limit skipped (Redis unavailable): %s", exc)

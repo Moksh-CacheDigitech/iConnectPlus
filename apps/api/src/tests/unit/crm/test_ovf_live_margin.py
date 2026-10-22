@@ -7,6 +7,14 @@ from modules.crm.domain.delivery_timeline import expected_delivery_date, parse_d
 from modules.crm.service.engines import margin_engine
 
 
+def test_finance_cost_pct_excel_formula():
+    # IF(Customer>Vendor, 0.5%/15*(Customer-Vendor), 0) as percent points.
+    assert margin_engine.compute_finance_cost_pct(15, 30) == Decimal("0.50")
+    assert margin_engine.compute_finance_cost_pct(30, 15) == Decimal("0.00")
+    assert margin_engine.compute_finance_cost_pct(15, 15) == Decimal("0.00")
+    assert margin_engine.compute_finance_cost_pct(0, 45) == Decimal("1.50")
+
+
 def test_carrying_cost_is_one_percent_a_month():
     # 8 lakh server held a month → ₹8,000 (the Samsung example).
     assert margin_engine.carrying_cost(Decimal("800000"), 30) == Decimal("8000.0000")

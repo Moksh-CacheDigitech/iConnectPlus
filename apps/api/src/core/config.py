@@ -204,9 +204,22 @@ class Settings(BaseSettings):
     # fans out many module calls; set API_RATE_LIMIT=300+ in AppScan / production.
     api_rate_limit: int = Field(default=0, alias="API_RATE_LIMIT")
     api_rate_window_seconds: int = Field(default=60, alias="API_RATE_WINDOW_SECONDS")
-    # Stricter limit for mutating methods (POST/PUT/PATCH/DELETE). 0 disables write bucket.
-    api_write_rate_limit: int = Field(default=0, alias="API_WRITE_RATE_LIMIT")
+    # Mutating methods (POST/PUT/PATCH/DELETE). Enabled by default to stop data-entry floods.
+    api_write_rate_limit: int = Field(default=120, alias="API_WRITE_RATE_LIMIT")
     api_write_rate_window_seconds: int = Field(default=60, alias="API_WRITE_RATE_WINDOW_SECONDS")
+    # Uploads (multipart + upload-path JSON). Stricter than general writes.
+    api_upload_rate_limit: int = Field(default=30, alias="API_UPLOAD_RATE_LIMIT")
+    api_upload_rate_window_seconds: int = Field(
+        default=60, alias="API_UPLOAD_RATE_WINDOW_SECONDS"
+    )
+    # Max JSON string length for normal entry fields (content_base64 exempt).
+    api_max_entry_string_length: int = Field(
+        default=20_000, alias="API_MAX_ENTRY_STRING_LENGTH"
+    )
+    # Max Content-Length for multipart / known upload routes (bytes). 0 disables.
+    api_max_upload_request_bytes: int = Field(
+        default=45 * 1024 * 1024, alias="API_MAX_UPLOAD_REQUEST_BYTES"
+    )
     # Access token lifetime for platform/super admins (VAPT session hijack window).
     jwt_privileged_access_token_expire_minutes: int = Field(
         default=15, alias="JWT_PRIVILEGED_ACCESS_TOKEN_EXPIRE_MINUTES"

@@ -78,7 +78,9 @@ Important knobs:
 | `CLAMAV_ENABLED` | `true` | Upload AV |
 | `FIELD_ENCRYPTION_KEYS` | set in non-dev | Comma-separated; first encrypts, all decrypt |
 | `INTEGRATION_OUTBOUND_ALLOWED_HOSTS` | set outside dev | Webhook SSRF allowlist |
-| `API_RATE_LIMIT` | `600`+ local | Dashboard fans out many GETs |
+| `API_RATE_LIMIT` | `0` local / `300`+ prod | Dashboard fans out many GETs |
+| `API_WRITE_RATE_LIMIT` | `120` | Data-entry flood protection |
+| `API_UPLOAD_RATE_LIMIT` | `30` | Multipart + upload-path JSON |
 | `AUTH_COOKIE_*` | HttpOnly cookies | Sessions are cookie-based |
 
 ### 2. Start

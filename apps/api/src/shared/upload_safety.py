@@ -146,10 +146,12 @@ def validate_upload(
     content_type: str | None,
     raw: bytes | None = None,
     max_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
+    allowed_extensions: frozenset[str] | None = None,
 ) -> tuple[str, str | None]:
     """Validate upload metadata/bytes. Returns (safe_name, normalized_content_type)."""
     safe_name = sanitize_filename(file_name)
     ext = file_extension(safe_name)
+    allowed = allowed_extensions if allowed_extensions is not None else ALLOWED_EXTENSIONS
 
     if not ext:
         raise UnsafeUploadError("Uploaded file must include a valid extension")
@@ -157,7 +159,7 @@ def validate_upload(
         raise UnsafeUploadError(
             f"File type '{ext}' is not allowed. Upload documents or images only."
         )
-    if ext not in ALLOWED_EXTENSIONS:
+    if ext not in allowed:
         raise UnsafeUploadError(
             f"File type '{ext}' is not allowed. Allowed types include PDF, Office, and images."
         )

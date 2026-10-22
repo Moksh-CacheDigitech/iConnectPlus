@@ -44,7 +44,7 @@ import {
   PlatformModuleShareDonut,
 } from "@/components/platform/platform-dashboard-charts";
 import { Button } from "@/components/ui/button";
-import { erpModules } from "@/config/modules";
+import { shellSidebarModules } from "@/config/navigation";
 import { useAuthUser } from "@/hooks/use-auth-user";
 import { welcomeDisplayName } from "@/lib/welcome-display-name";
 import { canAccessHref, hasModuleAssignments } from "@/lib/module-access";
@@ -84,6 +84,7 @@ const MODULE_ICONS: Record<string, LucideIcon> = {
   helpdesk: Headphones,
   foundation: Shield,
   organization: Building2,
+  "master-data": Boxes,
 };
 
 function moduleIcon(key: string): LucideIcon {
@@ -381,7 +382,7 @@ export function PlatformDashboard() {
 
   const visibleModules = useMemo(
     () =>
-      erpModules.filter((mod) =>
+      shellSidebarModules().filter((mod) =>
         canAccessHref(mod.href, moduleKeys, user?.userType, adminModuleKeys),
       ),
     [adminModuleKeys, moduleKeys, user?.userType],
@@ -510,11 +511,11 @@ export function PlatformDashboard() {
     headline.length > 0
       ? headline.slice(0, 4)
       : [
-          { label: "Modules", value: String(visibleModules.length), hint: "Assigned" },
-          { label: "Records", value: "—", hint: "Tracked" },
-          { label: "Live feeds", value: "—", hint: "Healthy" },
-          { label: "Coverage", value: "—", hint: "API" },
-        ];
+        { label: "Modules", value: String(visibleModules.length), hint: "Assigned" },
+        { label: "Records", value: "—", hint: "Tracked" },
+        { label: "Live feeds", value: "—", hint: "Healthy" },
+        { label: "Coverage", value: "—", hint: "API" },
+      ];
 
   return shell(
     <>
@@ -655,7 +656,7 @@ export function PlatformDashboard() {
 
       <HomeCard
         title="Departments"
-        subtitle="Status, volume, and KPIs — alerts use color; chrome stays monochrome."
+        subtitle="Same modules as the sidebar — status, volume, and KPIs."
         icon={LayoutDashboard}
         delayMs={280}
       >

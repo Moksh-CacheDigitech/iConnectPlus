@@ -28,6 +28,8 @@ from modules.marketing.models import (
 )
 from modules.marketing.repository.base import MktScopedRepository, utcnow
 from modules.marketing.service.number_service import MarketingNumberService
+from shared.text_safety import assert_safe_plain_text
+from shared.upload_safety import UnsafeUploadError, validate_upload
 
 OPEN_TASK_STATUSES = {"draft", "assigned", "in_progress", "in_review", "blocked"}
 
@@ -177,7 +179,6 @@ class TaskService:
     ) -> MktTask:
         """Content provider attaches a link and/or uploaded file for approval."""
         import base64
-        import re
         import uuid as uuid_lib
         from pathlib import Path
 
@@ -214,8 +215,11 @@ class TaskService:
             raise ValidationException("This deliverable is already approved")
 
         url = (content_url or "").strip()
-        doc_name = (document_name or "").strip()
-        note_text = (notes or "").strip()
+        try:
+            doc_name = assert_safe_plain_text(document_name or "", field="document_name") if document_name else ""
+            note_text = assert_safe_plain_text(notes or "", field="notes") if notes else ""
+        except ValueError as exc:
+            raise ValidationException(str(exc)) from exc
         raw_b64 = (content_base64 or "").strip()
         upload_name = (file_name or "").strip() or doc_name
 
@@ -229,12 +233,15 @@ class TaskService:
                 raw = base64.b64decode(raw_b64, validate=False)
             except Exception as exc:  # noqa: BLE001
                 raise ValidationException("Invalid file upload payload") from exc
-            max_bytes = 25 * 1024 * 1024
-            if len(raw) > max_bytes:
-                raise ValidationException("Uploaded file must be 25 MB or smaller")
-            if len(raw) == 0:
-                raise ValidationException("Uploaded file is empty")
-            safe = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(upload_name).name).strip("._") or "upload.bin"
+            try:
+                safe, media = validate_upload(
+                    file_name=upload_name,
+                    content_type=content_type,
+                    raw=raw,
+                    max_bytes=25 * 1024 * 1024,
+                )
+            except UnsafeUploadError as exc:
+                raise ValidationException(str(exc)) from exc
             root = Path(settings.resolved_crm_upload_root).parent / "marketing-deliverables"
             folder = root / str(ctx.tenant_id) / str(row.id)
             folder.mkdir(parents=True, exist_ok=True)
@@ -242,9 +249,9 @@ class TaskService:
             path = folder / stored_name
             path.write_bytes(raw)
             stored_rel = str(path.relative_to(root)).replace("\\", "/")
-            stored_ctype = (content_type or "").strip() or "application/octet-stream"
+            stored_ctype = media or (content_type or "").strip() or "application/octet-stream"
             if not doc_name:
-                doc_name = Path(upload_name).name
+                doc_name = safe
 
         if not url and not stored_rel and not doc_name and not note_text:
             raise ValidationException("Provide a content link, upload a file, or add notes")

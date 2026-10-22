@@ -18,6 +18,8 @@ from modules.ess.employee_document_storage import (
     load_document_download,
     save_employee_document_bytes,
 )
+from shared.text_safety import assert_safe_plain_text
+from shared.upload_safety import UnsafeUploadError, validate_upload
 from modules.ess.schemas import (
     EssAnnouncementItem,
     EssAssetItem,
@@ -1018,10 +1020,24 @@ class EssService:
         if not raw:
             raise AppException("Empty file")
 
+        try:
+            document_name = assert_safe_plain_text(
+                body.document_name, field="document_name"
+            )
+            safe_name, _media = validate_upload(
+                file_name=body.file_name,
+                content_type=body.content_type,
+                raw=raw,
+                max_bytes=2 * 1024 * 1024,
+                allowed_extensions=frozenset({".pdf", ".png", ".jpg", ".jpeg"}),
+            )
+        except (UnsafeUploadError, ValueError) as exc:
+            raise AppException(str(exc)) from exc
+
         storage_uri = save_employee_document_bytes(
             company_id=emp.company_id,
             employee_id=emp.id,
-            file_name=body.file_name,
+            file_name=safe_name,
             raw=raw,
         )
         row = self._documents.create(
@@ -1030,7 +1046,7 @@ class EssService:
             employee_id=emp.id,
             company_id=emp.company_id,
             document_type=doc_type,
-            document_name=body.document_name.strip(),
+            document_name=document_name,
             storage_uri=storage_uri,
             issued_on=body.issued_on,
             expires_on=body.expires_on,

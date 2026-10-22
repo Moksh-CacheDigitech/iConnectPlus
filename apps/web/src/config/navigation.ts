@@ -80,8 +80,30 @@ const groupTitles: Record<ErpModule["group"], string> = {
 /** Foundation, organization, and master data stay in the ERP shell; operations open in a new tab. */
 const IN_APP_NAV_GROUPS = new Set<ErpModule["group"]>(["foundation", "organization", "master-data"]);
 
-/** Modules kept in the registry but omitted from the ERP shell sidebar. */
-const HIDDEN_FROM_SHELL_NAV = new Set<string>(["recruitment", "payroll", "inventory"]);
+/** Modules kept in the registry but omitted from the ERP shell sidebar (and home Departments table). */
+export const HIDDEN_FROM_SHELL_NAV = new Set<string>(["recruitment", "payroll", "inventory"]);
+
+const SHELL_NAV_GROUPS = ["foundation", "organization", "master-data", "operations"] as const;
+
+/** ERP modules shown in the left sidebar, in sidebar order (ops alphabetical). */
+export function shellSidebarModules(): ErpModule[] {
+  const rows: ErpModule[] = [];
+  for (const group of SHELL_NAV_GROUPS) {
+    const moduleItems = erpModules.filter(
+      (m) => m.group === group && !HIDDEN_FROM_SHELL_NAV.has(m.key),
+    );
+    if (group === "operations") {
+      rows.push(
+        ...[...moduleItems].sort((a, b) =>
+          a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
+        ),
+      );
+    } else {
+      rows.push(...moduleItems);
+    }
+  }
+  return rows;
+}
 
 export const navigation: NavGroup[] = [
   {
@@ -103,7 +125,7 @@ export const navigation: NavGroup[] = [
       },
     ],
   },
-  ...(["foundation", "organization", "master-data", "operations"] as const).map((group) => {
+  ...SHELL_NAV_GROUPS.map((group) => {
     const moduleItems = erpModules
       .filter((m) => m.group === group && !HIDDEN_FROM_SHELL_NAV.has(m.key))
       .map((m) => ({
@@ -124,14 +146,14 @@ export const navigation: NavGroup[] = [
         ...items,
         ...(group === "organization"
           ? [
-              {
-                title: "Users",
-                href: "/organization/users",
-                description: "ERP users in your organization tenant",
-                icon: Users,
-                inApp: true,
-              } satisfies NavItem,
-            ]
+            {
+              title: "Users",
+              href: "/organization/users",
+              description: "ERP users in your organization tenant",
+              icon: Users,
+              inApp: true,
+            } satisfies NavItem,
+          ]
           : []),
       ],
     };

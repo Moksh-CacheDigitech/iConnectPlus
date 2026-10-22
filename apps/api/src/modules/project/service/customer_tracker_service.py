@@ -24,6 +24,7 @@ from modules.project.schemas import (
 )
 from modules.project.service.project_module_admin import ProjectModuleAdminService
 from modules.project.service.project_scope_validator import ProjectScopeValidator
+from shared.upload_safety import UnsafeUploadError, validate_upload
 
 GRID_FORMAT = "erp.tracker.grid.v1"
 GRID_CONTENT_TYPE = "application/vnd.erp.tracker.grid+json"
@@ -171,17 +172,21 @@ class CustomerTrackerService:
         project = self._projects.get(ctx, project_id)
         if project is None or project.company_id != cid:
             raise NotFoundException("Project not found")
-        safe_name = Path(file_name).name.strip()
-        if not safe_name:
-            raise ValidationException("A tracker file name is required")
         try:
             raw = base64.b64decode(content_base64, validate=True)
         except (ValueError, binascii.Error) as exc:
             raise ValidationException("Invalid tracker file data") from exc
-        if not raw:
-            raise ValidationException("Tracker file cannot be empty")
-        if len(raw) > 25 * 1024 * 1024:
-            raise ValidationException("Tracker file must be 25 MB or smaller")
+        try:
+            safe_name, media = validate_upload(
+                file_name=file_name,
+                content_type=content_type,
+                raw=raw,
+                max_bytes=25 * 1024 * 1024,
+                allowed_extensions=frozenset({".xlsx", ".xls", ".csv"}),
+            )
+        except UnsafeUploadError as exc:
+            raise ValidationException(str(exc)) from exc
+        content_type = media or content_type
 
         return self._persist(
             ctx,

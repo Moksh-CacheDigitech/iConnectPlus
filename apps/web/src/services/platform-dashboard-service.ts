@@ -1,4 +1,5 @@
 import { erpModules } from "@/config/modules";
+import { HIDDEN_FROM_SHELL_NAV, shellSidebarModules } from "@/config/navigation";
 import { canAccessHref } from "@/lib/module-access";
 import { ApiClientError } from "@/services/api-client";
 import { loadAnalyticsOverview } from "@/services/analytics-service";
@@ -816,8 +817,15 @@ export async function loadPlatformDashboard(
   userType?: string,
   adminModuleKeys: string[] = [],
 ): Promise<PlatformDashboardData> {
-  const accessibleKeys = Object.keys(MODULE_LOADERS).filter((key) =>
-    canAccessHref(moduleMeta(key).href, moduleKeys, userType, adminModuleKeys),
+  // Match left-sidebar modules only (same set + order as shell nav).
+  const shellModules = shellSidebarModules().filter((mod) =>
+    canAccessHref(mod.href, moduleKeys, userType, adminModuleKeys),
+  );
+  const shellOrder = shellModules.map((mod) => mod.key);
+  const shellKeySet = new Set(shellOrder);
+
+  const accessibleKeys = Object.keys(MODULE_LOADERS).filter(
+    (key) => shellKeySet.has(key) && !HIDDEN_FROM_SHELL_NAV.has(key),
   );
 
   const settled = await mapWithConcurrency(
@@ -850,11 +858,28 @@ export async function loadPlatformDashboard(
     };
   });
 
+  const loadedByKey = new Map(results.map((row) => [row.key, row]));
+
+  // Include shell modules that have no overview loader yet (Foundation, Org, …).
+  for (const mod of shellModules) {
+    if (loadedByKey.has(mod.key)) continue;
+    loadedByKey.set(mod.key, {
+      key: mod.key,
+      title: mod.title,
+      href: mod.href,
+      analytics: { status: "ok", recordCount: 0, kpis: [], errors: [] },
+    });
+  }
+
+  const orderedResults: ModuleLoaderResult[] = shellOrder
+    .map((key) => loadedByKey.get(key))
+    .filter((row): row is ModuleLoaderResult => Boolean(row));
+
   const statusCodes: number[] = [];
   let offlineCount = 0;
   let softPartialCount = 0;
 
-  for (const row of results) {
+  for (const row of orderedResults) {
     if (row.analytics.status === "error") offlineCount += 1;
     if (row.analytics.status === "partial") softPartialCount += 1;
     if (row.statusCodes?.length) {
@@ -863,21 +888,20 @@ export async function loadPlatformDashboard(
   }
 
   // Banner only when something is actually offline, or most modules are soft-partial.
-  const tracked = results.length || 1;
+  const tracked = orderedResults.length || 1;
   const partial =
     offlineCount > 0 || softPartialCount >= Math.max(2, Math.ceil(tracked * 0.35));
 
-  const modules: ModuleAnalytics[] = results
-    .map((row) => ({
-      key: row.key,
-      title: row.title,
-      href: row.href,
-      ...row.analytics,
-    }))
-    .sort((a, b) => b.recordCount - a.recordCount);
+  const modules: ModuleAnalytics[] = orderedResults.map((row) => ({
+    key: row.key,
+    title: row.title,
+    href: row.href,
+    ...row.analytics,
+  }));
 
-  const moduleActivity = modules
+  const moduleActivity = [...modules]
     .filter((row) => row.recordCount > 0)
+    .sort((a, b) => b.recordCount - a.recordCount)
     .slice(0, 10)
     .map((row) => ({
       name: row.title,
@@ -887,15 +911,15 @@ export async function loadPlatformDashboard(
 
   return {
     loadedAt: new Date().toISOString(),
-    executive: buildExecutive(results),
-    opsBacklog: buildOpsBacklog(results),
+    executive: buildExecutive(orderedResults),
+    opsBacklog: buildOpsBacklog(orderedResults),
     moduleHealth: [
       { name: "Live", value: modules.filter((row) => row.status === "ok").length },
       { name: "Partial", value: modules.filter((row) => row.status === "partial").length },
       { name: "Offline", value: modules.filter((row) => row.status === "error").length },
     ].filter((row) => row.value > 0),
     modules,
-    connectedPipeline: buildConnectedPipeline(results),
+    connectedPipeline: buildConnectedPipeline(orderedResults),
     moduleActivity,
     partial,
     authBlocked: statusCodes.includes(401),

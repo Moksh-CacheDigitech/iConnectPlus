@@ -9,10 +9,12 @@ import { buildResourceColumns } from "@/components/module/resource-columns";
 import { DataTable } from "@/components/shared/data-table";
 import { EmptyState } from "@/components/shared/empty-state";
 import { KpiCard, KpiStrip } from "@/components/shared/kpi-card";
+import { PlatformPillarsBanner } from "@/components/shared/platform-pillars-banner";
 import { ViewAllLink, WorkspacePage, WorkspaceSection } from "@/components/shared/workspace-ui";
 import { buttonVariants } from "@/components/ui/button";
 import type { ErpModule, ModuleResource } from "@/config/modules";
 import { moduleIconMap } from "@/config/navigation";
+import { platformPillarForModuleKey } from "@/config/platform-pillars";
 import { useAuthUser } from "@/hooks/use-auth-user";
 import { canManageModuleUsers, moduleUsersHref } from "@/lib/module-access";
 import { enrichRows, listTotal, normalizeRows } from "@/lib/resource-display";
@@ -90,6 +92,7 @@ export function ModuleHub({ module }: ModuleHubProps) {
   }, [load]);
 
   const recentColumns = useMemo(() => buildResourceColumns(data.recent, 4), [data.recent]);
+  const pillar = platformPillarForModuleKey(module.key);
 
   return (
     <WorkspacePage>
@@ -131,6 +134,8 @@ export function ModuleHub({ module }: ModuleHubProps) {
           </>
         }
       />
+
+      {pillar ? <PlatformPillarsBanner active={pillar} /> : null}
 
       {kpiResources.length > 0 ? (
         <KpiStrip variant="hero">

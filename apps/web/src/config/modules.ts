@@ -50,7 +50,8 @@ export const erpModules: ErpModule[] = [
   {
     key: "foundation",
     title: "Foundation",
-    description: "Auth, tenants, RBAC, workflows, notifications, audit, and settings.",
+    description:
+      "Who can do what + how approvals, notifications, and audit work (auth, tenants, users, RBAC, engines, settings).",
     href: "/foundation",
     group: "foundation",
     icon: "shield",
@@ -162,7 +163,8 @@ export const erpModules: ErpModule[] = [
   {
     key: "organization",
     title: "Organization",
-    description: "Companies, branches, departments, and org hierarchy.",
+    description:
+      "Where the company structure is — companies, branches, departments, and the org tree.",
     href: "/organization",
     group: "organization",
     icon: "building",
@@ -206,7 +208,8 @@ export const erpModules: ErpModule[] = [
   {
     key: "master-data",
     title: "Master Data",
-    description: "Shared masters used across all business modules.",
+    description:
+      "Shared business masters used across every module (employees, customers, vendors, products, tax, warehouses).",
     href: "/master-data",
     group: "master-data",
     icon: "boxes",

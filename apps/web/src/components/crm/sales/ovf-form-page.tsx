@@ -939,7 +939,7 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
               readOnly
               className={`${NUMBER_NO_SPIN} cursor-default bg-muted/50`}
               value={financeCostPct.toFixed(2)}
-              title="max(0, customer days − vendor days − 5) / 15 × 0.5 (2 d.p.)"
+              title="IF(customer > vendor, 0.5%/15 × (customer − vendor), 0) (2 d.p.)"
             />
           </FinanceField>
           <FinanceField label="Additional Charges (₹)">

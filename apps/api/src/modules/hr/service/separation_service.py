@@ -17,6 +17,8 @@ from modules.hr.repository.separation_repository import SeparationRepository
 from modules.hr.service.document_number_service import DocumentNumberService
 from modules.hr.service.engines import EmploymentEngine, SeparationEngine
 from modules.hr.service.hr_scope_validator import HrScopeValidator
+from shared.input_validation import UnsafeInputError, assert_safe_filename
+from shared.text_safety import assert_safe_plain_text
 
 DEFAULT_CHECKLIST = [
     {"key": "assets", "label": "Asset return", "done": False, "notes": None},
@@ -779,9 +781,18 @@ class SeparationService:
             raise InvalidSeparationState("Upload exit documents after manager approval")
         if row.status == "completed":
             raise InvalidSeparationState("Cannot upload documents on a completed exit")
-        title = (name or "").strip()
-        if not title:
-            raise InvalidSeparationState("Document name is required")
+        try:
+            title = assert_safe_plain_text(name or "", field="name")
+            if not title:
+                raise InvalidSeparationState("Document name is required")
+            safe_notes = (
+                assert_safe_plain_text(notes, field="notes") if notes else None
+            )
+            safe_file_name = (
+                assert_safe_filename(file_name, required=False) if file_name else None
+            )
+        except (UnsafeInputError, ValueError) as exc:
+            raise InvalidSeparationState(str(exc)) from exc
         clearance = self._clearance_for_update(row)
         docs = list(clearance.get("documents") or [])
         docs.append(
@@ -789,8 +800,8 @@ class SeparationService:
                 "id": str(uuid4()),
                 "name": title,
                 "doc_type": (doc_type or "other").strip().lower() or "other",
-                "notes": notes,
-                "file_name": file_name,
+                "notes": safe_notes,
+                "file_name": safe_file_name or None,
                 "uploaded_at": datetime.now(timezone.utc).isoformat(),
                 "uploaded_by": str(ctx.user_id) if ctx.user_id else None,
             }

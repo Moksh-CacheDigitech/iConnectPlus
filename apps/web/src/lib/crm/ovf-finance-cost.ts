@@ -1,12 +1,10 @@
 /** OVF Rule #7 — finance cost from payment-term gap (matches margin_engine). */
 
 export const FINANCE_COST_PCT_PER_15_DAYS = 0.5;
-/** First N days of funding gap are free. */
-export const FINANCE_COST_BUFFER_DAYS = 5;
 
 /**
- * gapDays = max(0, customerDays - vendorDays - 5)
- * finance_cost_pct = (gapDays / 15) * 0.5  → rounded to 2 decimal places
+ * Excel: IF(Customer_Terms>Vendor_Terms, 0.5%/15*(Customer_Terms-Vendor_Terms), 0)
+ * Stored as percent points (e.g. 0.50), rounded to 2 d.p.
  */
 export function computeFinanceCostPct(
   vendorPaymentDays: number,
@@ -14,7 +12,6 @@ export function computeFinanceCostPct(
 ): number {
   const vendor = Math.max(0, Math.trunc(Number(vendorPaymentDays) || 0));
   const customer = Math.max(0, Math.trunc(Number(customerPaymentDays) || 0));
-  const gapDays = customer - vendor - FINANCE_COST_BUFFER_DAYS;
-  if (gapDays <= 0) return 0;
-  return Number(((gapDays / 15) * FINANCE_COST_PCT_PER_15_DAYS).toFixed(2));
+  if (customer <= vendor) return 0;
+  return Number(((FINANCE_COST_PCT_PER_15_DAYS / 15) * (customer - vendor)).toFixed(2));
 }

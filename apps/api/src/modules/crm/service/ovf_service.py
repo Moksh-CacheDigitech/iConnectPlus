@@ -2,7 +2,7 @@
 
 Product rules enforced here:
   4. OVF ONLY after customer PO is approved on the opportunity.
-  7. Finance cost ~0.5% per 15 days of payment gap after a 5-day buffer.
+  7. Finance cost: IF customer > vendor then (0.5/15)*(customer-vendor), else 0.
   8. "Send for approval" creates a My Jobs task + notification stub and can
      lock the record.
 """

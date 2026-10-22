@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
 from core import object_storage
 from core.exceptions import AppException, NotFoundException
+from shared.upload_safety import UnsafeUploadError, sanitize_filename, validate_upload
 
 ESS_DOC_PREFIX = "ess-doc:"
 MAX_PHOTO_BYTES = 300 * 1024
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
-ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+ALLOWED_EXTENSIONS = frozenset({".pdf", ".png", ".jpg", ".jpeg"})
 
 UPLOAD_ROOT = Path(__file__).resolve().parents[3] / "var" / "ess-documents"
 
@@ -27,9 +27,7 @@ class DocumentDownload:
 
 
 def _safe_filename(name: str) -> str:
-    base = Path(name).name
-    cleaned = re.sub(r"[^\w.\-]+", "_", base).strip("._")
-    return cleaned[:200] or "document"
+    return sanitize_filename(name, max_length=200)
 
 
 def guess_media_type(file_name: str) -> str:
@@ -50,13 +48,18 @@ def save_employee_document_bytes(
     file_name: str,
     raw: bytes,
 ) -> str:
-    if len(raw) > MAX_UPLOAD_BYTES:
-        raise AppException(f"File exceeds maximum size of {MAX_UPLOAD_BYTES // (1024 * 1024)}MB")
-    ext = Path(file_name).suffix.lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        raise AppException("Allowed file types: PDF, PNG, JPG, JPEG")
+    try:
+        safe_name, _media = validate_upload(
+            file_name=file_name,
+            content_type=None,
+            raw=raw,
+            max_bytes=MAX_UPLOAD_BYTES,
+            allowed_extensions=ALLOWED_EXTENSIONS,
+        )
+    except UnsafeUploadError as exc:
+        raise AppException(str(exc)) from exc
 
-    stored_name = f"{uuid.uuid4()}_{_safe_filename(file_name)}"
+    stored_name = f"{uuid.uuid4()}_{safe_name}"
     rel = f"{company_id}/{employee_id}/{stored_name}"
     if object_storage.is_enabled():
         key = object_storage.module_key("hr", "ess", rel)

@@ -46,16 +46,8 @@ const PRESET_DELIVERABLE_TYPES = [
 
 const CUSTOM_TYPE_VALUE = "__custom__";
 
-const CONTENT_PROVIDER_ROLES = new Set(["content_creator"]);
-const APPROVAL_HEAD_ROLES = new Set(["approval_head"]);
-const EDITOR_ROLES = new Set(["video_editor", "graphic_designer", "supporting_member"]);
-
-function roleLabel(role: string): string {
-  return role.replaceAll("_", " ");
-}
-
 function memberOptionLabel(member: MarketingTeamMember): string {
-  return `${member.display_name} (${roleLabel(member.role)})`;
+  return member.email ? `${member.display_name} (${member.email})` : member.display_name;
 }
 
 function canManageCampaignDeliverables(
@@ -194,18 +186,11 @@ export function MarketingCampaignsPage() {
     [extraTypes],
   );
 
-  const contentProviders = useMemo(
-    () => teamMembers.filter((m) => CONTENT_PROVIDER_ROLES.has(m.role)),
-    [teamMembers],
-  );
-  const approvalHeads = useMemo(
-    () => teamMembers.filter((m) => APPROVAL_HEAD_ROLES.has(m.role)),
-    [teamMembers],
-  );
-  const editors = useMemo(
-    () => teamMembers.filter((m) => EDITOR_ROLES.has(m.role)),
-    [teamMembers],
-  );
+  // Every Marketing module-assigned user is selectable in each user dropdown,
+  // regardless of their functional role (same roster as Marketing > Users).
+  const contentProviders = teamMembers;
+  const approvalHeads = teamMembers;
+  const editors = teamMembers;
 
   async function submitCreate() {
     const campaignName = name.trim();
@@ -701,7 +686,7 @@ export function MarketingCampaignsPage() {
                       {teamLoading
                         ? "Loading…"
                         : contentProviders.length === 0
-                          ? "No content creators"
+                          ? "No module users assigned"
                           : "Select content provider"}
                     </option>
                     {contentProviders.map((m) => (
@@ -726,7 +711,7 @@ export function MarketingCampaignsPage() {
                       {teamLoading
                         ? "Loading…"
                         : approvalHeads.length === 0
-                          ? "No approval heads"
+                          ? "No module users assigned"
                           : "Select approval head"}
                     </option>
                     {approvalHeads.map((m) => (
@@ -751,7 +736,7 @@ export function MarketingCampaignsPage() {
                       {teamLoading
                         ? "Loading…"
                         : editors.length === 0
-                          ? "No editors / supporting members"
+                          ? "No module users assigned"
                           : "Select editor"}
                     </option>
                     {editors.map((m) => (

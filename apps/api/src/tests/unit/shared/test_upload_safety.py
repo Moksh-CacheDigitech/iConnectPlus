@@ -57,3 +57,23 @@ def test_sanitize_strips_path_and_specials() -> None:
 
 def test_office_download_not_inline() -> None:
     assert content_disposition_type("boq.xlsx", "application/vnd.ms-excel") == "attachment"
+
+
+def test_allowed_extensions_override() -> None:
+    name, _ = validate_upload(
+        file_name="diag.zip",
+        content_type="application/zip",
+        raw=b"PK\x03\x04fake",
+        allowed_extensions=frozenset({".zip"}),
+    )
+    assert name == "diag.zip"
+
+
+def test_override_still_blocks_html() -> None:
+    with pytest.raises(UnsafeUploadError):
+        validate_upload(
+            file_name="x.html",
+            content_type="text/html",
+            raw=b"<html></html>",
+            allowed_extensions=frozenset({".html"}),
+        )

@@ -10,6 +10,7 @@ from core.constants import API_V1_PREFIX, APP_DESCRIPTION
 from core.exceptions import register_exception_handlers
 from core.logging import setup_logging
 from middleware.rate_limit import RateLimitMiddleware
+from middleware.input_validation import InputValidationMiddleware
 from middleware.hr_api_alias import HrToHrmsAliasMiddleware
 from middleware.request_context import RequestContextMiddleware
 from middleware.security_headers import SecurityHeadersMiddleware
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
 
     application.add_middleware(RequestContextMiddleware)
     application.add_middleware(SecurityHeadersMiddleware)
+    application.add_middleware(InputValidationMiddleware)
     application.add_middleware(RateLimitMiddleware)
     application.add_middleware(HrToHrmsAliasMiddleware)
 

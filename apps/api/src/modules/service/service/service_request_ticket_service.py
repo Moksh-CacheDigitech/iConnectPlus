@@ -67,15 +67,33 @@ from modules.service.service_request_ticket_schemas import (
 )
 from security.password import PasswordHasher
 from shared.email_utils import send_smtp_email
+from shared.upload_safety import UnsafeUploadError, validate_upload
 
 logger = logging.getLogger(__name__)
 
 UPLOAD_ROOT = Path(__file__).resolve().parents[3] / "var" / "service-attachments"
 MAX_ATTACHMENT_BYTES = 40 * 1024 * 1024
-ALLOWED_EXTENSIONS = {
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".xls", ".xlsx",
-    ".doc", ".docx", ".zip", ".txt", ".log",
-}
+# Service field work often needs logs/archives; still blocked types stay blocked in upload_safety.
+ALLOWED_EXTENSIONS = frozenset(
+    {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".webp",
+        ".pdf",
+        ".xls",
+        ".xlsx",
+        ".doc",
+        ".docx",
+        ".zip",
+        ".txt",
+        ".log",
+        ".csv",
+        ".msg",
+        ".eml",
+    }
+)
 
 
 class ServiceRequestTicketService:
@@ -842,14 +860,22 @@ class ServiceRequestTicketService:
             from core.exceptions import ForbiddenException
             raise ForbiddenException("You do not have permission to upload attachments")
 
-        ext = Path(file_name).suffix.lower()
-        if ext and ext not in ALLOWED_EXTENSIONS:
-            raise AppException(f"File type {ext} is not allowed")
+        try:
+            raw = base64.b64decode(content_base64)
+        except Exception as exc:  # noqa: BLE001
+            raise AppException("Invalid file content (base64)") from exc
 
-        safe_name = Path(file_name).name
-        raw = base64.b64decode(content_base64)
-        if len(raw) > MAX_ATTACHMENT_BYTES:
-            raise AppException("Attachment exceeds maximum size of 40MB")
+        try:
+            safe_name, media_type = validate_upload(
+                file_name=file_name,
+                content_type=content_type,
+                raw=raw,
+                max_bytes=MAX_ATTACHMENT_BYTES,
+                allowed_extensions=ALLOWED_EXTENSIONS,
+            )
+        except UnsafeUploadError as exc:
+            raise AppException(str(exc)) from exc
+        content_type = media_type or content_type
 
         att = SvcServiceRequestAttachment(
             id=uuid.uuid4(),
