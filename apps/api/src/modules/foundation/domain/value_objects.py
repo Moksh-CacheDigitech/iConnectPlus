@@ -41,3 +41,4 @@ class TenantContext:
     tenant_wide: bool = False
     procurement_tenant_wide: bool = False
     scoped_company_ids: tuple[UUID, ...] = ()
+    all_companies: bool = False

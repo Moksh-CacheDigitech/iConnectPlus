@@ -17,6 +17,7 @@ import {
 
 import {
   EmsAvatar,
+  EmsPagination,
   EmsSkeleton,
 } from "@/components/hr/workforce/ems-primitives";
 import { EmployeeImportDrawer } from "@/components/hr/workforce/employee-import-drawer";
@@ -47,8 +48,10 @@ import {
 import {
   computeEmployeeStats,
   downloadTextFile,
+  EMPLOYEE_LIST_PAGE_SIZE,
   exportEmployeesCsv,
   filterEmployees,
+  listEmployeesPage,
   loadEmployeeDirectory,
   setEmployeeLifecycleStatus,
   type EmployeeDirectoryOptions,
@@ -88,6 +91,8 @@ export function EmployeeManagementPage() {
   const [records, setRecords] = useState<EmployeeRecord[]>([]);
   const [options, setOptions] = useState<EmployeeDirectoryOptions | null>(null);
   const [loading, setLoading] = useState(true);
+  const [directoryReady, setDirectoryReady] = useState(false);
+  const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<EmployeeListFilters>(EMPTY_FILTERS);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -106,7 +111,13 @@ export function EmployeeManagementPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setDirectoryReady(false);
+    setPage(1);
     try {
+      const first = await listEmployeesPage(1, EMPLOYEE_LIST_PAGE_SIZE);
+      setRecords(first.records);
+      setLoading(false);
+
       const [{ records: rows, options: opts, errors }, employmentTypes] = await Promise.all([
         loadEmployeeDirectory(),
         listEmploymentTypeOptions(),
@@ -114,6 +125,7 @@ export function EmployeeManagementPage() {
       setRecords(rows);
       setOptions(opts);
       setEmploymentTypeOptions(employmentTypes);
+      setDirectoryReady(true);
       if (errors.length) toast(errors.join(" · "), "info");
     } catch {
       toast("Failed to load employee directory", "error");
@@ -131,6 +143,36 @@ export function EmployeeManagementPage() {
     [records, query, filters],
   );
   const stats = useMemo(() => computeEmployeeStats(records), [records]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, filters]);
+
+  const pageRows = useMemo(() => {
+    if (!directoryReady) return records;
+    const start = (page - 1) * EMPLOYEE_LIST_PAGE_SIZE;
+    return filtered.slice(start, start + EMPLOYEE_LIST_PAGE_SIZE);
+  }, [directoryReady, filtered, page, records]);
+
+  const listTotal = directoryReady
+    ? filtered.length
+    : (page - 1) * EMPLOYEE_LIST_PAGE_SIZE +
+      records.length +
+      (records.length >= EMPLOYEE_LIST_PAGE_SIZE ? 1 : 0);
+
+  async function onListPageChange(next: number) {
+    if (directoryReady) {
+      setPage(next);
+      return;
+    }
+    setPage(next);
+    try {
+      const res = await listEmployeesPage(next, EMPLOYEE_LIST_PAGE_SIZE);
+      setRecords(res.records);
+    } catch {
+      toast("Failed to load employees", "error");
+    }
+  }
   const orderedVisibleColumns = useMemo(
     () =>
       (Object.keys(EMPLOYEE_TABLE_COLUMN_LABELS) as EmployeeTableColumnKey[]).filter((key) =>
@@ -147,7 +189,8 @@ export function EmployeeManagementPage() {
   );
 
   function toggleAll(checked: boolean) {
-    if (checked) setSelected(new Set(filtered.map((r) => r.id)));
+    const ids = directoryReady ? filtered : pageRows;
+    if (checked) setSelected(new Set(ids.map((r) => r.id)));
     else setSelected(new Set());
   }
 
@@ -491,7 +534,7 @@ export function EmployeeManagementPage() {
                             <input
                               type="checkbox"
                               className="cursor-pointer"
-                              checked={filtered.length > 0 && filtered.every((r) => selected.has(r.id))}
+                              checked={pageRows.length > 0 && pageRows.every((r) => selected.has(r.id))}
                               onChange={(e) => toggleAll(e.target.checked)}
                             />
                           </th>
@@ -508,7 +551,7 @@ export function EmployeeManagementPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {filtered.map((row) => (
+                        {pageRows.map((row) => (
                           <tr
                             key={row.id}
                             className="border-b border-border/50 transition-colors hover:bg-muted/30"
@@ -599,16 +642,12 @@ export function EmployeeManagementPage() {
                       </tbody>
                     </table>
                   </div>
-                  <div className="flex items-center border-t border-border/70 px-4 py-2.5 text-xs text-muted-foreground">
-                    <span>
-                      {filtered.length === 0
-                        ? "No employees"
-                        : `Showing ${filtered.length} employee${filtered.length === 1 ? "" : "s"}`}
-                      {query || Object.values(filters).some(Boolean)
-                        ? ` (filtered from ${records.length})`
-                        : ""}
-                    </span>
-                  </div>
+                    <EmsPagination
+                      page={page}
+                      pageSize={EMPLOYEE_LIST_PAGE_SIZE}
+                      total={listTotal}
+                      onPageChange={(next) => void onListPageChange(next)}
+                    />
                 </div>
               )}
           </div>

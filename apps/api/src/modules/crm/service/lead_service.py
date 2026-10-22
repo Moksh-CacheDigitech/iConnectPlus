@@ -6,10 +6,11 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, ForbiddenException, NotFoundException
+from security.field_crypto import pii_lookup
 from modules.crm.domain.enums import CrmEntityType, LeadStatus
 from modules.crm.models import CrmLead
 from modules.crm.repository.company_repository import CompanyRepository
@@ -226,7 +227,7 @@ class LeadService:
                 select(EmployeeRead).where(
                     EmployeeRead.tenant_id == ctx.tenant_id,
                     EmployeeRead.is_deleted.is_(False),
-                    func.lower(EmployeeRead.email) == user.email.lower(),
+                    EmployeeRead.email_lookup == pii_lookup(user.email),
                 )
             )
             if email_row is not None:
@@ -319,7 +320,7 @@ class LeadService:
                 EmployeeRead.tenant_id == ctx.tenant_id,
                 EmployeeRead.company_id == company_id,
                 EmployeeRead.is_deleted.is_(False),
-                func.lower(EmployeeRead.email) == email,
+                EmployeeRead.email_lookup == pii_lookup(email),
             )
         )
         if existing is not None:

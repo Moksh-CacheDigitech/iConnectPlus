@@ -11,6 +11,27 @@ def _f(value) -> float:
     return float(Decimal(str(value or 0)))
 
 
+def _earning_rows(bd: dict, gross: float) -> list[dict[str, Any]]:
+    """List posted components. Variable pay is a separate line only when it is not already inside the split."""
+    rows: list[dict[str, Any]] = [
+        {"code": "basic", "label": "Basic", "amount": _f(bd.get("basic"))},
+        {"code": "hra", "label": "HRA", "amount": _f(bd.get("hra"))},
+        {"code": "special", "label": "Special Allowance", "amount": _f(bd.get("special_allowance"))},
+    ]
+    room = gross - sum(row["amount"] for row in rows)
+    for code, label, key in (
+        ("ot", "Overtime", "overtime_pay"),
+        ("bonus", "Bonus", "bonus"),
+        ("arrears", "Arrears", "arrears"),
+        ("incentive", "Performance Incentive", "incentives"),
+    ):
+        amount = _f(bd.get(key))
+        if amount > 0 and room + 0.05 >= amount:
+            rows.append({"code": code, "label": label, "amount": amount})
+            room -= amount
+    return rows
+
+
 def _inr(value) -> str:
     n = Decimal(str(value or 0)).quantize(Decimal("0.01"))
     return f"₹{n:,.2f}"
@@ -42,15 +63,7 @@ def build_payslip_document(
     day = day_summary or bd.get("day_summary") or {}
     counts = day.get("counts") if isinstance(day, dict) else {}
 
-    earnings = [
-        {"code": "basic", "label": "Basic", "amount": _f(bd.get("basic"))},
-        {"code": "hra", "label": "HRA", "amount": _f(bd.get("hra"))},
-        {"code": "special", "label": "Special Allowance", "amount": _f(bd.get("special_allowance"))},
-    ]
-    if _f(bd.get("overtime_pay")) > 0:
-        earnings.append({"code": "ot", "label": "Overtime", "amount": _f(bd.get("overtime_pay"))})
-    if _f(bd.get("bonus")) > 0:
-        earnings.append({"code": "bonus", "label": "Bonus", "amount": _f(bd.get("bonus"))})
+    earnings = _earning_rows(bd, _f(gross_earnings or bd.get("gross")))
 
     pf_total = _f(bd.get("pf_total") or (_f(bd.get("pf_employee")) + _f(bd.get("pf_employer"))))
     deductions = [
@@ -74,6 +87,7 @@ def build_payslip_document(
     attendance = {
         "period_days": _f(period_days or bd.get("period_days")),
         "paid_days": _f(paid_days or bd.get("paid_days")),
+        "payable_days": _f(paid_days or bd.get("paid_days")),
         "lop_days": _f(lop_days),
         "leave_days": _f(leave_days),
         "scheduled_working": _f(counts.get("scheduled_working") if counts else 0),
@@ -81,7 +95,13 @@ def build_payslip_document(
         "unpaid_leave": _f(counts.get("unpaid_leave") if counts else 0),
         "present": _f(counts.get("present") if counts else 0),
         "absent": _f(counts.get("absent") if counts else 0),
+        "half_day": _f(counts.get("half_day") if counts else 0),
+        "week_off": _f(counts.get("week_off") if counts else 0),
+        "holiday": _f(counts.get("holiday") if counts else 0),
+        "sandwich_lop": _f(counts.get("sandwich_lop") if counts else 0),
     }
+    if counts and "late" in counts:
+        attendance["late_count"] = _f(counts.get("late"))
 
     doc: dict[str, Any] = {
         "version": 1,
@@ -129,12 +149,13 @@ def format_payslip_text(doc: dict[str, Any]) -> str:
         f"Employee: {emp.get('name') or '-'} ({emp.get('code') or emp.get('id')})",
         "-" * 42,
         "ATTENDANCE (payroll cycle)",
-        f"  Scheduled / N     {att.get('period_days', 0)}",
-        f"  Paid days         {att.get('paid_days', 0)}",
+        f"  Payable days      {att.get('paid_days', 0)} / {att.get('period_days', 30)}",
+        f"  Present           {att.get('present', 0)}",
+        f"  Paid leave        {att.get('paid_leave', 0)}",
+        f"  Weekly off        {att.get('week_off', 0)}",
+        f"  Holiday           {att.get('holiday', 0)}",
         f"  LOP days          {att.get('lop_days', 0)}",
         f"  Leave (requests)  {att.get('leave_days', 0)}",
-        f"  Paid leave        {att.get('paid_leave', 0)}",
-        f"  Unpaid leave      {att.get('unpaid_leave', 0)}",
         "-" * 42,
         "EARNINGS",
     ]

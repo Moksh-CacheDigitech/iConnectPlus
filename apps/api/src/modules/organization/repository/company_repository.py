@@ -2,10 +2,10 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import false, select
 from sqlalchemy.orm import Session
 
-from modules.foundation.domain.org_data_scope import apply_company_scope
+from modules.foundation.domain.org_data_scope import apply_company_scope, effective_company_ids
 from modules.foundation.domain.value_objects import TenantContext
 from modules.organization.domain.entities import CompanyEntity
 from modules.organization.models.company import OrgCompany
@@ -24,6 +24,21 @@ class CompanyRepository(OrgScopedRepository):
         stmt = apply_company_scope(
             stmt, OrgCompany, ctx, module_key=ORGANIZATION_MODULE_KEY
         )
+        return [self._to_entity(r) for r in self.db.scalars(stmt).all()]
+
+    def list_permitted_companies(self, ctx: TenantContext) -> list[CompanyEntity]:
+        """Every company the user may open, including ones other than the active entity."""
+        stmt = select(OrgCompany)
+        stmt = self.apply_tenant_filter(stmt, OrgCompany, ctx)
+        ids = effective_company_ids(ctx)
+        if ids is not None:
+            if not ids:
+                stmt = stmt.where(false())
+            elif len(ids) == 1:
+                stmt = stmt.where(OrgCompany.id == ids[0])
+            else:
+                stmt = stmt.where(OrgCompany.id.in_(ids))
+        stmt = stmt.order_by(OrgCompany.company_name)
         return [self._to_entity(r) for r in self.db.scalars(stmt).all()]
 
     def get_by_id(self, ctx: TenantContext, company_id: UUID) -> CompanyEntity | None:
@@ -54,6 +69,13 @@ class CompanyRepository(OrgScopedRepository):
         currency_code: str,
         registration_number: str | None = None,
         tax_number: str | None = None,
+        tan_number: str | None = None,
+        logo_url: str | None = None,
+        address_line1: str | None = None,
+        address_line2: str | None = None,
+        city: str | None = None,
+        state_name: str | None = None,
+        postal_code: str | None = None,
         fiscal_year_start_month: int = 4,
         timezone: str = "UTC",
         status: str = "active",
@@ -68,6 +90,13 @@ class CompanyRepository(OrgScopedRepository):
             currency_code=currency_code,
             registration_number=registration_number,
             tax_number=tax_number,
+            tan_number=tan_number,
+            logo_url=logo_url,
+            address_line1=address_line1,
+            address_line2=address_line2,
+            city=city,
+            state_name=state_name,
+            postal_code=postal_code,
             fiscal_year_start_month=fiscal_year_start_month,
             timezone=timezone,
             status=status or "active",
@@ -127,4 +156,12 @@ class CompanyRepository(OrgScopedRepository):
             timezone=row.timezone,
             version=row.version,
             is_deleted=row.is_deleted,
+            tax_number=row.tax_number,
+            tan_number=row.tan_number,
+            logo_url=row.logo_url,
+            address_line1=row.address_line1,
+            address_line2=row.address_line2,
+            city=row.city,
+            state_name=row.state_name,
+            postal_code=row.postal_code,
         )

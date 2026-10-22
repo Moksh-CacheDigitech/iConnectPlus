@@ -15,6 +15,7 @@ import { SetupEntityPanel, type FieldDef } from "@/components/hr/setup/setup-ent
 import { HolidayCalendarPanel } from "@/components/hr/setup/holiday-calendar-panel";
 import { AttendancePolicyPanel } from "@/components/hr/setup/attendance-policy-panel";
 import { ManagementGroupPanel } from "@/components/hr/setup/management-group-panel";
+import { PeopleRolesPanel } from "@/components/hr/setup/people-roles-panel";
 import { OnboardingPoliciesPanel } from "@/components/hr/setup/onboarding-policies-panel";
 import { SetupToastHost } from "@/components/hr/setup/setup-toast";
 import { toApiTimeValue, toTimeInputValue } from "@/components/hr/setup/setup-drawer";
@@ -806,6 +807,19 @@ const TAB_CONFIG: Partial<Record<HrSetupTabId, TabConfig>> = {
           { value: "AED", label: "AED" },
         ],
       },
+      { key: "tax_number", label: "PAN", placeholder: "Company PAN" },
+      { key: "tan_number", label: "TAN", placeholder: "Company TAN" },
+      { key: "address_line1", label: "Address", placeholder: "Street address" },
+      { key: "address_line2", label: "Address line 2" },
+      { key: "city", label: "City" },
+      { key: "state_name", label: "State" },
+      { key: "postal_code", label: "PIN code" },
+      {
+        key: "logo_url",
+        label: "Company logo",
+        type: "image",
+        hint: "Shown on the salary slip. PNG or JPEG.",
+      },
       BRANCH_STATUS_FIELD,
     ],
     statusActions: {
@@ -821,6 +835,14 @@ const TAB_CONFIG: Partial<Record<HrSetupTabId, TabConfig>> = {
       currency_code: f.currency_code || "INR",
       timezone: "Asia/Kolkata",
       status: f.status || "active",
+      tax_number: String(f.tax_number || "").trim() || null,
+      tan_number: String(f.tan_number || "").trim() || null,
+      address_line1: String(f.address_line1 || "").trim() || null,
+      address_line2: String(f.address_line2 || "").trim() || null,
+      city: String(f.city || "").trim() || null,
+      state_name: String(f.state_name || "").trim() || null,
+      postal_code: String(f.postal_code || "").trim() || null,
+      logo_url: String(f.logo_url || "").trim() || null,
     }),
     buildUpdateBody: (f) => ({
       company_code: String(f.company_code || "").trim().toUpperCase() || undefined,
@@ -829,6 +851,14 @@ const TAB_CONFIG: Partial<Record<HrSetupTabId, TabConfig>> = {
       country_code: f.country_code || undefined,
       currency_code: f.currency_code || undefined,
       status: f.status,
+      tax_number: String(f.tax_number || "").trim() || null,
+      tan_number: String(f.tan_number || "").trim() || null,
+      address_line1: String(f.address_line1 || "").trim() || null,
+      address_line2: String(f.address_line2 || "").trim() || null,
+      city: String(f.city || "").trim() || null,
+      state_name: String(f.state_name || "").trim() || null,
+      postal_code: String(f.postal_code || "").trim() || null,
+      logo_url: String(f.logo_url || "").trim() || null,
     }),
   },
   "employment-type": {
@@ -991,7 +1021,7 @@ const TAB_CONFIG: Partial<Record<HrSetupTabId, TabConfig>> = {
         key: "sandwich_rule_enabled",
         label: "Sandwich Rule",
         type: "checkbox",
-        hint: "Approved leave around a weekly off/holiday: sandwich off. Unauthorized absence (no approved leave, even if balance remains): weekly off/holiday becomes LOP.",
+        hint: "Company sandwich policy (Payroll → Salary configuration) is authoritative. Default: Friday leave + Monday leave converts weekly off/holiday to LOP. This leave-type flag is a fallback enable.",
       },
       {
         key: "leave_cycle_start_day",
@@ -1537,6 +1567,9 @@ function TabPanel({ tab }: { tab: HrSetupTab }) {
   }
   if (tab.id === "employment-types") {
     return <ManagementGroupPanel tab={tab} />;
+  }
+  if (tab.id === "people-roles") {
+    return <PeopleRolesPanel />;
   }
   if (tab.id === "onboarding-policies") {
     return <OnboardingPoliciesPanel />;

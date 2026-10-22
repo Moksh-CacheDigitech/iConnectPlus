@@ -64,6 +64,7 @@ def microsoft_login(
     _: Annotated[None, Depends(optional_authentication)],
     return_to: Annotated[str, Query(max_length=200)] = "/organization",
     frontend_origin: Annotated[str | None, Query(max_length=300)] = None,
+    client: Annotated[str | None, Query(max_length=32)] = None,
 ) -> RedirectResponse:
     if not MicrosoftOAuthService.is_enabled():
         raise MicrosoftLoginNotConfiguredException()
@@ -76,7 +77,12 @@ def microsoft_login(
         else "/organization"
     )
     # Remember which UI started SSO (localhost vs LAN VM) for post-login redirect.
-    safe_frontend = resolve_frontend_base(frontend_origin)
+    # Employee PWA (client=ess) lands back on the employee app, not admin web.
+    safe_frontend = (
+        settings.employee_app_url.rstrip("/")
+        if (client or "").strip().lower() in {"ess", "employee", "employee-app"}
+        else resolve_frontend_base(frontend_origin)
+    )
     SessionStore().set_oauth_state(
         state,
         {

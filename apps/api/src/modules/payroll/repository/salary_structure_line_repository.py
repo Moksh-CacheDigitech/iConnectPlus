@@ -19,11 +19,10 @@ class SalaryStructureLineRepository(PayScopedRepository):
         stmt = self.apply_pay_filter(stmt, PaySalaryStructureLine, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
-        stmt = select(PaySalaryStructureLine).where(
-            PaySalaryStructureLine.company_id == company_id,
-            PaySalaryStructureLine.is_deleted.is_(False),
-        )
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
+        stmt = select(PaySalaryStructureLine).where(PaySalaryStructureLine.is_deleted.is_(False))
+        if company_id is not None:
+            stmt = stmt.where(PaySalaryStructureLine.company_id == company_id)
         stmt = self.apply_pay_filter(stmt, PaySalaryStructureLine, ctx, branch_scoped=False)
         return list(self.db.scalars(stmt).all())
 
@@ -52,3 +51,25 @@ class SalaryStructureLineRepository(PayScopedRepository):
             row.version = int(row.version or 1) + 1
         self.db.flush()
         return row
+
+    def list_for_structure(self, ctx: TenantContext, structure_id: UUID):
+        stmt = select(PaySalaryStructureLine).where(
+            PaySalaryStructureLine.salary_structure_id == structure_id,
+            PaySalaryStructureLine.is_deleted.is_(False),
+        )
+        stmt = self.apply_pay_filter(stmt, PaySalaryStructureLine, ctx, branch_scoped=False)
+        return list(self.db.scalars(stmt).all())
+
+    def soft_delete(self, ctx: TenantContext, row_id: UUID) -> bool:
+        row = self.get(ctx, row_id)
+        if row is None:
+            return False
+        row.is_deleted = True
+        row.deleted_at = utcnow()
+        row.deleted_by = ctx.user_id
+        row.updated_at = utcnow()
+        row.updated_by = ctx.user_id
+        if hasattr(row, "version"):
+            row.version = int(row.version or 1) + 1
+        self.db.flush()
+        return True

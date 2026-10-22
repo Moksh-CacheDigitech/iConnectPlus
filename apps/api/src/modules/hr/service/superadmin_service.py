@@ -18,13 +18,18 @@ from modules.foundation.repository.user_module_repository import UserModuleRepos
 from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.rbac_service import RBACService
 from modules.foundation.service.user_service import UserService
+from modules.hr.domain.hr_nav_access import default_hr_nav_keys, normalize_hr_nav_keys
+from modules.hr.permissions import HR_SUPERADMIN_PERMISSION
+from modules.hr.repository.hr_admin_nav_access_repository import HrAdminNavAccessRepository
 from modules.hr.schemas import (
     HrActivityLogRecord,
     HrAdminEntityOption,
     HrAdminPasswordResponse,
     HrAdminRecord,
+    HrNavAccessRecord,
 )
 from modules.master_data.published import EmployeeCommands, EmployeeRead
+from modules.hr.service.hr_module_admin import HrModuleAdminService
 from modules.organization.models.company import OrgCompany
 from modules.organization.repository.org_scope_repository import OrgScopeRepository
 from security.password import PasswordHasher
@@ -76,6 +81,7 @@ class HrSuperadminService:
         self._scopes = OrgScopeRepository(db)
         self._modules = UserModuleRepository(db)
         self._rbac = RBACService(db)
+        self._nav = HrAdminNavAccessRepository(db)
 
     def _role(self, tenant_id: UUID, code: str) -> SecRole:
         role = self._db.scalar(
@@ -132,7 +138,10 @@ class HrSuperadminService:
             assigned_by=assigned_by,
         )
 
-    def _revoke_role_link(self, tenant_id: UUID, user_id: UUID, role_code: str) -> None:
+    def _revoke_role_link(
+        self, tenant_id: UUID, user_id: UUID, role_code: str, revoked_by: UUID | None = None
+    ) -> None:
+        _ = revoked_by
         role = self._db.scalar(
             select(SecRole).where(
                 SecRole.tenant_id == tenant_id,
@@ -169,6 +178,7 @@ class HrSuperadminService:
         temporary_password: str | None = None,
         company_ids: list[UUID] | None = None,
     ) -> HrAdminRecord:
+        nav_keys, nav_unrestricted = self._nav_fields(emp.tenant_id, user.id)
         return HrAdminRecord(
             employee_id=emp.id,
             employee_code=emp.employee_code,
@@ -179,7 +189,55 @@ class HrSuperadminService:
             login_created=login_created,
             temporary_password=temporary_password,
             company_ids=company_ids if company_ids is not None else self._company_ids_for_user(user.id),
+            nav_keys=nav_keys,
+            nav_unrestricted=nav_unrestricted,
         )
+
+    def _nav_fields(self, tenant_id: UUID, user_id: UUID) -> tuple[list[str], bool]:
+        row = self._nav.get(tenant_id, user_id)
+        if row is None:
+            return default_hr_nav_keys(), True
+        return normalize_hr_nav_keys(list(row.nav_keys or [])), False
+
+    def _is_unrestricted_viewer(self, ctx: TenantContext) -> bool:
+        if ctx.user_id is None:
+            return False
+        if ctx.user_type in {"super_admin", "tenant_admin"}:
+            return True
+        if HrModuleAdminService(self._db).is_admin(ctx):
+            return True
+        return self._rbac.has_permission(ctx.user_id, ctx.tenant_id, HR_SUPERADMIN_PERMISSION)
+
+    def my_nav_access(self, ctx: TenantContext) -> HrNavAccessRecord:
+        if ctx.user_id is None:
+            return HrNavAccessRecord(unrestricted=False, nav_keys=[])
+        if self._is_unrestricted_viewer(ctx):
+            return HrNavAccessRecord(unrestricted=True, nav_keys=default_hr_nav_keys())
+        keys, unrestricted = self._nav_fields(ctx.tenant_id, ctx.user_id)
+        return HrNavAccessRecord(unrestricted=unrestricted, nav_keys=keys)
+
+    def set_nav_keys(
+        self,
+        ctx: TenantContext,
+        employee_id: UUID,
+        nav_keys: list[str],
+    ) -> HrAdminRecord:
+        emp = self._employee(ctx, employee_id)
+        user = self._require_hr_admin_or_member(ctx, emp)
+        keys = normalize_hr_nav_keys(nav_keys)
+        self._nav.upsert(
+            tenant_id=ctx.tenant_id,
+            user_id=user.id,
+            nav_keys=keys,
+            actor_id=ctx.user_id,
+        )
+        self._audit.log_security_event(
+            tenant_id=ctx.tenant_id,
+            event_type="hr.hr_admin.nav_updated",
+            user_id=user.id,
+            details_json={"by": str(ctx.user_id), "employee_id": str(emp.id), "keys": keys},
+        )
+        return self._to_record(emp, user, login_created=False)
 
     def _company_ids_for_user(self, user_id: UUID) -> list[UUID]:
         rows = self._db.scalars(
@@ -419,6 +477,13 @@ class HrSuperadminService:
             self._resolve_company_ids(ctx, emp, company_ids),
             default_company_id=emp.company_id,
         )
+        if self._nav.get(ctx.tenant_id, user.id) is None:
+            self._nav.upsert(
+                tenant_id=ctx.tenant_id,
+                user_id=user.id,
+                nav_keys=default_hr_nav_keys(),
+                actor_id=ctx.user_id,
+            )
         self._rbac.invalidate_user(user.id)
         self._audit.log_security_event(
             tenant_id=ctx.tenant_id,
@@ -477,7 +542,8 @@ class HrSuperadminService:
         if row is not None and row.role == MODULE_ROLE_MEMBER:
             self._modules.delete_assignment(row)
 
-        self._revoke_role_link(ctx.tenant_id, emp.user_id, HR_MEMBER_ROLE_CODE)
+        self._revoke_role_link(ctx.tenant_id, emp.user_id, HR_MEMBER_ROLE_CODE, revoked_by=ctx.user_id)
+        self._nav.soft_delete(ctx.tenant_id, emp.user_id, ctx.user_id)
         home = [emp.company_id] if emp.company_id else []
         self._apply_entity_scopes(
             ctx, emp.user_id, home, default_company_id=emp.company_id

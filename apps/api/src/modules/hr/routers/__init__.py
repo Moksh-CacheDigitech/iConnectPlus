@@ -14,6 +14,7 @@ from modules.hr.dependencies import (
     get_db,
     get_pagination,
     paginate,
+    require_hr_superadmin_only,
 )
 from modules.hr.schemas import (
     AppraisalCreate,
@@ -177,6 +178,7 @@ from modules.hr.service.on_duty_ot_service import OnDutyRequestService, OtAllotm
 from modules.hr.service.compoff_bio_service import BiometricDeviceService, CompoffRequestService
 from modules.hr.service.shift_swap_rotation_service import ShiftRotationService, ShiftSwapService
 from modules.hr.service.management_group_service import ManagementGroupService
+from modules.hr.service.kpi_okr_service import KpiService, OkrService
 from shared.schemas import APIResponse
 
 designations_router = APIRouter(prefix="/designations", tags=["HR - Designations"])
@@ -1000,8 +1002,12 @@ def list_attendance(
     db: Annotated[Session, Depends(get_db)],
     pagination: Annotated[PaginationParams, Depends(get_pagination)],
     company_id: UUID | None = None,
+    employee_id: UUID | None = None,
 ):
-    return APIResponse(message="OK", data=paginate(AttendanceService(db).list(ctx, company_id), pagination))
+    return APIResponse(
+        message="OK",
+        data=paginate(AttendanceService(db).list(ctx, company_id, employee_id), pagination),
+    )
 
 
 @attendance_router.post("", response_model=APIResponse[AttendanceResponse])
@@ -1648,7 +1654,8 @@ def list_kpis(
     pagination: Annotated[PaginationParams, Depends(get_pagination)],
     company_id: UUID | None = None,
 ):
-    return APIResponse(message="OK", data=paginate(KpiService(db).list(ctx, company_id), pagination))
+    rows = paginate(KpiService(db).list(ctx, company_id), pagination)
+    return APIResponse(message="OK", data=[KpiResponse.model_validate(r) for r in rows])
 
 
 @kpis_router.post("", response_model=APIResponse[KpiResponse])
@@ -1812,6 +1819,16 @@ def update_training(
     return APIResponse(message="OK", data=TrainingService(db).update(ctx, row_id, **extract_update_fields(body)))
 
 
+@training_router.delete("/{row_id}", response_model=APIResponse[None])
+def delete_training(
+    row_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("hr.training:update"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    TrainingService(db).delete(ctx, row_id)
+    return APIResponse(message="Deleted", data=None)
+
+
 @training_router.post("/{row_id}/assign", response_model=APIResponse[TrainingAttendanceResponse])
 def assign_training(
     row_id: UUID,
@@ -1936,6 +1953,16 @@ def create_separation(
     db: Annotated[Session, Depends(get_db)],
 ):
     return APIResponse(message="OK", data=SeparationService(db).create(ctx, **body.model_dump()))
+
+
+@separation_router.delete("/{row_id}", response_model=APIResponse[None])
+def delete_separation(
+    row_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_hr_superadmin_only())],
+    db: Annotated[Session, Depends(get_db)],
+):
+    SeparationService(db).delete(ctx, row_id)
+    return APIResponse(message="Deleted", data=None)
 
 
 @separation_router.post("/{row_id}/submit", response_model=APIResponse[SeparationResponse])

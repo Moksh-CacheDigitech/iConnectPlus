@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from modules.foundation.domain.value_objects import TenantContext
@@ -19,11 +19,10 @@ class EmployeeSalaryRepository(PayScopedRepository):
         stmt = self.apply_pay_filter(stmt, PayEmployeeSalary, ctx, branch_scoped=True)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
-        stmt = select(PayEmployeeSalary).where(
-            PayEmployeeSalary.company_id == company_id,
-            PayEmployeeSalary.is_deleted.is_(False),
-        )
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
+        stmt = select(PayEmployeeSalary).where(PayEmployeeSalary.is_deleted.is_(False))
+        if company_id is not None:
+            stmt = stmt.where(PayEmployeeSalary.company_id == company_id)
         stmt = self.apply_pay_filter(stmt, PayEmployeeSalary, ctx, branch_scoped=True)
         return list(self.db.scalars(stmt).all())
 
@@ -52,3 +51,29 @@ class EmployeeSalaryRepository(PayScopedRepository):
             row.version = int(row.version or 1) + 1
         self.db.flush()
         return row
+
+    def count_by_structure(self, ctx: TenantContext, structure_id: UUID) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(PayEmployeeSalary)
+            .where(
+                PayEmployeeSalary.salary_structure_id == structure_id,
+                PayEmployeeSalary.is_deleted.is_(False),
+            )
+        )
+        stmt = self.apply_pay_filter(stmt, PayEmployeeSalary, ctx, branch_scoped=True)
+        return int(self.db.scalar(stmt) or 0)
+
+    def soft_delete(self, ctx: TenantContext, row_id: UUID) -> bool:
+        row = self.get(ctx, row_id)
+        if row is None:
+            return False
+        row.is_deleted = True
+        row.deleted_at = utcnow()
+        row.deleted_by = ctx.user_id
+        row.updated_at = utcnow()
+        row.updated_by = ctx.user_id
+        if hasattr(row, "version"):
+            row.version = int(row.version or 1) + 1
+        self.db.flush()
+        return True

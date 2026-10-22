@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CompanyCreateRequest(BaseModel):
@@ -14,6 +14,13 @@ class CompanyCreateRequest(BaseModel):
     currency_code: str = Field(max_length=3)
     registration_number: str | None = None
     tax_number: str | None = None
+    tan_number: str | None = None
+    logo_url: str | None = None
+    address_line1: str | None = None
+    address_line2: str | None = None
+    city: str | None = None
+    state_name: str | None = None
+    postal_code: str | None = None
     fiscal_year_start_month: int = 4
     timezone: str = "Asia/Kolkata"
     status: str = "active"
@@ -27,6 +34,14 @@ class CompanyUpdateRequest(BaseModel):
     timezone: str | None = None
     country_code: str | None = None
     currency_code: str | None = None
+    tax_number: str | None = None
+    tan_number: str | None = None
+    logo_url: str | None = None
+    address_line1: str | None = None
+    address_line2: str | None = None
+    city: str | None = None
+    state_name: str | None = None
+    postal_code: str | None = None
 
 
 class CompanyResponse(BaseModel):
@@ -42,6 +57,14 @@ class CompanyResponse(BaseModel):
     status: str
     fiscal_year_start_month: int
     timezone: str
+    tax_number: str | None = None
+    tan_number: str | None = None
+    logo_url: str | None = None
+    address_line1: str | None = None
+    address_line2: str | None = None
+    city: str | None = None
+    state_name: str | None = None
+    postal_code: str | None = None
     created_at: datetime | None = None
     created_by: UUID | None = None
     updated_at: datetime | None = None
@@ -178,5 +201,12 @@ class ProfitCenterCreateRequest(BaseModel):
 
 
 class ContextSwitchRequest(BaseModel):
-    company_id: UUID
+    company_id: UUID | None = None
     branch_id: UUID | None = None
+    all_companies: bool = False
+
+    @model_validator(mode="after")
+    def company_required_unless_all(self) -> "ContextSwitchRequest":
+        if not self.all_companies and self.company_id is None:
+            raise ValueError("company_id is required unless all_companies is set")
+        return self

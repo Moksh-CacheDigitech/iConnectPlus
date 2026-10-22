@@ -80,6 +80,26 @@ def primary_infra_reachable(settings: Settings, timeout: float = 2.0) -> bool:
     return _tcp_reachable(db[0], db[1], timeout=timeout)
 
 
+def _url_tcp_reachable(url: str, default_port: int, timeout: float = 2.0) -> bool:
+    parsed = _host_port_from_url(url, default_port)
+    if not parsed:
+        return False
+    return _tcp_reachable(parsed[0], parsed[1], timeout=timeout)
+
+
+def _fallback_unreachable_redis(settings: Settings) -> None:
+    """Postgres can be up while VM Redis is down; switch Redis URLs independently."""
+    redis_fb = str(getattr(settings, "redis_url_fallback", None) or "").strip()
+    if not redis_fb:
+        return
+    if _url_tcp_reachable(str(settings.redis_url), 6379):
+        return
+    settings.redis_url = redis_fb
+    celery_fb = str(getattr(settings, "celery_result_backend_fallback", None) or "").strip()
+    if celery_fb:
+        settings.celery_result_backend = celery_fb
+
+
 def apply_infra_fallback(settings: Settings) -> str:
     """
     Keep settings on VM primary when reachable; otherwise apply local Docker fallbacks.
@@ -96,10 +116,10 @@ def apply_infra_fallback(settings: Settings) -> str:
         ACTIVE_INFRA_SOURCE = "primary"
         return ACTIVE_INFRA_SOURCE
 
-    has_fallback = bool(
-        (settings.database_url_fallback or "").strip()
-        or (settings.redis_url_fallback or "").strip()
-    )
+    def fallback(name: str) -> str:
+        return str(getattr(settings, name, None) or "").strip()
+
+    has_fallback = bool(fallback("database_url_fallback") or fallback("redis_url_fallback"))
     if not has_fallback:
         _restore_primaries(settings)
         ACTIVE_INFRA_SOURCE = "primary"
@@ -108,6 +128,7 @@ def apply_infra_fallback(settings: Settings) -> str:
     if primary_infra_reachable(settings):
         _restore_primaries(settings)
         ACTIVE_INFRA_SOURCE = "primary"
+        _fallback_unreachable_redis(settings)
         return ACTIVE_INFRA_SOURCE
 
     # Switch each configured fallback independently (blank = keep primary value).

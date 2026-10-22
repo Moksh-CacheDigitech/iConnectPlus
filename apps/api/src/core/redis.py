@@ -15,11 +15,21 @@ logger = logging.getLogger(__name__)
 
 _redis_client: redis.Redis | None = None
 
+# Fail fast when VM Redis is unreachable so FastAPI is not blocked (~260s Windows TCP).
+_REDIS_SOCKET_TIMEOUT = 1.5
+
 
 def get_redis() -> redis.Redis:
     global _redis_client
     if _redis_client is None:
-        _redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+        _redis_client = redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_connect_timeout=_REDIS_SOCKET_TIMEOUT,
+            socket_timeout=_REDIS_SOCKET_TIMEOUT,
+            retry_on_timeout=False,
+            health_check_interval=30,
+        )
     return _redis_client
 
 

@@ -25,6 +25,9 @@ from modules.foundation.service.microsoft_oauth_service import (
     MicrosoftOAuthService,
     resolve_frontend_base,
 )
+from modules.master_data.models.employee import MasterEmployee
+from security.ess_default_password import normalize_employee_code
+from security.ess_login_captcha import verify_challenge
 from security.jwt import JWTService
 from security.password import PasswordHasher
 
@@ -116,6 +119,109 @@ class AuthService:
 
         if user.locked_until and user.locked_until > datetime.now(timezone.utc):
             raise AccountLockedException()
+
+        if user.mfa_enabled:
+            challenge = self._jwt.create_access_token(
+                user_id=user.id,
+                tenant_id=user.tenant_id,
+                user_type=user.user_type,
+                session_id=uuid4(),
+            )
+            return {"mfa_required": True, "mfa_challenge_token": challenge}
+
+        return self._issue_tokens(user, ip_address=ip_address, user_agent=user_agent)
+
+    def login_ess(
+        self,
+        *,
+        company_code: str,
+        employee_code: str,
+        password: str,
+        captcha_id: str | None = None,
+        captcha_answer: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict:
+        if not verify_challenge(captcha_id, captcha_answer):
+            raise InvalidCredentialsException("CAPTCHA verification failed")
+
+        code = company_code.strip().upper()
+        emp_code = normalize_employee_code(employee_code)
+        company = self._db.scalar(
+            select(OrgCompany).where(
+                OrgCompany.company_code == code,
+                OrgCompany.is_deleted.is_(False),
+            )
+        )
+        if company is None:
+            raise InvalidCredentialsException()
+
+        candidates = list(
+            self._db.scalars(
+                select(MasterEmployee).where(
+                    MasterEmployee.company_id == company.id,
+                    MasterEmployee.is_deleted.is_(False),
+                )
+            ).all()
+        )
+        employee = None
+        for row in candidates:
+            if normalize_employee_code(row.employee_code) == emp_code:
+                employee = row
+                break
+        if employee is None:
+            raise InvalidCredentialsException()
+
+        from modules.hr.models import HrEmployeeProfile
+        from security.ess_default_password import verify_ess_dob_password
+
+        profile = self._db.scalar(
+            select(HrEmployeeProfile).where(
+                HrEmployeeProfile.employee_id == employee.id,
+                HrEmployeeProfile.is_deleted.is_(False),
+            )
+        )
+
+        user = self._db.get(SecUser, employee.user_id) if employee.user_id else None
+
+        password_valid = False
+        if user and user.password_hash:
+            password_valid = PasswordHasher.verify_password(password, user.password_hash)
+
+        if not password_valid and profile and profile.date_of_birth:
+            if verify_ess_dob_password(password, employee.employee_code, profile.date_of_birth):
+                password_valid = True
+                if user is None:
+                    user = SecUser(
+                        tenant_id=employee.tenant_id,
+                        email=employee.email or f"{emp_code.lower()}@{code.lower()}.local",
+                        display_name=f"{employee.first_name} {employee.last_name or ''}".strip(),
+                        user_type="employee",
+                        status="active",
+                        password_hash=PasswordHasher.hash_password(password, validate=False),
+                    )
+                    self._db.add(user)
+                    self._db.flush()
+                    employee.user_id = user.id
+                    self._db.flush()
+                else:
+                    user.password_hash = PasswordHasher.hash_password(password, validate=False)
+                    self._db.flush()
+
+        if user is None or user.is_deleted or not password_valid:
+            if user:
+                self._users.record_failed_login(user)
+                if user.failed_login_count >= settings.account_lockout_threshold:
+                    locked_until = datetime.now(timezone.utc) + timedelta(
+                        minutes=settings.account_lockout_minutes
+                    )
+                    self._users.lock_account(user, locked_until)
+            raise InvalidCredentialsException()
+
+        if user.locked_until and user.locked_until > datetime.now(timezone.utc):
+            raise AccountLockedException(
+                "Account is temporarily locked. Try again later or contact HR."
+            )
 
         if user.mfa_enabled:
             challenge = self._jwt.create_access_token(
@@ -265,7 +371,7 @@ class AuthService:
         state: str,
         ip_address: str | None = None,
         user_agent: str | None = None,
-    ) -> tuple[str, str, str]:
+    ) -> tuple[str, str, str | None]:
         oauth = MicrosoftOAuthService()
         stored = self._store.pop_oauth_state(state)
         if stored is None:

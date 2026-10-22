@@ -6,7 +6,11 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.exceptions import ForbiddenException
-from modules.foundation.domain.org_data_scope import apply_org_scope_filter
+from modules.foundation.domain.org_data_scope import (
+    apply_org_scope_filter,
+    effective_company_ids,
+    has_tenant_wide_data_access,
+)
 from modules.foundation.domain.value_objects import TenantContext
 from modules.organization.repository.base import OrgScopedRepository
 
@@ -29,10 +33,18 @@ class PayScopedRepository(OrgScopedRepository):
         )
 
     @staticmethod
-    def resolve_company_id(ctx: TenantContext, company_id: UUID | None) -> UUID:
+    def resolve_company_id(ctx: TenantContext, company_id: UUID | None) -> UUID | None:
         if company_id is not None:
             PayScopedRepository.ensure_company_access(ctx, company_id, module_key=MODULE_KEY)
             return company_id
-        if ctx.company_id is None:
-            raise ForbiddenException("Company context required")
-        return ctx.company_id
+        if ctx.company_id is not None:
+            PayScopedRepository.ensure_company_access(ctx, ctx.company_id)
+            return ctx.company_id
+        if ctx.all_companies or has_tenant_wide_data_access(ctx):
+            return None
+        allowed = effective_company_ids(ctx)
+        if allowed and len(allowed) == 1:
+            return allowed[0]
+        if allowed and len(allowed) > 1:
+            return None
+        raise ForbiddenException("Company context required")

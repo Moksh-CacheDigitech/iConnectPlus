@@ -68,6 +68,27 @@ class TooManyRequestsException(AppException):
         super().__init__(message, status_code=status.HTTP_429_TOO_MANY_REQUESTS)
 
 
+def conflict_from_integrity(exc: IntegrityError) -> ConflictException:
+    """Turn a DB constraint failure into a client-facing 409."""
+    orig = getattr(exc, "orig", None)
+    name = type(orig).__name__ if orig is not None else ""
+    detail = str(orig) if orig is not None else str(exc)
+    lowered = detail.lower()
+    if "CheckViolation" in name or "check constraint" in lowered:
+        return ConflictException(
+            "This status or value is not allowed for this record.",
+        )
+    if "ForeignKeyViolation" in name or "foreign key" in lowered:
+        return ConflictException(
+            "Cannot delete or change this record because other data still depends on it.",
+        )
+    if "UniqueViolation" in name or "unique constraint" in lowered:
+        return ConflictException("A record with these values already exists.")
+    if "NotNullViolation" in name or "not-null constraint" in lowered:
+        return ConflictException("A required value is missing, so this could not be saved.")
+    return ConflictException("This change conflicts with existing data.")
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppException)
     async def app_exception_handler(_: Request, exc: AppException) -> JSONResponse:

@@ -45,6 +45,7 @@ from modules.payroll.schemas import (
     PayrollPeriodResponse,
     PayrollPeriodUpdate,
     PayrollPolicyCreate,
+    PayrollPolicyEnsureRequest,
     PayrollPolicyResponse,
     PayrollPolicyUpdate,
     PayrollPostingCreate,
@@ -315,11 +316,13 @@ def list_payroll_policies(
 def ensure_default_payroll_policy(
     ctx: Annotated[TenantContext, Depends(require_permission("payroll.period:create"))],
     db: Annotated[Session, Depends(get_db)],
+    body: PayrollPolicyEnsureRequest | None = None,
     company_id: UUID | None = None,
 ):
+    target = company_id or (body.company_id if body is not None else None)
     return APIResponse(
         message="OK",
-        data=PayrollPolicyService(db).ensure_default_active(ctx, company_id),
+        data=PayrollPolicyService(db).ensure_default_active(ctx, target),
     )
 
 
@@ -363,6 +366,14 @@ def list_salary_structures(
 ):
     return APIResponse(message="OK", data=paginate(SalaryStructureService(db).list(ctx, company_id), pagination))
 
+@salary_structures_router.get("/{row_id}", response_model=APIResponse[SalaryStructureResponse])
+def get_salary_structure(
+    row_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("payroll.structure:read"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    return APIResponse(message="OK", data=SalaryStructureService(db).get(ctx, row_id))
+
 @salary_structures_router.post("", response_model=APIResponse[SalaryStructureResponse])
 def create_salary_structures(
     body: SalaryStructureCreate,
@@ -379,6 +390,16 @@ def update_salary_structures(
     db: Annotated[Session, Depends(get_db)],
 ):
     return APIResponse(message="Updated", data=SalaryStructureService(db).update(ctx, row_id, **extract_update_fields(body)))
+
+
+@salary_structures_router.delete("/{row_id}", response_model=APIResponse[None])
+def delete_salary_structure(
+    row_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("payroll.structure:update"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    SalaryStructureService(db).delete(ctx, row_id)
+    return APIResponse(message="Deleted", data=None)
 
 @salary_components_router.get("", response_model=APIResponse[list[SalaryComponentResponse]])
 def list_salary_components(
@@ -457,6 +478,16 @@ def update_employee_salaries(
     db: Annotated[Session, Depends(get_db)],
 ):
     return APIResponse(message="Updated", data=EmployeeSalaryService(db).update(ctx, row_id, **extract_update_fields(body)))
+
+
+@employee_salaries_router.delete("/{row_id}", response_model=APIResponse[None])
+def delete_employee_salary(
+    row_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("payroll.employee_salary:update"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    EmployeeSalaryService(db).delete(ctx, row_id)
+    return APIResponse(message="Deleted", data=None)
 
 @employee_salary_components_router.get("", response_model=APIResponse[list[EmployeeSalaryComponentResponse]])
 def list_employee_salary_components(

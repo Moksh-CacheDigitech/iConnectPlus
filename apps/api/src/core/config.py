@@ -185,6 +185,11 @@ class Settings(BaseSettings):
     jwt_secret_key: str = Field(default="change-me-in-production", alias="JWT_SECRET_KEY")
     # Comma-separated; first key encrypts, all keys decrypt (prepend to rotate).
     field_encryption_keys: str = Field(default="", alias="FIELD_ENCRYPTION_KEYS")
+    # Passphrase or Fernet key. Changing it makes existing ciphertext unreadable.
+    pii_encryption_key: str = Field(
+        default="change-me-in-production",
+        alias="PII_ENCRYPTION_KEY",
+    )
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
     # Long-lived by default so local/demo sessions are not cut short mid-work.
     # Override via env for production hardening.
@@ -290,6 +295,10 @@ class Settings(BaseSettings):
     mcp_auth_token: str = Field(default="", alias="MCP_AUTH_TOKEN")
 
     frontend_url: str = Field(default="http://localhost:3000", alias="FRONTEND_URL")
+    employee_app_url: str = Field(
+        default="http://localhost:3001",
+        alias="EMPLOYEE_APP_URL",
+    )
 
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")

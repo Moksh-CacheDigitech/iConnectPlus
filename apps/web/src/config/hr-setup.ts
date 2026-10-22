@@ -35,6 +35,7 @@ export type HrSetupTabId =
   | "employment-types"
   | "employment-type"
   | "reporting"
+  | "people-roles"
   | "document-types"
   | "onboarding-policies"
   | "leave-policies"
@@ -101,7 +102,7 @@ export const hrSetupSections: HrSetupSection[] = [
         title: "Designations",
         description: "Job titles and levels",
         source: "api",
-        apiPath: "/hr/designations",
+        apiPath: "/hrms/designations",
         codePrefix: "DES",
       },
       {
@@ -109,7 +110,7 @@ export const hrSetupSections: HrSetupSection[] = [
         title: "Job Levels",
         description: "Junior through CXO bands",
         source: "api",
-        apiPath: "/hr/job-levels",
+        apiPath: "/hrms/job-levels",
         codePrefix: "LVL",
       },
       {
@@ -117,7 +118,7 @@ export const hrSetupSections: HrSetupSection[] = [
         title: "Grades",
         description: "Pay grades and salary bands",
         source: "api",
-        apiPath: "/hr/grades",
+        apiPath: "/hrms/grades",
         codePrefix: "GRD",
       },
       {
@@ -133,7 +134,7 @@ export const hrSetupSections: HrSetupSection[] = [
         title: "Legal Entities",
         description: "Company / legal entities - saved to the database and used in Assign HR",
         source: "api",
-        apiPath: "/hr/legal-entities",
+        apiPath: "/hrms/legal-entities",
         codePrefix: "ENT",
       },
     ],
@@ -149,7 +150,7 @@ export const hrSetupSections: HrSetupSection[] = [
         title: "Employment Group",
         description: "Management groups - shifts, calendars, feature toggles",
         source: "api",
-        apiPath: "/hr/management-groups",
+        apiPath: "/hrms/management-groups",
         codePrefix: "MG",
       },
       {
@@ -162,8 +163,15 @@ export const hrSetupSections: HrSetupSection[] = [
       {
         id: "reporting",
         title: "Reporting Structure",
-        description: "Reporting managers derived from roles",
+        description: "Reporting managers derived from who has direct reports",
         source: "derived",
+      },
+      {
+        id: "people-roles",
+        title: "People roles",
+        description: "Assign hiring manager, recruiter, and HR — used for job dropdowns, approvals, and RBAC",
+        source: "api",
+        apiPath: "/hrms/people-roles",
       },
       // Document Types & Onboarding Policies moved to EDoc (/hr/edoc)
     ],
@@ -187,7 +195,7 @@ export const hrSetupSections: HrSetupSection[] = [
         title: "Leave Types",
         description: "Casual, sick, privilege…",
         source: "api",
-        apiPath: "/hr/leave-types",
+        apiPath: "/hrms/leave-types",
         codePrefix: "LT",
       },
       {
@@ -195,7 +203,7 @@ export const hrSetupSections: HrSetupSection[] = [
         title: "Holiday Calendar",
         description: "National and company holidays",
         source: "api",
-        apiPath: "/hr/holiday-calendars",
+        apiPath: "/hrms/holiday-calendars",
         codePrefix: "HC",
       },
       {
@@ -203,7 +211,7 @@ export const hrSetupSections: HrSetupSection[] = [
         title: "Attendance Policy",
         description: "Arrival windows, half-day rules, biometric punch mode",
         source: "api",
-        apiPath: "/hr/attendance-rules",
+        apiPath: "/hrms/attendance-rules",
         codePrefix: "AR",
       },
     ],
@@ -216,7 +224,7 @@ export const meetingRoomTab: HrSetupTab = {
   title: "Meeting Room",
   description: "Meeting rooms, conference halls, and training rooms with capacity & features",
   source: "api",
-  apiPath: "/hr/training-rooms",
+  apiPath: "/hrms/training-rooms",
   codePrefix: "ROOM",
 };
 
@@ -238,6 +246,7 @@ export const setupTabIcons: Partial<Record<HrSetupTabId, LucideIcon>> = {
   "employment-types": UserCog,
   "employment-type": Briefcase,
   reporting: Users,
+  "people-roles": UserCog,
   "document-types": FileText,
   "onboarding-policies": Shield,
   "leave-policies": Shield,

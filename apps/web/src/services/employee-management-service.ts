@@ -466,6 +466,7 @@ let directoryInflight: Promise<EmployeeDirectoryResult> | null = null;
 /** API pagination max is `le=200` - larger page_size returns 422. */
 const API_PAGE_SIZE = 200;
 const API_MAX_PAGES = 25;
+export const EMPLOYEE_LIST_PAGE_SIZE = 10;
 
 /** Clear cached HR directory after creates/updates (or wait for TTL in dev). */
 export function invalidateEmployeeDirectoryCache(): void {
@@ -475,12 +476,17 @@ export function invalidateEmployeeDirectoryCache(): void {
 async function listAllPages(apiPath: string): Promise<{ data: HrRow[]; error?: unknown }> {
   const all: HrRow[] = [];
   try {
+    const seenFirstIds = new Set<string>();
     for (let page = 1; page <= API_MAX_PAGES; page += 1) {
       const res = await resourceService.list(apiPath, {
         page_size: API_PAGE_SIZE,
         page,
       });
       const chunk = (Array.isArray(res.data) ? res.data : []) as HrRow[];
+      const firstId = chunk[0] ? String(chunk[0].id ?? "") : "";
+      // Some org endpoints ignore page and return the full list every time.
+      if (page > 1 && firstId && seenFirstIds.has(firstId)) break;
+      if (firstId) seenFirstIds.add(firstId);
       all.push(...chunk);
       if (chunk.length < API_PAGE_SIZE) break;
     }
@@ -488,6 +494,40 @@ async function listAllPages(apiPath: string): Promise<{ data: HrRow[]; error?: u
   } catch (error) {
     return { data: all, error };
   }
+}
+
+const EMPTY_LABEL_MAP = new Map<string, string>();
+const EMPTY_COMPANY_MAP = new Map<string, { name: string; code: string }>();
+
+/** First-paint list: one page of master employees, no full directory hydrate. */
+export async function listEmployeesPage(
+  page: number,
+  pageSize = EMPLOYEE_LIST_PAGE_SIZE,
+): Promise<{ records: EmployeeRecord[]; hasMore: boolean }> {
+  await ensureEmployeeExtensionsLoaded();
+  const res = await resourceService.list("/employees", {
+    page: Math.max(1, page),
+    page_size: Math.min(Math.max(1, pageSize), API_PAGE_SIZE),
+  });
+  const masterRows = (Array.isArray(res.data) ? res.data : []) as HrRow[];
+  const extensions = loadExtensions();
+  const records = masterRows
+    .filter((m) => !m.is_deleted)
+    .map((m) => {
+      const id = String(m.id);
+      return mergeRow(
+        m,
+        undefined,
+        undefined,
+        EMPTY_LABEL_MAP,
+        EMPTY_LABEL_MAP,
+        EMPTY_LABEL_MAP,
+        EMPTY_COMPANY_MAP,
+        EMPTY_LABEL_MAP,
+        defaultExtension(extensions[id]),
+      );
+    });
+  return { records, hasMore: masterRows.length >= pageSize };
 }
 
 async function loadOptions(): Promise<EmployeeDirectoryOptions> {
@@ -608,6 +648,13 @@ async function fetchEmployeeDirectoryUncached(): Promise<EmployeeDirectoryResult
       const stored = extensions[id];
       const ext = defaultExtension(stored);
       // Hydrate onboarding bank from HR profile when local store is empty
+      if (profile) {
+        ext.governmentIds = {
+          ...ext.governmentIds,
+          pan: ext.governmentIds.pan || String(profile.pan_number ?? ""),
+          uan: ext.governmentIds.uan || String(profile.uan_number ?? ""),
+        };
+      }
       if (profile && !ext.bank.accountNumber && !ext.bank.ifsc) {
         ext.bank = {
           ...ext.bank,

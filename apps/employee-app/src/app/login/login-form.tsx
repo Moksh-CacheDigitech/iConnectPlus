@@ -3,7 +3,8 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  MOCK_DEMO_EMAIL,
+  MOCK_DEMO_COMPANY,
+  MOCK_DEMO_EMPLOYEE_CODE,
   MOCK_DEMO_PASSWORD,
 } from "@/data/mock-ess";
 import { IconCheck } from "@/components/icons";
@@ -13,15 +14,11 @@ import { essService } from "@/services/ess-service";
 import { clearFaceVerified } from "@/lib/face-auth";
 import { env } from "@/utils/env";
 
-type LoginMode = "email" | "employee";
-
 const REMEMBER_KEY = "ess.login.remember";
 
 type Remembered = {
-  mode: LoginMode;
-  email?: string;
-  companyCode?: string;
-  employeeCode?: string;
+  companyCode: string;
+  employeeCode: string;
 };
 
 function loadRemembered(): Remembered | null {
@@ -43,6 +40,17 @@ function saveRemembered(data: Remembered | null) {
   }
 }
 
+function MicrosoftIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 23 23" aria-hidden>
+      <path fill="#f35325" d="M1 1h10v10H1z" />
+      <path fill="#81bc06" d="M12 1h10v10H12z" />
+      <path fill="#05a6f0" d="M1 12h10v10H1z" />
+      <path fill="#ffba08" d="M12 12h10v10H12z" />
+    </svg>
+  );
+}
+
 const fieldClass =
   "w-full rounded-2xl border border-[#e5e7eb] bg-white px-4 py-3.5 text-[0.95rem] text-[#111827] outline-none placeholder:text-[#9ca3af] transition focus:border-[#7c5cfc] focus:shadow-[0_0_0_3px_rgba(124,92,252,0.15)]";
 
@@ -51,23 +59,36 @@ const labelClass = "block text-sm font-medium text-[#374151]";
 export default function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [mode, setMode] = useState<LoginMode>("employee");
-  const [email, setEmail] = useState(env.useMock ? MOCK_DEMO_EMAIL : "");
-  const [companyCode, setCompanyCode] = useState("DEMOCO");
-  const [employeeCode, setEmployeeCode] = useState("EMP-004");
+  const [companyCode, setCompanyCode] = useState(env.useMock ? MOCK_DEMO_COMPANY : "CT");
+  const [employeeCode, setEmployeeCode] = useState(env.useMock ? MOCK_DEMO_EMPLOYEE_CODE : "CT5354");
   const [password, setPassword] = useState(env.useMock ? MOCK_DEMO_PASSWORD : "");
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [microsoftEnabled, setMicrosoftEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const oauthError = searchParams.get("error");
+    if (oauthError) setError(oauthError);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (env.useMock) {
+      setMicrosoftEnabled(false);
+      return;
+    }
+    authService
+      .microsoftConfig()
+      .then((res) => setMicrosoftEnabled(Boolean(res.data?.enabled)))
+      .catch(() => setMicrosoftEnabled(false));
+  }, []);
 
   useEffect(() => {
     if (env.useMock) return;
     const saved = loadRemembered();
     if (!saved) return;
     setRememberMe(true);
-    setMode(saved.mode);
-    if (saved.email) setEmail(saved.email);
     if (saved.companyCode) setCompanyCode(saved.companyCode);
     if (saved.employeeCode) setEmployeeCode(saved.employeeCode);
     setPassword("");
@@ -77,13 +98,6 @@ export default function LoginForm() {
     await essService.me();
     clearFaceVerified();
     const next = searchParams.get("next") || "/home";
-    if (!env.useMock) {
-      const face = await essService.faceStatus();
-      if (face.data?.verification_required) {
-        router.replace(`/login/face-verify?next=${encodeURIComponent(next)}`);
-        return;
-      }
-    }
     router.replace(next);
   }
 
@@ -94,34 +108,21 @@ export default function LoginForm() {
     setInfo(null);
 
     try {
-      if (env.useMock || mode === "email") {
-        const login = await authService.login(email.trim(), password);
-        if (login.data?.mfa_required) {
-          setError("MFA is required for this account. Use the ERP login first.");
-          return;
-        }
-      } else {
-        const login = await authService.essLogin({
-          company_code: companyCode.trim(),
-          employee_code: employeeCode.trim(),
-          password,
-        });
-        if (login.data?.mfa_required) {
-          setError("MFA is required for this account.");
-          return;
-        }
+      const login = await authService.essLogin({
+        company_code: companyCode.trim().toUpperCase(),
+        employee_code: employeeCode.trim().toUpperCase(),
+        password: password.trim(),
+      });
+      if (login.data?.mfa_required) {
+        setError("MFA is required for this account.");
+        return;
       }
 
       if (rememberMe && !env.useMock) {
-        saveRemembered(
-          mode === "email"
-            ? { mode, email: email.trim() }
-            : {
-                mode,
-                companyCode: companyCode.trim(),
-                employeeCode: employeeCode.trim(),
-              },
-        );
+        saveRemembered({
+          companyCode: companyCode.trim().toUpperCase(),
+          employeeCode: employeeCode.trim().toUpperCase(),
+        });
       } else {
         saveRemembered(null);
       }
@@ -137,7 +138,7 @@ export default function LoginForm() {
         } else if (err.status === 404) {
           setError("Logged in, but no employee profile is linked to this user.");
         } else {
-          setError(err.message);
+          setError(err.message || "Invalid company code, employee code, or password.");
         }
       } else {
         setError("Unable to sign in. Check API connection.");
@@ -149,7 +150,12 @@ export default function LoginForm() {
 
   function onForgotPassword() {
     setError(null);
-    setInfo("Password resets are managed by HR. Contact your HR team for help.");
+    setInfo("Default password is your Employee Code + Date of Birth (DDMMYYYY), e.g. CT535415102003. For password resets, contact your HR team.");
+  }
+
+  function onMicrosoftSignIn() {
+    const next = searchParams.get("next") || "/home";
+    window.location.href = authService.microsoftLoginUrl(next);
   }
 
   return (
@@ -179,85 +185,72 @@ export default function LoginForm() {
             Welcome Back
           </h1>
           <p className="mt-2 max-w-xs text-[0.95rem] leading-relaxed text-[#6b7280]">
-            Log in to your account to continue.
+            Log in with your company credentials.
           </p>
         </div>
 
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="flex rounded-2xl bg-[#ebebef] p-1">
+        {!env.useMock ? (
+          <div className="mb-5 space-y-3">
             <button
               type="button"
-              className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
-                mode === "employee"
-                  ? "bg-white text-[#7c5cfc] shadow-sm"
-                  : "text-[#6b7280]"
-              }`}
-              onClick={() => setMode("employee")}
+              disabled={microsoftEnabled === false || microsoftEnabled === null}
+              onClick={onMicrosoftSignIn}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-[#e5e7eb] bg-white px-4 py-3.5 text-[1rem] font-semibold text-[#111827] shadow-sm transition hover:bg-[#f9fafb] disabled:opacity-55"
             >
-              Employee code
+              <MicrosoftIcon />
+              {microsoftEnabled === null
+                ? "Checking SSO…"
+                : microsoftEnabled === false
+                  ? "SSO not configured"
+                  : "Sign in with Microsoft"}
             </button>
-            <button
-              type="button"
-              className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
-                mode === "email"
-                  ? "bg-white text-[#7c5cfc] shadow-sm"
-                  : "text-[#6b7280]"
-              }`}
-              onClick={() => setMode("email")}
-            >
-              Email
-            </button>
+            {microsoftEnabled === false ? (
+              <p className="text-center text-xs text-[#6b7280]">
+                Ask IT to enable Microsoft SSO, or use your employee code below.
+              </p>
+            ) : (
+              <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-wide text-[#9ca3af]">
+                <span className="h-px flex-1 bg-[#e5e7eb]" />
+                Or
+                <span className="h-px flex-1 bg-[#e5e7eb]" />
+              </div>
+            )}
           </div>
+        ) : null}
 
+        <form onSubmit={onSubmit} className="space-y-4">
           {env.useMock ? (
             <div className="rounded-2xl border border-[#7c5cfc]/20 bg-[#f3efff] px-3.5 py-3 text-xs text-[#5b3fd4]">
               <p className="font-semibold">Demo login</p>
               <p className="mt-0.5 text-[#374151]/80">
-                {MOCK_DEMO_EMAIL} / {MOCK_DEMO_PASSWORD}
+                Company: {MOCK_DEMO_COMPANY} &middot; Code: {MOCK_DEMO_EMPLOYEE_CODE} &middot; Password: {MOCK_DEMO_PASSWORD}
               </p>
             </div>
           ) : null}
 
-          {mode === "email" || env.useMock ? (
-            <label className="block space-y-1.5">
-              <span className={labelClass}>Email</span>
-              <input
-                className={fieldClass}
-                suppressHydrationWarning
-                type="email"
-                autoComplete="username"
-                required={mode === "email" || env.useMock}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Enter your email"
-              />
-            </label>
-          ) : (
-            <>
-              <label className="block space-y-1.5">
-                <span className={labelClass}>Company code</span>
-                <input
-                  className={fieldClass}
-                  suppressHydrationWarning
-                  required
-                  value={companyCode}
-                  onChange={(e) => setCompanyCode(e.target.value)}
-                  placeholder="Enter company code"
-                />
-              </label>
-              <label className="block space-y-1.5">
-                <span className={labelClass}>Employee code</span>
-                <input
-                  className={fieldClass}
-                  suppressHydrationWarning
-                  required
-                  value={employeeCode}
-                  onChange={(e) => setEmployeeCode(e.target.value)}
-                  placeholder="Enter employee code"
-                />
-              </label>
-            </>
-          )}
+          <label className="block space-y-1.5">
+            <span className={labelClass}>Company code</span>
+            <input
+              className={fieldClass}
+              suppressHydrationWarning
+              required
+              value={companyCode}
+              onChange={(e) => setCompanyCode(e.target.value.toUpperCase())}
+              placeholder="e.g. CT or DEMOCO"
+            />
+          </label>
+
+          <label className="block space-y-1.5">
+            <span className={labelClass}>Employee code</span>
+            <input
+              className={fieldClass}
+              suppressHydrationWarning
+              required
+              value={employeeCode}
+              onChange={(e) => setEmployeeCode(e.target.value.toUpperCase())}
+              placeholder="e.g. CT5354"
+            />
+          </label>
 
           <label className="block space-y-1.5">
             <span className={labelClass}>Password</span>
@@ -269,8 +262,11 @@ export default function LoginForm() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
+              placeholder="e.g. CT535415102003"
             />
+            <p className="mt-1 text-xs text-[#6b7280]">
+              Format: Employee Code + DOB (DDMMYYYY), e.g. <span className="font-mono text-[#7c5cfc]">CT535415102003</span>
+            </p>
           </label>
 
           <div className="flex items-center justify-between gap-3 pt-0.5">

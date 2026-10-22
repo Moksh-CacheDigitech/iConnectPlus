@@ -907,6 +907,7 @@ class TrainingCreate(BaseModel):
 
 
 class TrainingUpdate(BaseModel):
+    branch_id: UUID | None = None
     training_name: str | None = None
     training_type: str | None = None
     trainer_name: str | None = None
@@ -920,6 +921,7 @@ class TrainingUpdate(BaseModel):
     recurrence_rule: str | None = None
     notes: str | None = None
     status: str | None = None
+    employee_ids: list[UUID] | None = None
     version: int | None = None
 
 
@@ -1728,6 +1730,15 @@ class HrAdminAssignRequest(BaseModel):
     company_ids: list[UUID] = []
 
 
+class HrAdminNavRequest(BaseModel):
+    nav_keys: list[str]
+
+
+class HrNavAccessRecord(BaseModel):
+    unrestricted: bool = False
+    nav_keys: list[str] = []
+
+
 class HrAdminEntitiesRequest(BaseModel):
     company_ids: list[UUID]
 
@@ -1750,6 +1761,8 @@ class HrAdminRecord(BaseModel):
     login_created: bool = False
     temporary_password: str | None = None
     company_ids: list[UUID] = []
+    nav_keys: list[str] = []
+    nav_unrestricted: bool = True
 
 
 class HrAdminPasswordResponse(BaseModel):
@@ -1768,3 +1781,62 @@ class HrActivityLogRecord(BaseModel):
     actor_name: str | None = None
     actor_email: str | None = None
     summary: str = ""
+
+
+class LeaveAdjustConfirmRequest(BaseModel):
+    employee_id: UUID
+    period_start: date
+    period_end: date
+    company_id: UUID | None = None
+    source: str = "attendance_tab"
+    payroll_run_id: UUID | None = None
+    reason: str | None = None
+
+
+class LeaveAdjustApplyDayRequest(BaseModel):
+    employee_id: UUID
+    period_start: date
+    period_end: date
+    attendance_date: date
+    leave_type_code: str
+    company_id: UUID | None = None
+    source: str = "attendance_tab"
+    payroll_run_id: UUID | None = None
+    reason: str | None = None
+
+
+class LeaveAdjustRevertRequest(BaseModel):
+    employee_id: UUID
+    period_start: date
+    period_end: date
+    company_id: UUID | None = None
+    payroll_run_id: UUID | None = None
+
+
+class PeopleRoleUpdate(BaseModel):
+    is_hiring_manager: bool | None = None
+    is_recruiter: bool | None = None
+    is_hr: bool | None = None
+    reporting_manager_id: UUID | None = None
+    clear_reporting_manager: bool = False
+
+
+class PeopleRoleResponse(BaseModel):
+    id: UUID
+    employee_code: str
+    first_name: str
+    last_name: str
+    display_name: str
+    designation: str
+    status: str
+    reporting_manager_id: UUID | None = None
+    reporting_manager_name: str | None = None
+    reporting_manager_code: str | None = None
+    reports_count: int = 0
+    is_hiring_manager: bool = False
+    is_recruiter: bool = False
+    is_hr: bool = False
+    has_login: bool = False
+    role_codes: list[str] = []
+    hr_note: str | None = None
+

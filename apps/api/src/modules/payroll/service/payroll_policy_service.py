@@ -7,7 +7,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from core.exceptions import NotFoundException
+from core.exceptions import NotFoundException, ValidationException
 from modules.foundation.domain.value_objects import TenantContext
 from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.payroll.domain.payroll_policy_spec import default_company_payroll_policy_fields
@@ -73,6 +73,13 @@ class PayrollPolicyService:
             "pf_employee_amount": row.pf_employee_amount,
             "pf_employer_amount": row.pf_employer_amount,
             "pf_total_amount": row.pf_total_amount,
+            "pf_employee_percent": row.pf_employee_percent,
+            "pf_employer_percent": row.pf_employer_percent,
+            "pf_wage_ceiling": row.pf_wage_ceiling,
+            "pf_on_lop": getattr(row, "pf_on_lop", None) or "fixed",
+            "sandwich_enabled": bool(getattr(row, "sandwich_enabled", True)),
+            "sandwich_off_becomes": getattr(row, "sandwich_off_becomes", None) or "lop",
+            "sandwich_triggers": getattr(row, "sandwich_triggers", None) or "both",
             "net_pay_formula": row.net_pay_formula,
             "attendance_rules_json": row.attendance_rules_json,
             "notes": row.notes,
@@ -87,6 +94,10 @@ class PayrollPolicyService:
     ) -> PayPayrollPolicy:
         """Create DEFAULT active policy for company if none exists."""
         cid = self._scope.resolve_company_id(ctx, company_id)
+        if cid is None:
+            raise ValidationException(
+                "Select a company in the header before saving salary configuration."
+            )
         existing = self._repo.get_active(ctx, cid)
         if existing is not None:
             return existing

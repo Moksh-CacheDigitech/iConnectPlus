@@ -13,6 +13,7 @@ from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.hr.adapters.master_data_port import HrMasterDataAdapter
 from modules.hr.domain.enums import HolidayCalendarStatus, HrEntityType, LeaveAdjustmentStatus, LeaveRequestStatus
 from modules.hr.domain.exceptions import InvalidLeaveAdjustmentState
+from modules.hr.domain.leave_accrual_calendar import leave_financial_year
 from modules.hr.domain.leave_cycle_rules import (
     assert_leave_balance_for_cycle,
     assert_no_future_calendar_month_leave,
@@ -74,7 +75,7 @@ def _count_leave_days(
     """Leave requests always count working days (exclude weekends + published holidays).
 
     ``sandwich`` is ignored here. Sandwich is an attendance LOP rule: weekly offs
-    between unauthorized absences become LOP unless those days have approved leave.
+    between leave or unauthorized absence become LOP (or leave) per company policy.
     """
     del sandwich
     count = 0
@@ -243,7 +244,7 @@ class LeaveBalanceService:
             if (
                 bal.employee_id == employee_id
                 and bal.leave_type_id == co_type.id
-                and bal.balance_year == earned.year
+                and bal.balance_year == leave_financial_year(earned)
                 and bal.status == "open"
             ):
                 balance = bal
@@ -255,7 +256,7 @@ class LeaveBalanceService:
                 employee_id=employee_id,
                 company_id=cid,
                 leave_type_id=co_type.id,
-                balance_year=earned.year,
+                balance_year=leave_financial_year(earned),
                 opening_balance=Decimal("0"),
                 accrued=Decimal("0"),
                 used=Decimal("0"),
@@ -656,7 +657,9 @@ class LeaveRequestService:
                 continue
             if bool(getattr(leave_type, "sandwich_rule_enabled", False)):
                 return True
-        return False
+        from modules.hr.service.sandwich_attendance_service import resolve_company_sandwich_settings
+
+        return bool(resolve_company_sandwich_settings(self._db, company_id).get("enabled"))
 
     def _refresh_attendance_sandwich(
         self,
@@ -671,7 +674,12 @@ class LeaveRequestService:
         """Re-evaluate sandwich LOP after leave approval (approved leave → sandwich off)."""
         if not self._company_sandwich_enabled(ctx, company_id):
             return
-        from modules.hr.service.sandwich_attendance_service import apply_sandwich_for_employee
+        from modules.hr.service.sandwich_attendance_service import (
+            apply_sandwich_for_employee,
+            resolve_company_sandwich_settings,
+        )
+
+        settings = resolve_company_sandwich_settings(self._db, company_id)
 
         window_start = around_start - timedelta(days=10)
         window_end = around_end + timedelta(days=10)
@@ -696,6 +704,8 @@ class LeaveRequestService:
             as_of=date.today(),
             is_non_working=lambda d: d in non_working,
             holiday_dates=holiday_dates,
+            trigger=settings["trigger"],
+            off_becomes=settings["off_becomes"],
         )
 
     def _validate_cycle_for_request(
@@ -712,7 +722,7 @@ class LeaveRequestService:
     ) -> None:
         leave_type = self._types.get(ctx, leave_type_id)
         balance = self._find_open_balance(
-            ctx, company_id, employee_id, leave_type_id, start_date.year
+            ctx, company_id, employee_id, leave_type_id, leave_financial_year(start_date)
         )
         validate_leave_cycle_application(
             start_date=start_date,
@@ -745,7 +755,9 @@ class LeaveRequestService:
         )
         # Leave cycle: calendar months only (past/current). Posted balance only - no early credit.
         assert_no_future_calendar_month_leave(start_date, end_date)
-        balance = self._find_open_balance(ctx, cid, employee_id, leave_type_id, start_date.year)
+        balance = self._find_open_balance(
+            ctx, cid, employee_id, leave_type_id, leave_financial_year(start_date)
+        )
         if balance is not None:
             leave_type = self._types.get(ctx, leave_type_id)
             assert_leave_balance_for_cycle(
@@ -875,7 +887,7 @@ class LeaveRequestService:
         )
         self._engine.approve(row)
         balance = self._find_open_balance(
-            ctx, row.company_id, row.employee_id, row.leave_type_id, row.start_date.year
+            ctx, row.company_id, row.employee_id, row.leave_type_id, leave_financial_year(row.start_date)
         )
         if balance is None:
             raise NotFoundException("Open leave balance not found for approval year")
@@ -1070,7 +1082,7 @@ class LeaveAdjustmentService:
             if (
                 bal.employee_id == row.employee_id
                 and bal.leave_type_id == row.leave_type_id
-                and bal.balance_year == row.adjustment_month.year
+                and bal.balance_year == leave_financial_year(row.adjustment_month)
                 and bal.status == "open"
             ):
                 balance = bal

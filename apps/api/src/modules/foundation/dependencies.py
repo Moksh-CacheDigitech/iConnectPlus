@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Annotated
 from uuid import UUID
 
+import redis
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
@@ -41,6 +42,11 @@ def get_tenant_context(
     session = session_repo.get_active(session_id)
     if session is None:
         raise UnauthorizedException("Session expired or revoked")
+    store = SessionStore()
+    try:
+        cached = store.get_session(session_id)
+    except redis.RedisError:
+        cached = None
 
     # Access-token session binding on every request (VAPT 7.1.6).
     from core.config import settings
@@ -69,11 +75,18 @@ def get_tenant_context(
             "user_id": str(payload["sub"]),
             "tenant_id": str(payload["tenant_id"]),
         }
-        store.set_session(session_id, cached)
+        try:
+            store.set_session(session_id, cached)
+        except redis.RedisError:
+            pass
     else:
-        store.touch_session(session_id)
+        try:
+            store.touch_session(session_id)
+        except redis.RedisError:
+            pass
     company_id = UUID(cached["company_id"]) if cached.get("company_id") else None
     branch_id = UUID(cached["branch_id"]) if cached.get("branch_id") else None
+    all_companies = bool(cached.get("all_companies"))
     user_id = UUID(payload["sub"])
     tenant_id = UUID(payload["tenant_id"])
     user_type = str(payload["user_type"])
@@ -81,7 +94,7 @@ def get_tenant_context(
     if user_row is not None and user_row.user_type:
         user_type = user_row.user_type
 
-    if not company_id:
+    if not company_id and not all_companies:
         from modules.foundation.service.org_context_service import OrgContextService
 
         org_ctx = OrgContextService(db)
@@ -142,6 +155,7 @@ def get_tenant_context(
         tenant_wide=tenant_wide,
         procurement_tenant_wide=procurement_tenant_wide,
         scoped_company_ids=scoped_company_ids,
+        all_companies=all_companies,
     )
 
 
