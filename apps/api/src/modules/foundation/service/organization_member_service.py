@@ -28,11 +28,11 @@ class OrganizationMemberService:
 
     @staticmethod
     def _domain() -> str:
-        return settings.microsoft_user_email_domain.strip().lower().lstrip("@")
+        return settings.org_email_domain.strip().lower().lstrip("@")
 
     @staticmethod
-    def _sso_placeholder_password() -> str:
-        return f"Ms0!{secrets.token_urlsafe(18)}"
+    def _placeholder_password() -> str:
+        return f"Hr0!{secrets.token_urlsafe(18)}"
 
     def create_member(
         self,
@@ -64,7 +64,7 @@ class OrganizationMemberService:
         user_entity = self._users.create_user(
             tenant_id=tenant_id,
             email=normalized_email,
-            password=self._sso_placeholder_password(),
+            password=self._placeholder_password(),
             display_name=name,
             user_type="employee",
             created_by=actor_user_id,

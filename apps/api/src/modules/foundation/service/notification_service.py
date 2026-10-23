@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.exceptions import AppException, NotFoundException, ValidationException
-from modules.foundation.adapters.graph_email_adapter import GraphEmailAdapter
+from modules.foundation.adapters.smtp_email_adapter import SmtpEmailAdapter
 from modules.foundation.domain.entities import NotificationInboxItem
 from modules.foundation.models.notification import NtfEvent, NtfTemplate
 from modules.foundation.repository.notification_repository import NotificationRepository
@@ -26,7 +26,7 @@ class NotificationService:
         self._db = db
         self._repo = NotificationRepository(db)
         self._audit = PlatformAuditFacade(db)
-        self._graph = GraphEmailAdapter()
+        self._smtp = SmtpEmailAdapter()
 
     def list_templates(self, tenant_id: UUID, *, channel: str | None = None):
         return self._repo.list_templates(tenant_id, channel=channel)
@@ -92,36 +92,35 @@ class NotificationService:
         return self._repo.list_deliveries(tenant_id, limit=limit)
 
     def email_provider_status(self) -> dict:
-        diag = settings.graph_credential_diagnostics()
+        diag = settings.smtp_diagnostics()
         return {
-            "provider": "microsoft_graph",
-            "configured": self._graph.configured,
-            "from_email": self._graph.from_email if self._graph.from_email else None,
+            "provider": "smtp",
+            "configured": self._smtp.configured,
+            "from_email": self._smtp.from_email or None,
             "delivery_mode": settings.email_delivery_mode,
-            "tenant_id_set": bool(settings.azure_tenant_id.strip()),
-            "client_id_set": bool(settings.azure_client_id.strip()),
-            "client_secret_set": bool(settings.azure_client_secret.strip()),
+            "host": diag.get("host"),
+            "port": diag.get("port"),
+            "use_tls": diag.get("use_tls"),
+            "auth": diag.get("auth"),
             "diagnostics": diag,
         }
 
     def test_email_connection(self) -> dict:
-        result = self._graph.test_connection()
-        diag = settings.graph_credential_diagnostics()
+        result = self._smtp.test_connection()
+        diag = settings.smtp_diagnostics()
         return {
             "ok": result.ok,
             "message": result.message,
             "status_code": result.status_code,
-            "from_email": self._graph.from_email or None,
+            "from_email": self._smtp.from_email or None,
             "provider_response": result.provider_response,
             "diagnostics": diag,
             "details": {
-                "step": "token" if self._graph.configured else "config",
+                "step": "connect" if self._smtp.configured else "config",
                 "hint": diag.get("hint"),
                 "missing": diag.get("missing"),
                 "present": diag.get("present"),
                 "env_files_found": diag.get("env_files_found"),
-                "tenant_id_preview": diag.get("tenant_id_preview"),
-                "client_id_preview": diag.get("client_id_preview"),
             },
         }
 

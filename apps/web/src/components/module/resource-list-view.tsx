@@ -111,8 +111,8 @@ export function ResourceListView({
               <p className="text-foreground/80">{error}</p>
               {status === 403 && authenticated ? (
                 <p className="text-foreground/80">
-                  Your role is missing this permission. Sign out and sign back in with a Microsoft
-                  account that has this module assigned, or ask an administrator to grant access.
+                  Your role is missing this permission. Ask your ERP admin or module admin to
+                  assign this module, then sign out and back in.
                 </p>
               ) : null}
               {status === 401 || !authenticated ? (

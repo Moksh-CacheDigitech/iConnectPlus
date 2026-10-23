@@ -163,7 +163,7 @@ export function MarketingCampaignHome({ campaignId }: { campaignId: string }) {
           Requests
         </Link>
         <Link className="cursor-pointer text-primary underline-offset-2 hover:underline" href={`/marketing/m365?campaign=${campaignId}`}>
-          SharePoint assets
+          Workspace assets
         </Link>
         <Link className="cursor-pointer text-primary underline-offset-2 hover:underline" href={`/marketing/inbox?campaign=${campaignId}`}>
           Inbox
@@ -283,7 +283,7 @@ export function MarketingCampaignHome({ campaignId }: { campaignId: string }) {
           )}
         </section>
         <section className="rounded-md border border-border/70 bg-card p-3">
-          <h2 className="mb-2 text-sm font-semibold">SharePoint / OneDrive</h2>
+          <h2 className="mb-2 text-sm font-semibold">Workspace assets</h2>
           {(data?.assets ?? []).length === 0 ? (
             <p className="text-xs text-muted-foreground">No assets linked to this campaign.</p>
           ) : (

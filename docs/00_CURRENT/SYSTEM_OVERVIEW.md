@@ -32,7 +32,7 @@ Browser (Next.js) ──HTTPS──► FastAPI (/api/v1)
 | OLTP | PostgreSQL |
 | Objects | MinIO (local) / AWS S3 (cloud) |
 | AV | ClamAV on upload |
-| Auth | Microsoft Entra SSO · JWT in **HttpOnly cookies** |
+| Auth | User id + password (HRMS-synced logins) · JWT in **HttpOnly cookies** |
 | Deploy | Docker Compose · Coolify (`docs/09_OPS/coolify-deploy.md`) |
 
 OpenSearch / Kubernetes / warehouse extract remain **evolution-gated** (`modules/platform/evolution.py`).

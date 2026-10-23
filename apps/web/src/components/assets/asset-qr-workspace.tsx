@@ -78,7 +78,7 @@ export function AssetQrWorkspace() {
     <div className="space-y-4">
       <PageHeader
         title="QR / Barcode"
-        description="Generate labels that open the authenticated Information Portal after Microsoft sign-in."
+        description="Generate labels that open the authenticated Information Portal after ERP sign-in."
       />
 
       <Card>

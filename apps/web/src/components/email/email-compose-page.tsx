@@ -65,7 +65,7 @@ export function EmailComposePage() {
       <EmailWorkspaceNav />
       <PageHeader
         title="Compose email"
-        description="Send via Microsoft Graph through the Notification Engine."
+        description="Send via SMTP through the Notification Engine."
       />
 
       {message ? (

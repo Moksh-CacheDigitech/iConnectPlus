@@ -1,23 +1,24 @@
 import { apiClient } from "@/services/api-client";
 
+type SmtpDiagnostics = {
+  configured: boolean;
+  missing: string[];
+  present: string[];
+  from_email: string | null;
+  env_files_found: string[];
+  hint: string | null;
+};
+
 export type EmailProviderStatus = {
   provider: string;
   configured: boolean;
   from_email: string | null;
   delivery_mode: string;
-  tenant_id_set: boolean;
-  client_id_set: boolean;
-  client_secret_set: boolean;
-  diagnostics?: {
-    configured: boolean;
-    missing: string[];
-    present: string[];
-    from_email: string | null;
-    tenant_id_preview: string | null;
-    client_id_preview: string | null;
-    env_files_found: string[];
-    hint: string | null;
-  };
+  host?: string | null;
+  port?: number | null;
+  use_tls?: boolean;
+  auth?: boolean;
+  diagnostics?: SmtpDiagnostics;
 };
 
 export type EmailDeliveryRow = {
@@ -106,24 +107,13 @@ export async function testEmailConnection() {
     status_code: number;
     from_email: string | null;
     provider_response?: string | null;
-    diagnostics?: {
-      configured: boolean;
-      missing: string[];
-      present: string[];
-      from_email: string | null;
-      tenant_id_preview: string | null;
-      client_id_preview: string | null;
-      env_files_found: string[];
-      hint: string | null;
-    };
+    diagnostics?: SmtpDiagnostics;
     details?: {
       step: string;
       hint: string | null;
       missing: string[];
       present: string[];
       env_files_found: string[];
-      tenant_id_preview: string | null;
-      client_id_preview: string | null;
     };
   }>("/notifications/email/test", { method: "POST" });
   return res.data;

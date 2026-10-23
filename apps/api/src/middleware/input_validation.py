@@ -23,8 +23,6 @@ logger = get_logger(__name__)
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _EXEMPT_SUFFIXES = (
     "/health",
-    "/auth/microsoft/callback",
-    "/auth/microsoft/exchange",
     "/auth/login",
     "/auth/refresh",
     "/public/access-gate/verify",

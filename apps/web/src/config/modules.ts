@@ -90,7 +90,7 @@ export const erpModules: ErpModule[] = [
   {
     key: "email",
     title: "Email",
-    description: "Graph-powered email notifications, templates, and delivery logs.",
+    description: "SMTP email notifications, templates, and delivery logs.",
     href: "/email",
     group: "foundation",
     icon: "mail",
@@ -105,7 +105,7 @@ export const erpModules: ErpModule[] = [
       {
         key: "compose",
         title: "Compose",
-        description: "Send an email via Microsoft Graph",
+        description: "Send an email via SMTP",
         apiPath: "/notifications/email/send",
         listable: false,
       },
@@ -1728,7 +1728,7 @@ export const erpModules: ErpModule[] = [
     key: "marketing",
     title: "Marketing & Social",
     description:
-      "Marketing operations - campaigns, tasks, AI studio, Microsoft 365, workload analytics, and publishing.",
+      "Marketing operations - campaigns, tasks, AI studio, campaign workspace, workload analytics, and publishing.",
     href: "/marketing",
     group: "operations",
     icon: "marketing",

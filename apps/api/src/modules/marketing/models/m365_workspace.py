@@ -1,4 +1,4 @@
-"""Microsoft 365 campaign workspace ORM."""
+"""Campaign workspace ORM (folders and shared files tracked inside the ERP)."""
 
 from uuid import UUID, uuid4
 

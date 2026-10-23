@@ -11,13 +11,17 @@ from modules.foundation.dependencies import require_permission
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.schemas import (
     AssignRoleRequest,
-    M365UserSyncResultResponse,
+    HrmsUserSyncResultResponse,
+    ModuleAccessRequest,
+    TemporaryPasswordResponse,
     UserCreateRequest,
     UserModulesResponse,
     UserModulesUpdateRequest,
     UserResponse,
     UserUpdateRequest,
 )
+from modules.foundation.service.hrms_user_sync_service import HrmsUserSyncService
+from modules.foundation.service.module_access_service import ModuleAccessService
 from modules.foundation.service.user_service import UserService
 from shared.schemas import APIResponse
 
@@ -29,33 +33,84 @@ def list_users(
     ctx: Annotated[TenantContext, Depends(require_permission("foundation.user:read"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> APIResponse[list[UserResponse]]:
-    users = UserService(db).list_users(ctx.tenant_id)
     return APIResponse(
         message="Users retrieved",
-        data=[UserService.to_response(u) for u in users],
+        data=UserService(db).list_user_responses(ctx.tenant_id),
     )
 
 
-@router.post("/sync-m365", response_model=APIResponse[M365UserSyncResultResponse])
-def sync_m365_organization_users(
+@router.post("/sync-hrms", response_model=APIResponse[HrmsUserSyncResultResponse])
+def sync_hrms_users(
     ctx: Annotated[TenantContext, Depends(require_permission("foundation.user:update"))],
     db: Annotated[Session, Depends(get_db)],
-) -> APIResponse[M365UserSyncResultResponse]:
-    """Pull Microsoft Entra (M365) directory users into this tenant."""
-    from modules.foundation.service.entra_user_sync_service import EntraUserSyncService
+) -> APIResponse[HrmsUserSyncResultResponse]:
+    """Create / link ERP logins for HRMS onboarded employees with a valid employee id."""
+    UserService(db).require_erp_admin(ctx.tenant_id, ctx.user_id)
+    result = HrmsUserSyncService(db).sync(tenant_id=ctx.tenant_id, actor_user_id=ctx.user_id)
+    db.commit()
+    return APIResponse(
+        message="HRMS employees synced",
+        data=HrmsUserSyncResultResponse(
+            employee_count=result.employee_count,
+            created=result.created,
+            linked=result.linked,
+            updated=result.updated,
+            deactivated=result.deactivated,
+            skipped=result.skipped,
+        ),
+    )
 
-    result = EntraUserSyncService(db).sync_organization_users(
-        tenant_id=ctx.tenant_id,
-        actor_user_id=ctx.user_id,
+
+@router.post("/{user_id}/module-access", response_model=APIResponse[UserResponse])
+def grant_module_access(
+    user_id: UUID,
+    body: ModuleAccessRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("foundation.user:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[UserResponse]:
+    """ERP admin: give a user Admin or User access to one module."""
+    user = ModuleAccessService(db).grant(
+        ctx,
+        user_id,
+        module_key=body.module_key,
+        role=body.role,
+        service_job_role=body.service_job_role,
+    )
+    db.commit()
+    return APIResponse(message="Module access updated", data=UserService.to_response(user))
+
+
+@router.delete("/{user_id}/module-access/{module_key}", response_model=APIResponse[UserResponse])
+def revoke_module_access(
+    user_id: UUID,
+    module_key: str,
+    ctx: Annotated[TenantContext, Depends(require_permission("foundation.user:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[UserResponse]:
+    """ERP admin: remove a user's Admin or User access to one module."""
+    user = ModuleAccessService(db).revoke(ctx, user_id, module_key=module_key)
+    db.commit()
+    return APIResponse(message="Module access removed", data=UserService.to_response(user))
+
+
+@router.post("/{user_id}/temporary-password", response_model=APIResponse[TemporaryPasswordResponse])
+def issue_temporary_password(
+    user_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("foundation.user:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[TemporaryPasswordResponse]:
+    """ERP admin: one-time password the user must change after signing in."""
+    user, password = UserService(db).issue_temporary_password(
+        ctx.tenant_id, user_id, actor_id=ctx.user_id
     )
     db.commit()
     return APIResponse(
-        message="Microsoft 365 users synced",
-        data=M365UserSyncResultResponse(
-            domain=result.domain,
-            directory_count=result.directory_count,
-            created=result.created,
-            updated=result.updated,
+        message="Temporary password issued",
+        data=TemporaryPasswordResponse(
+            user_id=user.id,
+            email=user.email,
+            display_name=user.display_name,
+            temporary_password=password,
         ),
     )
 

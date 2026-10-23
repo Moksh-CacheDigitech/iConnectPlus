@@ -1,4 +1,4 @@
-"""Module admin membership - assign Entra users to a single ERP module."""
+"""Module membership - module admins assign HRMS employees as users of their module."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, ConflictException, ForbiddenException, NotFoundException
+from modules.asset.service.domain_membership_service import DomainMembershipService
 from modules.foundation.domain.erp_modules import (
     ADMIN_USER_TYPES,
     ERP_MODULE_KEY_SET,
@@ -19,6 +20,7 @@ from modules.foundation.models.security import SecUser
 from modules.foundation.repository.user_module_repository import UserModuleRepository
 from modules.foundation.repository.user_repository import UserRepository
 from modules.platform.compat.audit_facade import PlatformAuditFacade
+from modules.foundation.service.hrms_user_directory import HrmsUserDirectory
 from modules.foundation.service.org_module_admin_sync_service import (
     SERVICE_TEAM_JOB_ROLES,
     OrgModuleAdminSyncService,
@@ -31,6 +33,7 @@ class ModuleAdminService:
         self._modules = UserModuleRepository(db)
         self._users = UserRepository(db)
         self._audit = PlatformAuditFacade(db)
+        self._hrms = HrmsUserDirectory(db)
 
     def ensure_module_admin(self, ctx: TenantContext, module_key: str) -> None:
         self._require_known_module(module_key)
@@ -80,34 +83,33 @@ class ModuleAdminService:
         return out
 
     def list_assignable_users(self, ctx: TenantContext, module_key: str) -> list[dict]:
+        """HRMS onboarded employees (valid employee id) not yet on this module."""
         self.ensure_module_admin(ctx, module_key)
         assigned_ids = self._modules.list_user_ids_for_module(ctx.tenant_id, module_key)
+        links = self._hrms.links_by_user(ctx.tenant_id)
+        valid_ids = {uid for uid, link in links.items() if link.valid} - assigned_ids
+        if not valid_ids:
+            return []
         stmt = (
             select(SecUser)
             .where(
                 SecUser.tenant_id == ctx.tenant_id,
+                SecUser.id.in_(valid_ids),
                 SecUser.is_deleted.is_(False),
-                SecUser.status == "active",
+                SecUser.status != "inactive",
             )
             .order_by(func.lower(SecUser.display_name).asc())
         )
-        options: list[dict] = []
-        for user in self._db.scalars(stmt).all():
-            email = (user.email or "").strip().lower()
-            if email.endswith("@example.com"):
-                continue
-            if user.user_type in ADMIN_USER_TYPES:
-                continue
-            if user.id in assigned_ids:
-                continue
-            options.append(
-                {
-                    "user_id": user.id,
-                    "display_name": user.display_name,
-                    "email": user.email,
-                }
-            )
-        return options
+        return [
+            {
+                "user_id": user.id,
+                "display_name": user.display_name,
+                "email": user.email,
+                "employee_code": links[user.id].employee_code,
+            }
+            for user in self._db.scalars(stmt).all()
+            if user.user_type not in ADMIN_USER_TYPES
+        ]
 
     def add_member(
         self,
@@ -124,6 +126,10 @@ class ModuleAdminService:
             raise NotFoundException("User not found")
         if target.user_type in ADMIN_USER_TYPES:
             raise AppException("ERP admins already have access to every module")
+        if not self._hrms.is_valid_user(ctx.tenant_id, user_id):
+            raise AppException(
+                "Only HRMS onboarded employees with a valid employee id can be assigned"
+            )
         existing = self._modules.get_assignment(ctx.tenant_id, user_id, module_key)
         if existing is not None:
             raise ConflictException("User already has this module")
@@ -227,6 +233,11 @@ class ModuleAdminService:
         if module_key == "service":
             OrgModuleAdminSyncService(self._db).demote_service_engineer(
                 ctx.tenant_id, user_id, ctx.user_id
+            )
+        if module_key == "assets":
+            # Clear IT/Non-IT domain memberships so list_users sync cannot re-add this member.
+            DomainMembershipService(self._db).deactivate_all_for_user(
+                ctx.tenant_id, user_id, actor_id=ctx.user_id
             )
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,

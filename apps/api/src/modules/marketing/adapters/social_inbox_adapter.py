@@ -18,6 +18,6 @@ class SocialInboxAdapter:
         code = (platform_code or "").strip().lower()
         if code not in {"linkedin", "instagram"}:
             return []
-        # Live Graph / LinkedIn comment APIs require the Integration Hub token.
+        # Live social comment APIs (LinkedIn etc.) require the Integration Hub token.
         # Return nothing rather than a fake thread.
         return []

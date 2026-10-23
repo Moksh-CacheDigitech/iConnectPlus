@@ -143,8 +143,8 @@ export function ModuleUsersPage({ moduleKey }: Props) {
         title={isService ? "Service team" : "Users"}
         description={
           isService
-            ? "As Service Head, assign Entra users and set their role to Service Engineer or Field Engineer. Module admins (Service Head) are set by the ERP admin under Organization → Users."
-            : `Assign Entra users to ${title}. Assigned users see this module in their ERP menu. Users who already have ${title} are hidden from the dropdown.`
+            ? "As Service Head, assign HRMS employees and set their role to Service Engineer or Field Engineer. Module admins (Service Head) are set only by the ERP admin under Organization → Users."
+            : `Assign HRMS onboarded employees as users of ${title}. Assigned users see this module in their ERP menu. Module admins are set only by the ERP admin under Organization → Users.`
         }
       />
 
@@ -171,7 +171,7 @@ export function ModuleUsersPage({ moduleKey }: Props) {
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <label className="sr-only" htmlFor={`${moduleKey}-assign-user`}>
-              Select Entra user
+              Select employee
             </label>
             <select
               id={`${moduleKey}-assign-user`}
@@ -181,11 +181,12 @@ export function ModuleUsersPage({ moduleKey }: Props) {
               className={`${selectClassName} min-w-[220px]`}
             >
               <option value="">
-                {options.length === 0 ? "No unassigned Entra users" : "Select Entra user…"}
+                {options.length === 0 ? "No unassigned HRMS employees" : "Select employee…"}
               </option>
               {options.map((row) => (
                 <option key={row.user_id} value={row.user_id}>
-                  {row.display_name} ({row.email})
+                  {row.display_name}
+                  {row.employee_code ? ` · ${row.employee_code}` : ""} ({row.email})
                 </option>
               ))}
             </select>

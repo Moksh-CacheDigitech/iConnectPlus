@@ -84,6 +84,22 @@ export function AuthGate({ children }: { children: ReactNode }) {
     router.replace(`/login${next}`);
   }, [pathname, searchParams, router, mounted, checking, authed]);
 
+  // Temporary passwords (issued by an ERP admin) must be replaced before using the ERP.
+  useEffect(() => {
+    if (!mounted || checking || !authed) return;
+    let cancelled = false;
+    void apiClient<{ user?: { must_change_password?: boolean } }>("/auth/me", { auth: true })
+      .then((res) => {
+        if (cancelled || !res.data?.user?.must_change_password) return;
+        const nextPath = safeNextPath(pathname, searchParams.toString()) ?? "/home";
+        router.replace(`/change-password?next=${encodeURIComponent(nextPath)}`);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [mounted, checking, authed, pathname, searchParams, router]);
+
   // If the cookie session dies mid-tab, send user back to login.
   useEffect(() => {
     if (!mounted || !authed) return;

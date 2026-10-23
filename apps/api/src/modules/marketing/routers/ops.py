@@ -1,4 +1,4 @@
-"""Marketing operations routers (tasks, M365, approvals, workload, AI ops)."""
+"""Marketing operations routers (tasks, campaign workspace, approvals, workload, AI ops)."""
 
 from typing import Annotated
 from uuid import UUID
@@ -47,7 +47,7 @@ from shared.schemas import APIResponse
 
 tasks_router = APIRouter(prefix="/tasks", tags=["Marketing - Tasks"])
 approvals_router = APIRouter(prefix="/approvals", tags=["Marketing - Approvals"])
-m365_router = APIRouter(prefix="/m365", tags=["Marketing - Microsoft 365"])
+m365_router = APIRouter(prefix="/m365", tags=["Marketing - Campaign workspace"])
 workload_router = APIRouter(prefix="/workload", tags=["Marketing - Workload"])
 ops_router = APIRouter(prefix="/ops", tags=["Marketing - Operations"])
 ai_ops_router = APIRouter(prefix="/ai", tags=["Marketing - AI Ops"])

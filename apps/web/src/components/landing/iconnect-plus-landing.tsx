@@ -102,7 +102,7 @@ const FAQ = [
   },
   {
     q: "Can it connect with tools we already use?",
-    a: "Yes. Modules share one tenant graph and integrate with identity (Microsoft Entra), email, and your existing finance / CRM / HR processes without forcing a rip-and-replace.",
+    a: "Yes. Modules share one tenant graph and integrate with HRMS-backed identity, email, and your existing finance / CRM / HR processes without forcing a rip-and-replace.",
   },
   {
     q: "Is our data secure?",

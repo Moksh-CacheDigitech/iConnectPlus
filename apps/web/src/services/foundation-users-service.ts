@@ -1,8 +1,5 @@
 import { apiClient } from "@/services/api-client";
 
-/** Organization Microsoft 365 email domain (matches API MICROSOFT_USER_EMAIL_DOMAIN). */
-export const ORG_EMAIL_DOMAIN = "cachedigitech.com";
-
 export type FoundationUser = {
   id: string;
   tenant_id: string;
@@ -15,24 +12,34 @@ export type FoundationUser = {
   role_ids: string[];
   assigned_module_keys: string[];
   admin_module_keys: string[];
+  must_change_password?: boolean;
+  /** HRMS employee code of the linked employee, when any. */
+  employee_code?: string | null;
+  /** True when linked to an onboarded HRMS employee with a valid employee id. */
+  hrms_valid?: boolean;
   department_id?: string | null;
   company_ids?: string[];
 };
 
-export type M365UserSyncResult = {
-  domain: string;
-  directory_count: number;
+export type HrmsUserSyncResult = {
+  employee_count: number;
   created: number;
+  linked: number;
   updated: number;
+  deactivated: number;
+  skipped: number;
+};
+
+export type ModuleAccessRole = "admin" | "member";
+
+export type TemporaryPassword = {
+  user_id: string;
+  email: string;
+  display_name: string;
+  temporary_password: string;
 };
 
 export type AssignmentOption = { id: string; label: string };
-
-export function isOrganizationDomainEmail(email: string, domain = ORG_EMAIL_DOMAIN): boolean {
-  const normalized = email.trim().toLowerCase();
-  const d = domain.trim().toLowerCase().replace(/^@/, "");
-  return Boolean(d) && normalized.endsWith(`@${d}`);
-}
 
 function asRows(data: unknown): Record<string, unknown>[] {
   if (Array.isArray(data)) return data as Record<string, unknown>[];
@@ -51,28 +58,50 @@ export async function listFoundationUsers(): Promise<FoundationUser[]> {
   return Array.isArray(data) ? data : [];
 }
 
-export async function syncM365OrganizationUsers(): Promise<M365UserSyncResult> {
-  const res = await apiClient<M365UserSyncResult>("/users/sync-m365", { method: "POST" });
+/** ERP admin: create / link logins for HRMS onboarded employees. */
+export async function syncHrmsUsers(): Promise<HrmsUserSyncResult> {
+  const res = await apiClient<HrmsUserSyncResult>("/users/sync-hrms", { method: "POST" });
   if (!res.data) {
-    throw new Error(res.message || "M365 sync returned an empty response");
+    throw new Error(res.message || "HRMS sync returned an empty response");
   }
   return res.data;
 }
 
-export async function createOrganizationMember(input: {
-  email: string;
-  display_name: string;
-}): Promise<FoundationUser> {
-  const res = await apiClient<FoundationUser>("/users/organization-members", {
+/** ERP admin: give a user Admin or User access to one module. */
+export async function grantModuleAccess(
+  userId: string,
+  moduleKey: string,
+  role: ModuleAccessRole,
+  serviceJobRole?: string,
+): Promise<FoundationUser> {
+  const res = await apiClient<FoundationUser>(`/users/${userId}/module-access`, {
     method: "POST",
     body: {
-      email: input.email.trim().toLowerCase(),
-      display_name: input.display_name.trim(),
+      module_key: moduleKey,
+      role,
+      ...(serviceJobRole ? { service_job_role: serviceJobRole } : {}),
     },
   });
-  if (!res.data) {
-    throw new Error(res.message || "Failed to create organization member");
-  }
+  if (!res.data) throw new Error(res.message || "Failed to update module access");
+  return res.data;
+}
+
+/** ERP admin: remove a user's Admin or User access to one module. */
+export async function revokeModuleAccess(userId: string, moduleKey: string): Promise<FoundationUser> {
+  const res = await apiClient<FoundationUser>(
+    `/users/${userId}/module-access/${encodeURIComponent(moduleKey)}`,
+    { method: "DELETE" },
+  );
+  if (!res.data) throw new Error(res.message || "Failed to remove module access");
+  return res.data;
+}
+
+/** ERP admin: one-time password the user must change after signing in. */
+export async function issueTemporaryPassword(userId: string): Promise<TemporaryPassword> {
+  const res = await apiClient<TemporaryPassword>(`/users/${userId}/temporary-password`, {
+    method: "POST",
+  });
+  if (!res.data) throw new Error(res.message || "Failed to issue temporary password");
   return res.data;
 }
 

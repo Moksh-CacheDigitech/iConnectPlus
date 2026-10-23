@@ -1,35 +1,39 @@
-"""Authentication service."""
+"""Authentication service (ERP user id + password)."""
 
-import base64
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.exceptions import UnauthorizedException
 from core.redis import SessionStore
-from modules.foundation.adapters.graph_directory_adapter import GraphDirectoryAdapter
 from modules.foundation.domain.exceptions import (
     AccountLockedException,
     InvalidCredentialsException,
+    PasswordResetTokenInvalidException,
 )
-from modules.foundation.domain.erp_modules import resolve_session_user_type
-from modules.foundation.models.security import SecRole, SecTenant, SecUser, SecUserRole
+from modules.foundation.domain.erp_modules import ADMIN_USER_TYPES, resolve_session_user_type
+from modules.foundation.models.security import SecRole, SecUser, SecUserRole
 from modules.foundation.repository.session_repository import SessionRepository
 from modules.foundation.repository.user_repository import UserRepository
 from modules.foundation.service.audit_service import AuditService
-from modules.foundation.service.microsoft_oauth_service import (
-    MicrosoftOAuthService,
-    resolve_frontend_base,
-)
 from modules.master_data.models.employee import MasterEmployee
+from modules.master_data.published import EmployeeRead
+from modules.organization.models.company import OrgCompany
 from security.ess_default_password import normalize_employee_code
 from security.ess_login_captcha import verify_challenge
 from security.jwt import JWTService
-from security.password import PasswordHasher
+from security.password import PasswordHasher, validate_password_policy
+from shared.text_safety import escape_html_text
+
+logger = logging.getLogger(__name__)
+
+# Users deactivated by HRMS sync (exited employees) cannot sign in.
+BLOCKED_LOGIN_STATUSES = frozenset({"inactive"})
 
 
 class AuthService:
@@ -40,6 +44,33 @@ class AuthService:
         self._audit = AuditService(db)
         self._jwt = JWTService()
         self._store = SessionStore()
+
+    def resolve_login_user(self, identifier: str) -> SecUser | None:
+        """Resolve a sign-in id: work email, or an HRMS employee code linked to one login."""
+        value = (identifier or "").strip()
+        if not value:
+            return None
+        if "@" in value:
+            return self._users.get_active_by_email(value)
+
+        code = normalize_employee_code(value)
+        if not code:
+            return None
+        rows = self._db.scalars(
+            select(EmployeeRead.user_id).where(
+                EmployeeRead.is_deleted.is_(False),
+                EmployeeRead.user_id.is_not(None),
+                func.upper(func.regexp_replace(EmployeeRead.employee_code, "[^A-Za-z0-9]", "", "g"))
+                == code,
+            )
+        ).all()
+        user_ids = {row for row in rows if row is not None}
+        if len(user_ids) != 1:
+            return None
+        user = self._db.get(SecUser, next(iter(user_ids)))
+        if user is None or user.is_deleted:
+            return None
+        return user
 
     def login(
         self,
@@ -57,7 +88,7 @@ class AuthService:
         success = False
         try:
             result = self._login_inner(
-                email=email,
+                identifier=email,
                 password=password,
                 ip_address=ip_address,
                 user_agent=user_agent,
@@ -74,7 +105,7 @@ class AuthService:
     def _login_inner(
         self,
         *,
-        email: str,
+        identifier: str,
         password: str,
         ip_address: str | None = None,
         user_agent: str | None = None,
@@ -88,7 +119,7 @@ class AuthService:
         allow_demo = settings.allow_demo_login
         if (
             not allow_demo
-            and email.strip().lower() in demo_emails
+            and identifier.strip().lower() in demo_emails
             and password == demo_password
         ):
             self._audit.log_security_event(
@@ -99,7 +130,7 @@ class AuthService:
             )
             raise InvalidCredentialsException()
 
-        user = self._users.get_active_by_email(email)
+        user = self.resolve_login_user(identifier)
         if user is None or not PasswordHasher.verify_password(password, user.password_hash):
             if user is not None:
                 self._users.record_failed_login(user)
@@ -117,8 +148,13 @@ class AuthService:
         ):
             raise InvalidCredentialsException()
 
+        if user.status in BLOCKED_LOGIN_STATUSES:
+            raise InvalidCredentialsException("This account is inactive. Contact your ERP admin.")
+
         if user.locked_until and user.locked_until > datetime.now(timezone.utc):
             raise AccountLockedException()
+        if user.status == "locked":
+            user.status = "active"
 
         if user.mfa_enabled:
             challenge = self._jwt.create_access_token(
@@ -244,7 +280,7 @@ class AuthService:
     ) -> dict:
         import pyotp
 
-        user = self._users.get_active_by_email(email)
+        user = self.resolve_login_user(email)
         if user is None or not user.mfa_enabled or not user.mfa_secret_encrypted:
             raise InvalidCredentialsException()
         totp = pyotp.TOTP(user.mfa_secret_encrypted)
@@ -252,220 +288,143 @@ class AuthService:
             raise InvalidCredentialsException()
         return self._issue_tokens(user, ip_address=ip_address, user_agent=user_agent)
 
-    def login_with_microsoft(
-        self,
-        *,
-        email: str,
-        display_name: str | None = None,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-    ) -> dict:
-        user = self._users.get_active_by_email(email)
-        if user is None:
-            user = self._provision_microsoft_user(email=email, display_name=display_name)
-        if user is None:
-            raise InvalidCredentialsException(
-                "No ERP account is linked to this Microsoft identity"
+    # -- password lifecycle -------------------------------------------------
+
+    def request_password_reset(self, *, identifier: str, ip_address: str | None = None) -> None:
+        """Start a reset without revealing whether the account exists."""
+        user = self.resolve_login_user(identifier)
+        if user is None or user.status in BLOCKED_LOGIN_STATUSES:
+            self._audit.log_security_event(
+                tenant_id=None,
+                event_type="auth.password_reset_unknown",
+                user_id=None,
+                ip_address=ip_address,
             )
-
-        if user.locked_until and user.locked_until > datetime.now(timezone.utc):
-            raise AccountLockedException()
-
-        return self._issue_tokens(user, ip_address=ip_address, user_agent=user_agent)
-
-    def _microsoft_email_allowed(self, email: str) -> bool:
-        normalized = email.strip().lower()
-        if normalized in settings.microsoft_platform_admin_email_set():
-            return True
-        domain = settings.microsoft_user_email_domain.strip().lower().lstrip("@")
-        return bool(domain and normalized.endswith(f"@{domain}"))
-
-    def _provision_microsoft_user(
-        self,
-        *,
-        email: str,
-        display_name: str | None,
-    ) -> SecUser | None:
-        """Just-in-time link for org-domain (or platform-admin) Microsoft accounts."""
-        if not self._microsoft_email_allowed(email):
-            return None
-
-        tenant = self._db.scalar(
-            select(SecTenant).where(
-                SecTenant.tenant_code == "BOOTSTRAP",
-                SecTenant.is_deleted.is_(False),
-            )
-        )
-        if tenant is None:
-            return None
-
-        from core.exceptions import ConflictException
-        from modules.foundation.service.org_context_service import OrgContextService
-        from modules.foundation.service.user_service import UserService
-
-        normalized = email.strip().lower()
-        existing = self._db.scalar(
-            select(SecUser).where(
-                SecUser.tenant_id == tenant.id,
-                SecUser.email == normalized,
-            )
-        )
-        if existing is not None:
-            if existing.is_deleted:
-                existing.is_deleted = False
-                existing.deleted_at = None
-                existing.deleted_by = None
-                existing.status = "active"
-                self._db.flush()
-            return existing
-
-        is_admin = normalized in settings.microsoft_platform_admin_email_set()
-        name = (display_name or "").strip() or normalized.split("@")[0]
-        service = UserService(self._db)
-        try:
-            user_row = service.create_user(
-                tenant_id=tenant.id,
-                email=normalized,
-                password=f"Ms0!{secrets.token_urlsafe(18)}",
-                display_name=name,
-                user_type="super_admin" if is_admin else "employee",
-            )
-        except ConflictException:
-            return self._users.get_active_by_email(normalized)
-
-        user = self._db.get(SecUser, user_row.id)
-        if user is None:
-            return None
-
-        if is_admin:
-            role = self._db.scalar(
-                select(SecRole).where(
-                    SecRole.tenant_id == tenant.id,
-                    SecRole.role_code == "SUPER_ADMIN",
-                    SecRole.is_deleted.is_(False),
-                )
-            )
-            if role is not None:
-                service.assign_role(
-                    tenant_id=tenant.id,
-                    user_id=user.id,
-                    role_id=role.id,
-                    assigned_by=None,
-                )
-
-        org = OrgContextService(self._db)
-        company, branch = org.get_tenant_primary_org(tenant.id)
-        if company is not None:
-            org.ensure_default_scope(
-                tenant_id=tenant.id,
-                user_id=user.id,
-                company_id=company.id,
-                branch_id=branch.id if branch else None,
-            )
-        return user
-
-    def complete_microsoft_oauth(
-        self,
-        *,
-        code: str,
-        state: str,
-        ip_address: str | None = None,
-        user_agent: str | None = None,
-    ) -> tuple[str, str, str | None]:
-        oauth = MicrosoftOAuthService()
-        stored = self._store.pop_oauth_state(state)
-        if stored is None:
-            raise InvalidCredentialsException("Microsoft sign-in session expired. Try again.")
-
-        return_to = (
-            stored.get("return_to") if isinstance(stored.get("return_to"), str) else "/"
-        )
-        frontend_origin = stored.get("frontend_origin")
-        frontend_base = resolve_frontend_base(
-            frontend_origin if isinstance(frontend_origin, str) else None
-        )
-        claims_bundle = oauth.exchange_authorization_code(code)
-        claims = claims_bundle.get("claims")
-        if not isinstance(claims, dict):
-            raise InvalidCredentialsException("Microsoft sign-in did not return identity claims")
-        ms_access_token = claims_bundle.get("access_token")
-        email = MicrosoftOAuthService.email_from_claims(claims)
-        if not email:
-            raise InvalidCredentialsException("Microsoft account did not include an email address")
-
-        display_name = claims.get("name")
-        if not isinstance(display_name, str):
-            display_name = None
-
-        tokens = self.login_with_microsoft(
-            email=email,
-            display_name=display_name,
-            ip_address=ip_address,
-            user_agent=user_agent,
-        )
-        user = self._users.get_active_by_email(email)
-        if user is not None and isinstance(ms_access_token, str) and ms_access_token:
-            self._cache_microsoft_avatar(user.id, ms_access_token)
-
-        exchange_code = oauth.create_exchange_code()
-        self._store.set_oauth_exchange(
-            exchange_code,
-            {**tokens, "return_to": return_to, "frontend_base": frontend_base},
-        )
-        return exchange_code, return_to, frontend_base
-
-    def resolve_user_avatar(self, *, user_id: UUID, email: str) -> tuple[bytes, str] | None:
-        """Return cached Microsoft profile photo, refreshing from Graph when needed."""
-        cached = self._store.get_user_avatar(user_id)
-        if cached is not None:
-            try:
-                return base64.b64decode(cached["data_b64"]), cached["content_type"]
-            except Exception:
-                pass
-
-        if self._store.has_user_avatar_miss(user_id):
-            return None
-
-        adapter = GraphDirectoryAdapter()
-        if not adapter.configured:
-            self._store.set_user_avatar_miss(user_id)
-            return None
-
-        try:
-            photo = adapter.fetch_user_photo(email)
-        except Exception:
-            self._store.set_user_avatar_miss(user_id)
-            return None
-
-        if photo is None:
-            self._store.set_user_avatar_miss(user_id)
-            return None
-
-        content, content_type = photo
-        self._store.set_user_avatar(
-            user_id,
-            content_type=content_type,
-            data_b64=base64.b64encode(content).decode("ascii"),
-        )
-        return content, content_type
-
-    def _cache_microsoft_avatar(self, user_id: UUID, ms_access_token: str) -> None:
-        photo = MicrosoftOAuthService.fetch_profile_photo(ms_access_token)
-        if photo is None:
-            self._store.set_user_avatar_miss(user_id)
             return
-        content, content_type = photo
-        self._store.set_user_avatar(
-            user_id,
-            content_type=content_type,
-            data_b64=base64.b64encode(content).decode("ascii"),
+
+        token = secrets.token_urlsafe(32)
+        minutes = max(5, int(settings.password_reset_token_minutes or 30))
+        self._store.set_password_reset(token, user.id, ttl_seconds=minutes * 60)
+        reset_url = f"{settings.frontend_url.rstrip('/')}/reset-password?token={token}"
+        self._audit.log_security_event(
+            tenant_id=user.tenant_id,
+            event_type="auth.password_reset_requested",
+            user_id=user.id,
+            ip_address=ip_address,
+        )
+        self._send_reset_email(user, reset_url, minutes)
+        self._notify_erp_admins_of_reset(user)
+
+    def _send_reset_email(self, user: SecUser, reset_url: str, minutes: int) -> None:
+        from modules.foundation.service.notification_service import NotificationService
+
+        if not settings.smtp_configured:
+            logger.info("Password reset requested for %s but SMTP is not configured", user.email)
+            return
+        name = escape_html_text(user.display_name or user.email)
+        link = escape_html_text(reset_url)
+        body = (
+            f"<p>Hello {name},</p>"
+            "<p>We received a request to reset your iConnect Plus password.</p>"
+            f'<p><a href="{link}">Reset your password</a></p>'
+            f"<p>This link expires in {minutes} minutes. If you did not request this, ignore this email.</p>"
+        )
+        try:
+            NotificationService(self._db).send_email(
+                tenant_id=user.tenant_id,
+                to_address=user.email,
+                subject="Reset your iConnect Plus password",
+                body_html=body,
+                event_type="auth.password_reset",
+                created_by=user.id,
+            )
+        except Exception as exc:  # noqa: BLE001 - reset request must not leak delivery errors
+            logger.warning("Password reset email failed for %s: %s", user.email, exc)
+
+    def _notify_erp_admins_of_reset(self, user: SecUser) -> None:
+        """In-app heads-up so an ERP admin can issue a temporary password when mail is off."""
+        from modules.platform.compat.notify_facade import PlatformNotifyFacade
+
+        if user.user_type in ADMIN_USER_TYPES:
+            return
+        admins = self._db.scalars(
+            select(SecUser).where(
+                SecUser.tenant_id == user.tenant_id,
+                SecUser.is_deleted.is_(False),
+                SecUser.status == "active",
+                SecUser.user_type.in_(tuple(ADMIN_USER_TYPES)),
+                SecUser.id != user.id,
+            )
+        ).all()
+        if not admins:
+            return
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M")
+        for admin in admins:
+            try:
+                PlatformNotifyFacade(self._db).send(
+                    tenant_id=user.tenant_id,
+                    template_code="auth.password_reset_requested",
+                    event_type="auth.password_reset_requested",
+                    recipient_user_id=admin.id,
+                    payload_json={
+                        "title": "Password reset requested",
+                        "body": (
+                            f"{user.display_name or user.email} ({user.email}) asked to reset their "
+                            "password. Issue a temporary password from Organization → Users if "
+                            "they cannot receive email."
+                        ),
+                        "kind": "auth_password_reset_requested",
+                        "entity_type": "sec_user",
+                        "entity_id": str(user.id),
+                        "href": "/organization/users",
+                    },
+                    created_by=user.id,
+                    channel="in_app",
+                    idempotency_key=f"auth:reset:{user.id}:{admin.id}:{stamp}",
+                    aggregate_id=user.id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not notify ERP admin about reset: %s", exc)
+
+    def _set_password(self, user: SecUser, new_password: str, *, must_change: bool) -> None:
+        validate_password_policy(new_password)
+        user.password_hash = PasswordHasher.hash_password(new_password, validate=False)
+        user.must_change_password = must_change
+        user.failed_login_count = 0
+        user.locked_until = None
+        if user.status == "locked":
+            user.status = "active"
+        self._db.flush()
+
+    def reset_password(self, *, token: str, new_password: str) -> None:
+        user_id = self._store.pop_password_reset(token)
+        user = self._db.get(SecUser, user_id) if user_id else None
+        if user is None or user.is_deleted or user.status in BLOCKED_LOGIN_STATUSES:
+            raise PasswordResetTokenInvalidException()
+        self._set_password(user, new_password, must_change=False)
+        self._sessions.revoke_all_for_user(user.tenant_id, user.id, revoked_by=user.id)
+        self._audit.log_security_event(
+            tenant_id=user.tenant_id,
+            event_type="auth.password_reset_completed",
+            user_id=user.id,
         )
 
-    def redeem_microsoft_exchange(self, exchange_code: str) -> dict:
-        payload = self._store.pop_oauth_exchange(exchange_code)
-        if payload is None:
-            raise InvalidCredentialsException("Sign-in code expired or already used")
-        return payload
+    def change_password(self, *, user_id: UUID, current_password: str, new_password: str) -> None:
+        user = self._db.get(SecUser, user_id)
+        if user is None or user.is_deleted:
+            raise UnauthorizedException("User not found")
+        if not PasswordHasher.verify_password(current_password, user.password_hash):
+            raise InvalidCredentialsException("Current password is incorrect")
+        if current_password == new_password:
+            raise InvalidCredentialsException("Choose a password you have not used just now")
+        self._set_password(user, new_password, must_change=False)
+        self._audit.log_security_event(
+            tenant_id=user.tenant_id,
+            event_type="auth.password_changed",
+            user_id=user.id,
+        )
+
+    # -- sessions -----------------------------------------------------------
 
     def refresh(
         self,
@@ -562,16 +521,11 @@ class AuthService:
         return list(self._db.scalars(stmt).all())
 
     def _session_user_type(self, user: SecUser) -> str:
-        resolved = resolve_session_user_type(
+        return resolve_session_user_type(
             user.user_type,
             user.email,
             self._role_codes_for_user(user.id),
-            platform_admin_emails=settings.microsoft_platform_admin_email_set(),
         )
-        if resolved != user.user_type:
-            user.user_type = resolved
-            self._db.flush()
-        return resolved
 
     def _issue_tokens(
         self,

@@ -76,7 +76,7 @@ export const MARKETING_NAV_GROUPS: readonly MarketingNavGroup[] = [
     label: "Channels",
     items: [
       { title: "Social", href: "/marketing/social-accounts", icon: Share2 },
-      { title: "Microsoft 365", href: "/marketing/m365", icon: LineChart },
+      { title: "Campaign workspace", href: "/marketing/m365", icon: LineChart },
     ],
   },
 ] as const;

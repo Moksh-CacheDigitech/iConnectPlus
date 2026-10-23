@@ -1,4 +1,4 @@
-"""Email channel delivery engine - template render + Graph send (C-05)."""
+"""Email channel delivery engine - template render + SMTP send (C-05)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from modules.foundation.adapters.graph_email_adapter import GraphEmailAdapter
+from modules.foundation.adapters.smtp_email_adapter import SmtpEmailAdapter
 from modules.foundation.models.notification import NtfDelivery, NtfEvent, NtfTemplate
 from modules.foundation.repository.base import utcnow
 
@@ -31,11 +31,11 @@ def render_template(template: str | None, payload: dict | None) -> str:
 
 
 class EmailDeliveryEngine:
-    """Delivers a queued email notification via Microsoft Graph."""
+    """Delivers a queued email notification via SMTP."""
 
-    def __init__(self, db: Session, adapter: GraphEmailAdapter | None = None) -> None:
+    def __init__(self, db: Session, adapter: SmtpEmailAdapter | None = None) -> None:
         self._db = db
-        self._adapter = adapter or GraphEmailAdapter()
+        self._adapter = adapter or SmtpEmailAdapter()
 
     def deliver(self, event_id: UUID, delivery_id: UUID) -> dict:
         event = self._db.get(NtfEvent, event_id)
@@ -56,10 +56,10 @@ class EmailDeliveryEngine:
 
         if not self._adapter.configured:
             delivery.status = "failed"
-            delivery.provider_response = "graph_not_configured"
+            delivery.provider_response = "smtp_not_configured"
             event.status = "failed"
             self._db.commit()
-            return {"status": "failed", "message": "Graph email not configured"}
+            return {"status": "failed", "message": "SMTP email not configured"}
 
         template = self._db.get(NtfTemplate, event.template_id)
         payload = dict(event.payload_json or {})

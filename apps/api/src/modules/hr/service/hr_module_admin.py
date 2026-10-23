@@ -1,14 +1,13 @@
-"""HRMS module admin - ERP admins, org-assigned module admins, or HR_ADMIN role."""
+"""HRMS module admin - ERP admins (DB user_type), org-assigned module admins, or HR_ADMIN role."""
 
 from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from core.config import settings
 from modules.foundation.domain.erp_modules import ADMIN_USER_TYPES
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.models.security import SecRole, SecUser, SecUserRole
+from modules.foundation.models.security import SecRole, SecUserRole
 from modules.foundation.repository.user_module_repository import UserModuleRepository
 
 HR_MODULE_KEY = "hr"
@@ -19,12 +18,6 @@ class HrModuleAdminService:
     def __init__(self, db: Session) -> None:
         self._db = db
         self._modules = UserModuleRepository(db)
-
-    @staticmethod
-    def is_platform_admin_email(email: str | None) -> bool:
-        if not email:
-            return False
-        return email.strip().lower() in settings.microsoft_platform_admin_email_set()
 
     def has_hr_admin_role(self, tenant_id, user_id) -> bool:
         role_id = self._db.scalar(
@@ -53,16 +46,7 @@ class HrModuleAdminService:
             return True
         if self._modules.is_module_admin(ctx.tenant_id, ctx.user_id, HR_MODULE_KEY):
             return True
-        user = self._db.scalar(
-            select(SecUser).where(
-                SecUser.id == ctx.user_id,
-                SecUser.tenant_id == ctx.tenant_id,
-                SecUser.is_deleted.is_(False),
-            )
-        )
-        if user is None:
-            return False
-        return self.is_platform_admin_email(user.email)
+        return self.has_hr_admin_role(ctx.tenant_id, ctx.user_id)
 
     def ensure_admin(self, ctx: TenantContext) -> None:
         from core.exceptions import ForbiddenException

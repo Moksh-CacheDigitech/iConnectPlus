@@ -89,8 +89,6 @@ export function EmailDashboard() {
         if ("step" in d && d.step) lines.push(`Failed step: ${d.step}`);
         if (d.missing?.length) lines.push(`Missing env: ${d.missing.join(", ")}`);
         if (d.present?.length) lines.push(`Present env: ${d.present.join(", ")}`);
-        if (d.tenant_id_preview) lines.push(`Tenant ID: ${d.tenant_id_preview}`);
-        if (d.client_id_preview) lines.push(`Client ID: ${d.client_id_preview}`);
         if (d.env_files_found?.length) {
           lines.push(`Env files loaded: ${d.env_files_found.join(" | ")}`);
         } else if (d.env_files_found) {
@@ -126,7 +124,7 @@ export function EmailDashboard() {
       <EmailWorkspaceNav />
       <PageHeader
         title="Email Notifications"
-        description="Microsoft Graph delivery through the Foundation Notification Engine."
+        description="SMTP delivery through the Foundation Notification Engine."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button
@@ -149,7 +147,7 @@ export function EmailDashboard() {
               disabled={testing || authenticated !== true}
             >
               <Server className="size-3.5" />
-              {testing ? "Testing…" : "Test Graph"}
+              {testing ? "Testing…" : "Test SMTP"}
             </Button>
             <Link
               href="/email/compose"
@@ -197,7 +195,7 @@ export function EmailDashboard() {
         <FinanceKpiCard variant="hero" 
           label="Delivered"
           value={String(counts?.delivered ?? 0)}
-          hint="Successful Graph sends"
+          hint="Successful SMTP sends"
           icon={CheckCircle2}
           tone="success"
         />
@@ -225,7 +223,7 @@ export function EmailDashboard() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="rounded-xl border border-border/80 bg-card p-4 shadow-sm">
-          <h2 className="text-base font-extrabold tracking-tight text-foreground">Graph provider</h2>
+          <h2 className="text-base font-extrabold tracking-tight text-foreground">SMTP provider</h2>
           <dl className="mt-3 space-y-2 text-sm">
             <div className="flex items-center justify-between gap-2">
               <dt className="text-muted-foreground">Status</dt>
@@ -244,11 +242,15 @@ export function EmailDashboard() {
               <dd className="text-foreground">{provider?.delivery_mode ?? "-"}</dd>
             </div>
             <div className="flex items-center justify-between gap-2">
-              <dt className="text-muted-foreground">Tenant / Client / Secret</dt>
+              <dt className="text-muted-foreground">Relay</dt>
+              <dd className="font-mono text-xs text-foreground">
+                {provider?.host ? `${provider.host}:${provider.port ?? ""}` : "-"}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <dt className="text-muted-foreground">TLS / Auth</dt>
               <dd className="text-xs text-muted-foreground">
-                {[provider?.tenant_id_set, provider?.client_id_set, provider?.client_secret_set]
-                  .map((v) => (v ? "✓" : "✗"))
-                  .join(" / ")}
+                {`${provider?.use_tls ? "STARTTLS" : "No TLS"} / ${provider?.auth ? "Login" : "None"}`}
               </dd>
             </div>
             {provider?.diagnostics?.missing?.length ? (

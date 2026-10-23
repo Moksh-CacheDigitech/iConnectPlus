@@ -3,16 +3,26 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from typing import Literal
+
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
+
+def _login_id_field():
+    """Sign-in id: work email or HRMS employee code (e.g. CT5345)."""
+    return Field(
+        min_length=2,
+        max_length=255,
+        validation_alias=AliasChoices("user_id", "email"),
+    )
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8)
+    email: str = _login_id_field()
+    password: str = Field(min_length=8, max_length=128)
 
 
 class MfaVerifyRequest(BaseModel):
-    email: EmailStr
+    email: str = _login_id_field()
     otp: str = Field(min_length=6, max_length=6)
 
 
@@ -20,13 +30,25 @@ class RefreshRequest(BaseModel):
     refresh_token: str | None = None
 
 
-class MicrosoftExchangeRequest(BaseModel):
-    code: str = Field(min_length=8)
+class ForgotPasswordRequest(BaseModel):
+    user_id: str = Field(min_length=2, max_length=255)
 
 
-class MicrosoftLoginConfigResponse(BaseModel):
-    enabled: bool
-    authorization_path: str = "/auth/microsoft/login"
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class TemporaryPasswordResponse(BaseModel):
+    user_id: UUID
+    email: str
+    display_name: str
+    temporary_password: str
 
 
 class TokenResponse(BaseModel):
@@ -85,6 +107,10 @@ class UserResponse(BaseModel):
     role_ids: list[UUID] = Field(default_factory=list)
     assigned_module_keys: list[str] = Field(default_factory=list)
     admin_module_keys: list[str] = Field(default_factory=list)
+    must_change_password: bool = False
+    # Linked HRMS employee (valid code + onboarded status) — only these get module access.
+    employee_code: str | None = None
+    hrms_valid: bool = False
 
 
 class UserModulesUpdateRequest(BaseModel):
@@ -98,17 +124,26 @@ class UserModulesResponse(BaseModel):
     effective_module_keys: list[str] = Field(default_factory=list)
 
 
-class M365UserSyncResultResponse(BaseModel):
-    domain: str
-    directory_count: int
+class HrmsUserSyncResultResponse(BaseModel):
+    employee_count: int
     created: int
+    linked: int
     updated: int
+    deactivated: int
+    skipped: int
+
+
+class ModuleAccessRequest(BaseModel):
+    module_key: str = Field(min_length=1, max_length=50)
+    role: Literal["admin", "member"]
+    service_job_role: str | None = None
 
 
 class ModuleUserOption(BaseModel):
     user_id: UUID
     display_name: str
     email: str
+    employee_code: str | None = None
 
 
 class ModuleUserRecord(BaseModel):

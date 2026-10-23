@@ -45,7 +45,8 @@ JWT_SECRET_KEY=long-random-string
 NEXT_PUBLIC_API_URL=https://api.iconnectplus.in/api/v1
 FRONTEND_URL=https://iconnectplus.in
 CORS_ORIGINS=["https://iconnectplus.in","https://www.iconnectplus.in","https://ess.iconnectplus.in"]
-MICROSOFT_REDIRECT_URI=https://api.iconnectplus.in/api/v1/auth/microsoft/callback
+SMTP_HOST=smtp.yourcompany.com
+SMTP_FROM_ADDRESS=noreply@yourcompany.com
 NEXT_PUBLIC_APP_NAME_EMPLOYEE=Employee App
 NEXT_PUBLIC_USE_MOCK=false
 EMPLOYEE_APP_PORT=3001
@@ -74,7 +75,7 @@ AWS_SECRET_ACCESS_KEY=...
 1. User opens `https://iconnectplus.in` and clicks **Sign in**.
 2. Enters code → `POST /api/v1/public/access-gate/verify`.
 3. **Demo code** → `/demo` (sales frontend, sample data only).
-4. **iConnectPlus code** → `/login` (Microsoft SSO into live ERP).
+4. **iConnectPlus code** → `/login` (user id + password into live ERP).
 5. Gate token is stored in `sessionStorage` and checked on `/demo` and `/login`.
 
 ## If deploy hangs on Waiting for api
@@ -88,4 +89,4 @@ AWS_SECRET_ACCESS_KEY=...
 1. API logs show `Starting uvicorn`
 2. `https://api.iconnectplus.in/api/v1/health` returns OK
 3. Landing loads; Sign in accepts both codes
-4. Demo code → demo shell; iConnectPlus code → Microsoft login
+4. Demo code → demo shell; iConnectPlus code → ERP sign-in page

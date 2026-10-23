@@ -15,7 +15,7 @@ type WelcomeSplashProps = {
 };
 
 /**
- * Post–Microsoft-login welcome — “hi” Lottie + name + Connect Plus.
+ * Post-sign-in welcome — “hi” Lottie + name + Connect Plus.
  * Apple.com-style type; Lottie already says hi, so no Hello! copy.
  */
 export function WelcomeSplash({ userName, onComplete }: WelcomeSplashProps) {

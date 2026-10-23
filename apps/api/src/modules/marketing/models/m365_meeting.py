@@ -1,4 +1,4 @@
-"""Outlook / Teams meeting ORM."""
+"""Campaign meeting ORM."""
 
 from datetime import datetime
 from uuid import UUID, uuid4

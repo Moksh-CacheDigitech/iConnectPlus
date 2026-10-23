@@ -68,17 +68,14 @@ def inbound_email_webhook(
 def poll_support_mailbox_now(
     ctx: Annotated[TenantContext, Depends(require_permission("service.request:approve"))],
 ):
-    """Manually poll the configured mailbox (Graph or IMAP) and create tickets."""
+    """Manually poll the configured IMAP mailbox and create tickets."""
     _ = ctx
     if not settings.email_ticket_enabled:
         raise HTTPException(status_code=503, detail="Email-to-ticket automation is disabled")
-    if not settings.graph_mail_configured and not settings.imap_configured:
+    if not settings.imap_configured:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "Mailbox not configured. Set MICROSOFT_TENANT_ID/CLIENT_ID/SECRET + "
-                "GRAPH_MAILBOX_EMAIL (preferred), or IMAP_* credentials."
-            ),
+            detail="Mailbox not configured. Set IMAP_ENABLED, IMAP_HOST, IMAP_USER and IMAP_PASSWORD.",
         )
     from modules.service.tasks import poll_support_mailbox
 
@@ -94,11 +91,6 @@ def list_mailbox_messages(
 ):
     """Recent inbox mail for Service Head / Engineer - all messages until subject rules are configured."""
     _ = ctx
-    if not settings.graph_mail_configured:
-        raise HTTPException(
-            status_code=503,
-            detail="Graph mailbox not configured. Set MICROSOFT_* / AZURE_* and GRAPH_MAILBOX_EMAIL.",
-        )
     try:
         result = MailboxInboxService(db).list_messages(top=top)
     except RuntimeError as exc:
@@ -106,20 +98,20 @@ def list_mailbox_messages(
     return APIResponse(message="OK", data=result)
 
 
-@email_inbound_router.get("/mailbox-messages/{graph_id}", response_model=APIResponse[MailboxMessageDetail])
+@email_inbound_router.get("/mailbox-messages/{mailbox_id}", response_model=APIResponse[MailboxMessageDetail])
 def get_mailbox_message(
-    graph_id: str,
+    mailbox_id: str,
     ctx: Annotated[TenantContext, Depends(require_permission("service.request:update"))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """Full body for one inbox message."""
     _ = ctx
-    if not settings.graph_mail_configured:
-        raise HTTPException(status_code=503, detail="Graph mailbox not configured.")
     try:
-        result = MailboxInboxService(db).get_message(graph_id)
+        result = MailboxInboxService(db).get_message(mailbox_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return APIResponse(message="OK", data=result)
 
 
@@ -141,8 +133,7 @@ def email_automation_status(
             enabled=settings.email_ticket_enabled,
             smtp_configured=settings.smtp_configured,
             imap_configured=settings.imap_configured,
-            graph_configured=settings.graph_mail_configured,
-            mailbox=settings.resolved_graph_mailbox() or settings.imap_user or None,
+            mailbox=settings.imap_user or None,
             webhook_path="/api/v1/service/email-inbound/webhook",
             recent_ingests=int(recent),
             subject_patterns=patterns,

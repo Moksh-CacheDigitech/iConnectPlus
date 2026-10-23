@@ -53,7 +53,7 @@ function portalErrorMessage(err: unknown): string {
   }
   const status = typeof err.status === "number" ? err.status : null;
   if (status === 401) {
-    return "Sign in with Microsoft is required to view this asset.";
+    return "Sign in is required to view this asset.";
   }
   if (status === 403) {
     return "You are signed in, but you do not have Asset Management access for this asset. Ask an admin to grant asset permissions.";
@@ -114,7 +114,7 @@ export function AssetInformationPortalView({ assetId }: Props) {
 
   const loadPortal = useCallback(async () => {
     if (!isAuthenticated()) {
-      setError("Sign in with Microsoft is required to view this asset.");
+      setError("Sign in is required to view this asset.");
       setLoading(false);
       return;
     }
@@ -313,7 +313,7 @@ export function AssetInformationPortalView({ assetId }: Props) {
               )
             }
           >
-            Sign in with Microsoft
+            Sign in
           </Button>
           <Button
             type="button"
@@ -522,7 +522,7 @@ export function AssetInformationPortalView({ assetId }: Props) {
                 </div>
                 <p className="break-all font-mono text-[11px] text-muted-foreground">{qrUrl}</p>
                 <p className="text-xs text-muted-foreground">
-                  Scanning opens Microsoft sign-in, then this Information Portal for authorized Asset
+                  Scanning opens ERP sign-in, then this Information Portal for authorized Asset
                   Management users. QR is generated in the browser only — never stored on the server.
                 </p>
                 <div className="flex flex-col gap-2">

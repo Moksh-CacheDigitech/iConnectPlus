@@ -38,8 +38,8 @@ export const marketingQuickLinks: MarketingQuickLink[] = [
     icon: ListTodo,
   },
   {
-    title: "Microsoft 365",
-    description: "Teams, SharePoint, OneDrive",
+    title: "Campaign workspace",
+    description: "Folders, drafts, final assets",
     href: "/marketing/m365",
     icon: Cloud,
   },

@@ -381,13 +381,14 @@ export const healthService = {
 };
 
 export const authService = {
-  login: (email: string, password: string) =>
+  /** `userId` is a work email or HRMS employee code. */
+  login: (userId: string, password: string) =>
     apiClient<TokenData>(
       "/auth/login",
       {
         method: "POST",
         auth: false,
-        body: { email, password },
+        body: { user_id: userId, password },
       },
     ).then((res) => {
       if (res.data?.access_token) {
@@ -403,28 +404,22 @@ export const authService = {
       clearTokens();
     }
   },
-  microsoftConfig: () =>
-    apiClient<{ enabled: boolean; authorization_path: string }>("/auth/microsoft/config", {
-      auth: false,
-    }),
-  microsoftLoginUrl: (returnTo = "/organization") => {
-    const params = new URLSearchParams({ return_to: returnTo });
-    // Send the browser origin so API redirects back here (not a fixed FRONTEND_URL / VM).
-    if (typeof window !== "undefined" && window.location?.origin) {
-      params.set("frontend_origin", window.location.origin);
-    }
-    return `${getApiUrl()}/auth/microsoft/login?${params.toString()}`;
-  },
-  exchangeMicrosoftCode: (code: string) =>
-    apiClient<TokenData>("/auth/microsoft/exchange", {
+  forgotPassword: (userId: string) =>
+    apiClient<null>("/auth/password/forgot", {
       method: "POST",
       auth: false,
-      body: { code },
-    }).then((res) => {
-      if (res.data?.access_token) {
-        setTokens(res.data.access_token, res.data.refresh_token);
-      }
-      return res;
+      body: { user_id: userId },
+    }),
+  resetPassword: (token: string, newPassword: string) =>
+    apiClient<null>("/auth/password/reset", {
+      method: "POST",
+      auth: false,
+      body: { token, new_password: newPassword },
+    }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    apiClient<null>("/auth/password/change", {
+      method: "POST",
+      body: { current_password: currentPassword, new_password: newPassword },
     }),
 };
 

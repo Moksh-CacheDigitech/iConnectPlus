@@ -1,114 +1,187 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, Crown, ShieldCheck, UserRound, Users } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import {
+  ChevronDown,
+  Copy,
+  Crown,
+  KeyRound,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+  UserPlus,
+  UserRound,
+} from "lucide-react";
 
-import { UserAvatar } from "@/components/layout/user-avatar";
-import { UserMemberModulesCell } from "@/components/organization/user-member-modules-cell";
-import { UserModulesCell } from "@/components/organization/user-modules-cell";
-import { useAuthUser } from "@/hooks/use-auth-user";
-import {
-  canManageUserModules,
-  isModuleAdmin,
-  moduleTitle,
-} from "@/lib/module-access";
-import {
-  hasModuleMemberAssignment,
-  memberOnlyModuleKeys,
-} from "@/lib/module-membership";
+import { FinanceField, FinanceSelect } from "@/components/finance/journals/finance-form-field";
 import { PageHeader } from "@/components/layout/page-header";
-import { FinanceStatusBadge } from "@/components/finance/finance-status-badge";
+import { UserAvatar } from "@/components/layout/user-avatar";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { erpModules } from "@/config/modules";
+import { useAuthUser } from "@/hooks/use-auth-user";
+import { hasAllModulesAdmin, isErpAdmin, moduleTitle } from "@/lib/module-access";
+import { hasModuleMemberAssignment, memberOnlyModuleKeys } from "@/lib/module-membership";
 import { cn } from "@/lib/utils";
-import { ApiClientError } from "@/services/api-client";
+import { formatApiError } from "@/services/api-client";
 import {
+  grantModuleAccess,
+  issueTemporaryPassword,
   listFoundationUsers,
-  syncM365OrganizationUsers,
+  revokeModuleAccess,
+  syncHrmsUsers,
+  updateUserModules,
   type FoundationUser,
+  type ModuleAccessRole,
+  type TemporaryPassword,
 } from "@/services/foundation-users-service";
 
-function sortUsersByName(users: FoundationUser[]): FoundationUser[] {
+type TableVariant = "erp" | "admin" | "member";
+
+/** One table row: ERP admins have no moduleKey; admin/member rows are per module. */
+type AccessTableRow = {
+  user: FoundationUser;
+  moduleKey: string | null;
+};
+
+const SERVICE_JOB_ROLES = [
+  { value: "service_engineer", label: "Service Engineer" },
+  { value: "field_engineer", label: "Field Engineer" },
+];
+
+function sortByName(users: FoundationUser[]): FoundationUser[] {
   return [...users].sort((a, b) =>
     a.display_name.localeCompare(b.display_name, undefined, { sensitivity: "base" }),
   );
 }
 
-function filterUsers(rows: FoundationUser[], query: string): FoundationUser[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return rows;
-  return rows.filter((row) => {
-    const assigned = row.assigned_module_keys ?? [];
-    const admins = row.admin_module_keys ?? [];
-    const members = memberOnlyModuleKeys(assigned, admins);
-    return (
-      row.display_name.toLowerCase().includes(q) ||
-      row.email.toLowerCase().includes(q) ||
-      row.user_type.toLowerCase().includes(q) ||
-      assigned.some((k) => moduleTitle(k).toLowerCase().includes(q)) ||
-      admins.some((k) => moduleTitle(k).toLowerCase().includes(q)) ||
-      members.some((k) => moduleTitle(k).toLowerCase().includes(q))
-    );
+function sortAccessRows(rows: AccessTableRow[]): AccessTableRow[] {
+  return [...rows].sort((a, b) => {
+    const byName = a.user.display_name.localeCompare(b.user.display_name, undefined, {
+      sensitivity: "base",
+    });
+    if (byName !== 0) return byName;
+    const aMod = a.moduleKey === "*" ? "All modules" : a.moduleKey ? moduleTitle(a.moduleKey) : "";
+    const bMod = b.moduleKey === "*" ? "All modules" : b.moduleKey ? moduleTitle(b.moduleKey) : "";
+    return aMod.localeCompare(bMod, undefined, { sensitivity: "base" });
   });
 }
 
-/** Platform ERP admins (super_admin / tenant_admin) — not per-module admins. */
-function isErpAdminUser(userType: string): boolean {
-  return isModuleAdmin(userType);
+function matchesUserQuery(user: FoundationUser, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const modules = [...(user.assigned_module_keys ?? []), ...(user.admin_module_keys ?? [])];
+  return (
+    user.display_name.toLowerCase().includes(q) ||
+    user.email.toLowerCase().includes(q) ||
+    (user.employee_code ?? "").toLowerCase().includes(q) ||
+    modules.some((k) => moduleTitle(k).toLowerCase().includes(q))
+  );
 }
 
-/** Module-level admins only (excludes ERP platform admins). */
-function isModuleAdminUser(row: FoundationUser): boolean {
-  if (isErpAdminUser(row.user_type)) return false;
-  return (row.admin_module_keys ?? []).length > 0;
+function matchesAccessQuery(row: AccessTableRow, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if (matchesUserQuery(row.user, q)) return true;
+  if (!row.moduleKey) return false;
+  if (row.moduleKey === "*") return "all modules".includes(q);
+  return moduleTitle(row.moduleKey).toLowerCase().includes(q);
 }
 
-type TableVariant = "erp" | "admin" | "member";
+function isModuleAdminRow(row: FoundationUser): boolean {
+  return !isErpAdmin(row.user_type) && (row.admin_module_keys ?? []).length > 0;
+}
+
+function expandAdminAccessRows(users: FoundationUser[]): AccessTableRow[] {
+  const seen = new Set<string>();
+  const out: AccessTableRow[] = [];
+  for (const user of users) {
+    const keys = user.admin_module_keys ?? [];
+    if (hasAllModulesAdmin(keys)) {
+      const id = `${user.id}:*`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({ user, moduleKey: "*" });
+      continue;
+    }
+    for (const key of keys) {
+      const id = `${user.id}:${key}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({ user, moduleKey: key });
+    }
+  }
+  return sortAccessRows(out);
+}
+
+function expandMemberAccessRows(users: FoundationUser[]): AccessTableRow[] {
+  const seen = new Set<string>();
+  const out: AccessTableRow[] = [];
+  for (const user of users) {
+    for (const key of memberOnlyModuleKeys(
+      user.assigned_module_keys ?? [],
+      user.admin_module_keys ?? [],
+    )) {
+      const id = `${user.id}:${key}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({ user, moduleKey: key });
+    }
+  }
+  return sortAccessRows(out);
+}
+
+function currentRole(row: FoundationUser | undefined, moduleKey: string): ModuleAccessRole | null {
+  if (!row || !moduleKey) return null;
+  if ((row.admin_module_keys ?? []).includes(moduleKey)) return "admin";
+  if ((row.assigned_module_keys ?? []).includes(moduleKey)) return "member";
+  return null;
+}
 
 function UsersTableCard({
   title,
-  subtitle,
   icon,
-  toolbar,
+  rows,
   loading,
   emptyLabel,
-  rows,
   variant,
-  canEditModules,
-  onModulesSaved,
+  canEdit,
+  busy,
+  onResetPassword,
+  onAssign,
+  onRemove,
   defaultOpen = false,
-  expandWhen = false,
 }: {
   title: string;
-  subtitle: string;
   icon: ReactNode;
-  toolbar?: ReactNode;
+  rows: AccessTableRow[];
   loading: boolean;
   emptyLabel: string;
-  rows: FoundationUser[];
   variant: TableVariant;
-  canEditModules: boolean;
-  onModulesSaved: (
-    userId: string,
-    assigned_module_keys: string[],
-    admin_module_keys: string[],
-  ) => void;
-  /** When true, the table body starts expanded. */
+  canEdit: boolean;
+  busy: { userId: string; key: string } | null;
+  onResetPassword: (row: FoundationUser) => void;
+  onAssign: (row: FoundationUser) => void;
+  onRemove: (row: AccessTableRow, variant: TableVariant) => void;
   defaultOpen?: boolean;
-  /** Force-open while true (e.g. active search filter). */
-  expandWhen?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [expanded, setExpanded] = useState(defaultOpen);
+  const [query, setQuery] = useState("");
   const panelId = useId();
-
-  useEffect(() => {
-    if (expandWhen) setOpen(true);
-  }, [expandWhen]);
-  const modulesColumnLabel =
-    variant === "member"
-      ? "Module membership"
-      : variant === "erp"
-        ? "Access"
-        : "Module admins";
+  const filtered = useMemo(() => rows.filter((row) => matchesAccessQuery(row, query)), [rows, query]);
+  // An active search always shows results.
+  const open = expanded || Boolean(query.trim());
+  const showModule = variant === "admin" || variant === "member";
+  const colSpan = (showModule ? 4 : 3) + (canEdit ? 1 : 0);
 
   return (
     <div className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm">
@@ -118,14 +191,13 @@ function UsersTableCard({
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-md text-left transition-colors duration-200 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
           aria-expanded={open}
           aria-controls={panelId}
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setExpanded(!open)}
         >
           <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
             {icon}
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-foreground">{title}</p>
-            <p className="text-[11px] text-muted-foreground">{subtitle}</p>
           </div>
           <ChevronDown
             className={cn(
@@ -135,82 +207,122 @@ function UsersTableCard({
             aria-hidden
           />
         </button>
-        {toolbar ? (
-          <div
-            className="flex flex-wrap items-center gap-2"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
-          >
-            {toolbar}
-          </div>
-        ) : null}
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search name, employee id, email, module…"
+          className="h-9 w-full min-w-[200px] max-w-xs"
+          aria-label={`Search ${title}`}
+        />
       </div>
 
       {open ? (
         <div id={panelId} className="erp-scroll overflow-x-auto">
-          <table className="w-full min-w-[880px] text-left text-sm">
+          <table className="w-full min-w-[720px] text-center text-sm">
             <thead>
               <tr className="border-b border-border/80 bg-muted/60 text-xs font-semibold tracking-wide text-foreground uppercase">
-                <th className="px-4 py-2.5">User</th>
-                <th className="px-4 py-2.5">Email</th>
-                <th className="px-4 py-2.5">{modulesColumnLabel}</th>
-                <th className="px-4 py-2.5">Status</th>
+                <th className="px-4 py-2.5 text-center">User</th>
+                <th className="px-4 py-2.5 text-center">Employee ID</th>
+                <th className="px-4 py-2.5 text-center">Email</th>
+                {showModule ? <th className="px-4 py-2.5 text-center">Module</th> : null}
+                {canEdit ? <th className="px-4 py-2.5 text-center">Actions</th> : null}
               </tr>
             </thead>
             <tbody>
               {loading && rows.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
+                  <td colSpan={colSpan} className="px-4 py-10 text-center text-muted-foreground">
                     Loading users…
                   </td>
                 </tr>
-              ) : rows.length === 0 ? (
+              ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
-                    {emptyLabel}
+                  <td colSpan={colSpan} className="px-4 py-10 text-center text-muted-foreground">
+                    {query.trim() ? "No users match your search." : emptyLabel}
                   </td>
                 </tr>
               ) : (
-                rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="border-b border-border/50 transition-colors duration-150 last:border-0 hover:bg-accent/30"
-                  >
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-2.5">
-                        <UserAvatar
-                          displayName={row.display_name}
-                          size="sm"
-                          className="!size-8 !text-[10px]"
-                        />
-                        <span className="font-medium text-foreground">{row.display_name}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{row.email}</td>
-                    <td className="px-4 py-2.5">
-                      {variant === "member" ? (
-                        <UserMemberModulesCell
-                          assignedModuleKeys={row.assigned_module_keys ?? []}
-                          adminModuleKeys={row.admin_module_keys ?? []}
-                        />
-                      ) : (
-                        <UserModulesCell
-                          userId={row.id}
-                          userType={row.user_type}
-                          assignedModuleKeys={row.assigned_module_keys ?? []}
-                          adminModuleKeys={row.admin_module_keys ?? []}
-                          canEdit={canEditModules && variant !== "erp"}
-                          onSaved={(assigned_module_keys, admin_module_keys) => {
-                            onModulesSaved(row.id, assigned_module_keys, admin_module_keys);
-                          }}
-                        />
-                      )}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <FinanceStatusBadge status={row.status} />
-                    </td>
-                  </tr>
-                ))
+                filtered.map((row) => {
+                  const { user, moduleKey } = row;
+                  const busyId = moduleKey ? `${user.id}:${moduleKey}` : user.id;
+                  const busyKey = busy?.userId === busyId || busy?.userId === user.id ? busy.key : null;
+                  const moduleLabel =
+                    moduleKey === "*" ? "All modules" : moduleKey ? moduleTitle(moduleKey) : "—";
+                  return (
+                    <tr
+                      key={`${user.id}:${moduleKey ?? "erp"}`}
+                      className="border-b border-border/50 transition-colors duration-150 last:border-0 hover:bg-accent/30"
+                    >
+                      <td className="px-4 py-2.5 text-center">
+                        <div className="inline-flex items-center justify-center gap-2.5">
+                          <UserAvatar
+                            displayName={user.display_name}
+                            size="sm"
+                            className="!size-8 !text-[10px]"
+                          />
+                          <span className="font-medium text-foreground">{user.display_name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-center font-mono text-xs text-muted-foreground">
+                        {user.employee_code ?? "—"}
+                      </td>
+                      <td className="px-4 py-2.5 text-center text-muted-foreground">{user.email}</td>
+                      {showModule ? (
+                        <td className="px-4 py-2.5 text-center font-medium text-foreground">
+                          {moduleLabel}
+                        </td>
+                      ) : null}
+                      {canEdit ? (
+                        <td className="px-4 py-2.5 text-center">
+                          <div className="inline-flex justify-center gap-1.5">
+                            {variant !== "erp" ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 cursor-pointer gap-1.5"
+                                disabled={!user.hrms_valid}
+                                title={user.hrms_valid ? undefined : "Not an onboarded HRMS employee"}
+                                onClick={() => onAssign(user)}
+                              >
+                                <UserPlus className="size-3.5" />
+                                Assign
+                              </Button>
+                            ) : null}
+                            {variant === "admin" || variant === "member" ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 cursor-pointer gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                disabled={busyKey === "remove"}
+                                title={`Remove ${moduleLabel} access`}
+                                aria-label={`Remove ${moduleLabel} access for ${user.display_name}`}
+                                onClick={() => onRemove(row, variant)}
+                              >
+                                <Trash2 className="size-3.5" />
+                                {busyKey === "remove" ? "Removing…" : "Remove"}
+                              </Button>
+                            ) : null}
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 cursor-pointer gap-1.5"
+                              disabled={busyKey === "password"}
+                              title="Issue a temporary password"
+                              aria-label={`Issue a temporary password for ${user.display_name}`}
+                              onClick={() => onResetPassword(user)}
+                            >
+                              <KeyRound className="size-3.5" />
+                              {busyKey === "password" ? "Issuing…" : "Reset"}
+                            </Button>
+                          </div>
+                        </td>
+                      ) : null}
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -220,242 +332,447 @@ function UsersTableCard({
   );
 }
 
+function AssignAccessCard({
+  users,
+  selectedUserId,
+  onSelectUser,
+  onAssigned,
+  onError,
+  cardRef,
+}: {
+  users: FoundationUser[];
+  selectedUserId: string;
+  onSelectUser: (id: string) => void;
+  onAssigned: (user: FoundationUser, message: string) => void;
+  onError: (message: string) => void;
+  cardRef: RefObject<HTMLDivElement | null>;
+}) {
+  const [search, setSearch] = useState("");
+  const [moduleKey, setModuleKey] = useState("");
+  const [role, setRole] = useState<ModuleAccessRole>("member");
+  const [jobRole, setJobRole] = useState(SERVICE_JOB_ROLES[0].value);
+  const [saving, setSaving] = useState(false);
+
+  const options = useMemo(
+    () => users.filter((u) => matchesUserQuery(u, search) || u.id === selectedUserId),
+    [users, search, selectedUserId],
+  );
+  const selected = users.find((u) => u.id === selectedUserId);
+  const existing = currentRole(selected, moduleKey);
+  const unchanged = existing === role;
+
+  async function submit() {
+    if (!selected || !moduleKey || unchanged) return;
+    setSaving(true);
+    try {
+      const updated = await grantModuleAccess(
+        selected.id,
+        moduleKey,
+        role,
+        moduleKey === "service" && role === "member" ? jobRole : undefined,
+      );
+      onAssigned(
+        updated,
+        `${selected.display_name} is now ${role === "admin" ? "Admin" : "User"} of ${moduleTitle(moduleKey)}.`,
+      );
+    } catch (err) {
+      onError(formatApiError(err, "Could not update module access"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      ref={cardRef}
+      className="rounded-xl border border-border/80 bg-card p-4 shadow-sm"
+      aria-labelledby="assign-access-heading"
+    >
+      <div className="mb-3 flex items-center gap-2.5">
+        <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <UserPlus className="size-4" />
+        </div>
+        <div>
+          <p id="assign-access-heading" className="text-sm font-semibold text-foreground">
+            Assign module access
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)_minmax(0,1fr)_auto] md:items-end">
+        <FinanceField label="Employee" htmlFor="assign-user" className="min-w-0">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter by name, employee id, email…"
+            className="mb-1.5 h-9"
+            aria-label="Filter employees"
+          />
+          <FinanceSelect
+            id="assign-user"
+            className="h-9 bg-background"
+            value={selectedUserId}
+            onChange={(e) => onSelectUser(e.target.value)}
+          >
+            <option value="">
+              {users.length === 0 ? "No HRMS employees synced yet" : `Select employee (${options.length})…`}
+            </option>
+            {options.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.display_name} · {u.employee_code ?? "—"} ({u.email})
+              </option>
+            ))}
+          </FinanceSelect>
+        </FinanceField>
+
+        <FinanceField label="Module" htmlFor="assign-module" className="min-w-0">
+          <FinanceSelect
+            id="assign-module"
+            className="h-9 bg-background"
+            value={moduleKey}
+            onChange={(e) => setModuleKey(e.target.value)}
+          >
+            <option value="">Select module…</option>
+            {erpModules.map((m) => (
+              <option key={m.key} value={m.key}>
+                {m.title}
+              </option>
+            ))}
+          </FinanceSelect>
+        </FinanceField>
+
+        <FinanceField label="Role" htmlFor="assign-role" className="min-w-0">
+          <FinanceSelect
+            id="assign-role"
+            className="h-9 bg-background"
+            value={role}
+            onChange={(e) => setRole(e.target.value as ModuleAccessRole)}
+          >
+            <option value="member">User</option>
+            <option value="admin">Admin</option>
+          </FinanceSelect>
+        </FinanceField>
+
+        <Button
+          type="button"
+          className="h-9 cursor-pointer gap-1.5"
+          disabled={!selected || !moduleKey || saving || unchanged}
+          onClick={() => void submit()}
+        >
+          <UserPlus className="size-3.5" />
+          {saving ? "Saving…" : existing ? "Change role" : "Assign"}
+        </Button>
+      </div>
+
+      {moduleKey === "service" && role === "member" ? (
+        <FinanceField label="Service team role" htmlFor="assign-service-role" className="mt-3 max-w-xs">
+          <FinanceSelect
+            id="assign-service-role"
+            className="h-9 bg-background"
+            value={jobRole}
+            onChange={(e) => setJobRole(e.target.value)}
+          >
+            {SERVICE_JOB_ROLES.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </FinanceSelect>
+        </FinanceField>
+      ) : null}
+
+      {selected && moduleKey ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Current access to {moduleTitle(moduleKey)}:{" "}
+          <span className="font-medium text-foreground">
+            {existing === "admin" ? "Admin" : existing === "member" ? "User" : "None"}
+          </span>
+          {unchanged ? " — already has this role." : null}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function OrganizationUsersPage({
   title = "Organization users",
-  description = "ERP admins, module admins, module members, and Entra users without module assignment.",
   backHref,
   backLabel,
 }: {
   title?: string;
-  description?: string;
   backHref?: string;
   backLabel?: string;
 } = {}) {
-  const { user: sessionUser, permissions } = useAuthUser();
-  const canEditModules = canManageUserModules(permissions, sessionUser?.userType);
+  const { user: sessionUser } = useAuthUser();
+  const erpAdmin = isErpAdmin(sessionUser?.userType);
   const [rows, setRows] = useState<FoundationUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [erpQuery, setErpQuery] = useState("");
-  const [adminQuery, setAdminQuery] = useState("");
-  const [memberQuery, setMemberQuery] = useState("");
-  const [unassignedQuery, setUnassignedQuery] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [tempPassword, setTempPassword] = useState<TemporaryPassword | null>(null);
+  const [busy, setBusy] = useState<{ userId: string; key: string } | null>(null);
+  const [assignUserId, setAssignUserId] = useState("");
+  const assignRef = useRef<HTMLDivElement>(null);
+  const autoSynced = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
-      // Keep Entra directory users fresh whenever this page is opened.
-      if (canEditModules) {
-        try {
-          await syncM365OrganizationUsers();
-        } catch {
-          // Soft-fail: still show local users if Graph sync is unavailable.
-        }
-      }
       setRows(await listFoundationUsers());
     } catch (err) {
       setRows([]);
-      if (err instanceof ApiClientError) {
-        const hint =
-          err.status === 0
-            ? "Cannot reach the API. Confirm the backend is running on port 8000."
-            : err.message;
-        setError(hint);
-      } else {
-        setError("Failed to load users");
-      }
+      setError(formatApiError(err, "Failed to load users"));
     } finally {
       setLoading(false);
     }
-  }, [canEditModules]);
+  }, []);
+
+  const runSync = useCallback(
+    async (manual: boolean) => {
+      setSyncing(true);
+      if (manual) setError(null);
+      try {
+        const result = await syncHrmsUsers();
+        if (manual || result.created || result.linked || result.updated || result.deactivated) {
+          setNotice(
+            `HRMS sync: ${result.employee_count} onboarded employees · ${result.created} new logins · ` +
+            `${result.linked} linked · ${result.updated} updated · ${result.deactivated} deactivated.`,
+          );
+          await load();
+        }
+      } catch (err) {
+        if (manual) setError(formatApiError(err, "HRMS sync failed"));
+      } finally {
+        setSyncing(false);
+      }
+    },
+    [load],
+  );
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const erpAdmins = useMemo(() => {
-    const list = rows.filter((row) => isErpAdminUser(row.user_type));
-    return sortUsersByName(filterUsers(list, erpQuery));
-  }, [rows, erpQuery]);
+  useEffect(() => {
+    if (!erpAdmin || autoSynced.current) return;
+    autoSynced.current = true;
+    void runSync(false);
+  }, [erpAdmin, runSync]);
 
-  const adminUsers = useMemo(() => {
-    const list = rows.filter((row) => isModuleAdminUser(row));
-    return sortUsersByName(filterUsers(list, adminQuery));
-  }, [rows, adminQuery]);
-
-  const memberUsers = useMemo(() => {
-    const list = rows.filter((row) =>
-      hasModuleMemberAssignment(
-        row.user_type,
-        row.assigned_module_keys ?? [],
-        row.admin_module_keys ?? [],
-      ),
-    );
-    return sortUsersByName(filterUsers(list, memberQuery));
-  }, [rows, memberQuery]);
-
-  const unassignedUsers = useMemo(() => {
-    const list = rows.filter(
-      (row) =>
-        !isErpAdminUser(row.user_type) &&
-        !isModuleAdminUser(row) &&
-        !hasModuleMemberAssignment(
-          row.user_type,
-          row.assigned_module_keys ?? [],
-          row.admin_module_keys ?? [],
-        ),
-    );
-    return sortUsersByName(filterUsers(list, unassignedQuery));
-  }, [rows, unassignedQuery]);
-
-  function onModulesSaved(
-    userId: string,
-    assigned_module_keys: string[],
-    admin_module_keys: string[],
-  ) {
+  function mergeUser(updated: FoundationUser) {
     setRows((prev) =>
       prev.map((r) =>
-        r.id === userId ? { ...r, assigned_module_keys, admin_module_keys } : r,
+        r.id === updated.id
+          ? {
+            ...r,
+            assigned_module_keys: updated.assigned_module_keys,
+            admin_module_keys: updated.admin_module_keys,
+            status: updated.status,
+          }
+          : r,
       ),
     );
   }
 
-  const erpSearchInput = (
-    <Input
-      value={erpQuery}
-      onChange={(e) => setErpQuery(e.target.value)}
-      placeholder="Search name or email…"
-      className="h-9 w-full min-w-[200px] max-w-xs cursor-pointer"
-      aria-label="Search ERP admins"
-    />
+  async function resetPassword(row: FoundationUser) {
+    setBusy({ userId: row.id, key: "password" });
+    setError(null);
+    try {
+      setTempPassword(await issueTemporaryPassword(row.id));
+    } catch (err) {
+      setError(formatApiError(err, "Could not issue a temporary password"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removeAccess(row: AccessTableRow, variant: TableVariant) {
+    if (variant !== "admin" && variant !== "member") return;
+    const { user, moduleKey } = row;
+    if (!moduleKey) return;
+    const moduleLabel = moduleKey === "*" ? "all modules" : moduleTitle(moduleKey);
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(`Remove ${user.display_name}'s access to ${moduleLabel}?`)
+    ) {
+      return;
+    }
+    setBusy({ userId: `${user.id}:${moduleKey}`, key: "remove" });
+    setError(null);
+    setNotice(null);
+    try {
+      let updated: FoundationUser;
+      if (variant === "admin") {
+        updated =
+          moduleKey === "*"
+            ? await updateUserModules(user.id, [])
+            : await updateUserModules(
+              user.id,
+              (user.admin_module_keys ?? []).filter((key) => key !== moduleKey),
+            );
+      } else {
+        updated = await revokeModuleAccess(user.id, moduleKey);
+      }
+      mergeUser(updated);
+      setNotice(`Removed ${user.display_name}'s access to ${moduleLabel}.`);
+    } catch (err) {
+      setError(formatApiError(err, "Could not remove access"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function startAssign(row: FoundationUser) {
+    setAssignUserId(row.id);
+    assignRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  const erpAdmins = useMemo(
+    () =>
+      sortAccessRows(
+        sortByName(rows.filter((r) => isErpAdmin(r.user_type))).map((user) => ({
+          user,
+          moduleKey: null,
+        })),
+      ),
+    [rows],
+  );
+  const moduleAdmins = useMemo(
+    () => expandAdminAccessRows(rows.filter(isModuleAdminRow)),
+    [rows],
+  );
+  const moduleUsers = useMemo(
+    () =>
+      expandMemberAccessRows(
+        rows.filter((r) =>
+          hasModuleMemberAssignment(r.user_type, r.assigned_module_keys ?? [], r.admin_module_keys ?? []),
+        ),
+      ),
+    [rows],
+  );
+  const assignable = useMemo(
+    () => sortByName(rows.filter((r) => r.hrms_valid && !isErpAdmin(r.user_type) && r.status !== "inactive")),
+    [rows],
   );
 
-  const adminSearchInput = (
-    <Input
-      value={adminQuery}
-      onChange={(e) => setAdminQuery(e.target.value)}
-      placeholder="Search name or email…"
-      className="h-9 w-full min-w-[200px] max-w-xs cursor-pointer"
-      aria-label="Search module admin users"
-    />
-  );
-
-  const memberSearchInput = (
-    <Input
-      value={memberQuery}
-      onChange={(e) => setMemberQuery(e.target.value)}
-      placeholder="Search name or email…"
-      className="h-9 w-full min-w-[200px] max-w-xs cursor-pointer"
-      aria-label="Search module member users"
-    />
-  );
-
-  const unassignedSearchInput = (
-    <Input
-      value={unassignedQuery}
-      onChange={(e) => setUnassignedQuery(e.target.value)}
-      placeholder="Search name or email…"
-      className="h-9 w-full min-w-[200px] max-w-xs cursor-pointer"
-      aria-label="Search users without module assignment"
-    />
-  );
+  const tableProps = {
+    loading,
+    canEdit: erpAdmin,
+    busy,
+    onResetPassword: (row: FoundationUser) => void resetPassword(row),
+    onAssign: startAssign,
+    onRemove: (row: AccessTableRow, variant: TableVariant) => void removeAccess(row, variant),
+  };
 
   return (
     <div className="space-y-5">
       <PageHeader
         title={title}
-        description={description}
         backHref={backHref}
         backLabel={backLabel}
+        actions={
+          erpAdmin ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 cursor-pointer gap-1.5"
+              disabled={syncing}
+              onClick={() => void runSync(true)}
+            >
+              <RefreshCw className={cn("size-3.5", syncing && "animate-spin motion-reduce:animate-none")} />
+              {syncing ? "Syncing HRMS…" : "Sync from HRMS"}
+            </Button>
+          ) : null
+        }
       />
 
       {error ? (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
       ) : null}
+      {notice ? (
+        <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {notice}
+        </div>
+      ) : null}
+      {tempPassword ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p>
+            Temporary password for <span className="font-semibold">{tempPassword.display_name}</span> (
+            {tempPassword.email}):{" "}
+            <code className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-[13px]">
+              {tempPassword.temporary_password}
+            </code>{" "}
+            — share it securely. They must change it after signing in.
+          </p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 cursor-pointer gap-1.5 bg-white/70"
+              onClick={() => void navigator.clipboard?.writeText(tempPassword.temporary_password)}
+            >
+              <Copy className="size-3.5" />
+              Copy
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 cursor-pointer"
+              onClick={() => setTempPassword(null)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {erpAdmin ? (
+        <AssignAccessCard
+          cardRef={assignRef}
+          users={assignable}
+          selectedUserId={assignUserId}
+          onSelectUser={setAssignUserId}
+          onAssigned={(updated, message) => {
+            mergeUser(updated);
+            setError(null);
+            setNotice(message);
+          }}
+          onError={(message) => {
+            setNotice(null);
+            setError(message);
+          }}
+        />
+      ) : null}
 
       <UsersTableCard
+        {...tableProps}
         title="ERP admins"
-        subtitle={
-          loading ? "Loading…" : `${erpAdmins.length} platform admin${erpAdmins.length === 1 ? "" : "s"}`
-        }
         icon={<Crown className="size-4" />}
-        toolbar={erpSearchInput}
-        loading={loading}
-        emptyLabel={
-          erpQuery.trim() ? "No ERP admins match your search." : "No ERP admins found."
-        }
         rows={erpAdmins}
+        emptyLabel="No ERP admins found."
         variant="erp"
-        canEditModules={canEditModules}
-        onModulesSaved={onModulesSaved}
-        expandWhen={Boolean(erpQuery.trim())}
       />
-
       <UsersTableCard
+        {...tableProps}
         title="Module admin users"
-        subtitle={
-          loading ? "Loading…" : `${adminUsers.length} with module admin rights`
-        }
         icon={<ShieldCheck className="size-4" />}
-        toolbar={adminSearchInput}
-        loading={loading}
-        emptyLabel={
-          adminQuery.trim()
-            ? "No module admin users match your search."
-            : "No module admins assigned yet."
-        }
-        rows={adminUsers}
+        rows={moduleAdmins}
+        emptyLabel="No module admins assigned yet."
         variant="admin"
-        canEditModules={canEditModules}
-        onModulesSaved={onModulesSaved}
-        expandWhen={Boolean(adminQuery.trim())}
+        defaultOpen
       />
-
       <UsersTableCard
+        {...tableProps}
         title="Module users"
-        subtitle={
-          loading
-            ? "Loading…"
-            : `${memberUsers.length} with member access (managed in module panels)`
-        }
         icon={<UserRound className="size-4" />}
-        toolbar={memberSearchInput}
-        loading={loading}
-        emptyLabel={
-          memberQuery.trim()
-            ? "No module users match your search."
-            : "No module members assigned yet."
-        }
-        rows={memberUsers}
+        rows={moduleUsers}
+        emptyLabel="No module users assigned yet."
         variant="member"
-        canEditModules={canEditModules}
-        onModulesSaved={onModulesSaved}
-        expandWhen={Boolean(memberQuery.trim())}
-      />
-
-      <UsersTableCard
-        title="Non-assigned users"
-        subtitle={
-          loading
-            ? "Loading…"
-            : `${unassignedUsers.length} Entra users without module assignment`
-        }
-        icon={<Users className="size-4" />}
-        toolbar={unassignedSearchInput}
-        loading={loading}
-        emptyLabel={
-          unassignedQuery.trim()
-            ? "No unassigned users match your search."
-            : "Every user has a module assignment."
-        }
-        rows={unassignedUsers}
-        variant="admin"
-        canEditModules={canEditModules}
-        onModulesSaved={onModulesSaved}
-        expandWhen={Boolean(unassignedQuery.trim())}
       />
     </div>
   );

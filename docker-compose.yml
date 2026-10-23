@@ -94,7 +94,6 @@ services:
       RUN_MIGRATIONS: "true"
       CORS_ORIGINS: ${CORS_ORIGINS}
       FRONTEND_URL: ${FRONTEND_URL:-https://172.16.200.26}
-      MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-https://172.16.200.26/api/v1/auth/microsoft/callback}
       SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
       REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
       SSL_CERT_DIR: /etc/ssl/certs

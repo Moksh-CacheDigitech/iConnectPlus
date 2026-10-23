@@ -31,7 +31,6 @@ class EmailAutomationStatus(BaseModel):
     enabled: bool
     smtp_configured: bool
     imap_configured: bool
-    graph_configured: bool = False
     mailbox: str | None = None
     webhook_path: str
     recent_ingests: int = 0
@@ -40,7 +39,7 @@ class EmailAutomationStatus(BaseModel):
 
 
 class MailboxMessageItem(BaseModel):
-    graph_id: str
+    mailbox_id: str
     message_id: str
     internet_message_id: str | None = None
     from_address: str

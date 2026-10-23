@@ -32,7 +32,7 @@ export function UserAvatar({
           className,
         )}
       >
-        {/* blob:/data: URLs from Microsoft photo — plain img avoids Next image optimizer */}
+        {/* blob:/data: URLs — plain img avoids Next image optimizer */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imageUrl}

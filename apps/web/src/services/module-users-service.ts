@@ -6,6 +6,7 @@ export type ModuleUserOption = {
   user_id: string;
   display_name: string;
   email: string;
+  employee_code?: string | null;
 };
 
 export type ModuleUserRecord = {

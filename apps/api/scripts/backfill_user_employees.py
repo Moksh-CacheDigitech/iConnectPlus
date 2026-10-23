@@ -1,4 +1,4 @@
-"""Backfill master_employee rows for active sec_user accounts (Entra / org users)."""
+"""Backfill master_employee rows for active sec_user accounts (org users)."""
 
 from __future__ import annotations
 

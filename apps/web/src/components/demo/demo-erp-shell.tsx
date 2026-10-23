@@ -308,7 +308,7 @@ export function DemoErpShell() {
           </section>
 
           <p className="mt-8 text-center text-xs text-[#94A3B8]">
-            Want the live iConnectPlus ERP? Sign in with Microsoft from the landing page.
+            Want the live iConnectPlus ERP? Sign in from the landing page.
           </p>
         </main>
       </div>

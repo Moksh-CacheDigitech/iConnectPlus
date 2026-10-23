@@ -161,7 +161,6 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS}
       CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-      MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-http://localhost:8000/api/v1/auth/microsoft/callback}
       # Local MinIO (built from source — public Hub/Quay images removed)
       OBJECT_STORAGE_BACKEND: ${OBJECT_STORAGE_BACKEND:-s3}
       ASSET_STORAGE_BACKEND: ${ASSET_STORAGE_BACKEND:-s3}

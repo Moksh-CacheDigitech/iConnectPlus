@@ -15,7 +15,7 @@ Multi-Industry, Multi-Company, Enterprise-Grade ERP Platform.
 | Objects | MinIO (local / on-prem) · AWS S3 (cloud) |
 | Antivirus | ClamAV (upload scanning) |
 | Cache / Queue | Redis, RabbitMQ |
-| Auth | Microsoft Entra ID SSO · JWT in **HttpOnly cookies** |
+| Auth | User id + password (HRMS-synced logins) · JWT in **HttpOnly cookies** |
 | Deploy | Docker Compose · Coolify on EC2 (`docker-compose.coolify.yml`) |
 
 **Pattern:** Clean Architecture · DDD · Modular Monolith  
@@ -101,7 +101,9 @@ docker compose -f docker-compose.local.yml up -d --build
 
 ### 3. Sign-in
 
-Microsoft Entra SSO from http://localhost:3000/login.  
+Sign in at http://localhost:3000/login with your email ID or employee code and password.  
+Create the first ERP admin with `python -m scripts.bootstrap_erp_admin --email … --password …` (from `apps/api`) — admin status is stored in the database (`user_type`), not env.  
+ERP admins sync logins from HRMS (Organization → Users) and grant module Admin / User access.  
 Tokens are **HttpOnly cookies** — not `localStorage`.
 
 ## Compose files

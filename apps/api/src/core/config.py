@@ -249,23 +249,16 @@ class Settings(BaseSettings):
     # Push notifications (legacy FCM). Leave empty to keep stub deliveries.
     fcm_server_key: str | None = Field(default=None, alias="FCM_SERVER_KEY")
 
-    # Microsoft Graph email (Notification Engine - email channel)
-    azure_tenant_id: str = Field(default="", alias="AZURE_TENANT_ID")
-    azure_client_id: str = Field(default="", alias="AZURE_CLIENT_ID")
-    azure_client_secret: str = Field(default="", alias="AZURE_CLIENT_SECRET")
-    azure_from_email: str = Field(default="", alias="AZURE_FROM_EMAIL")
+    # Notification Engine email channel delivers through SMTP_* below.
     # sync = deliver in-request (local/dev); async = Celery only
     email_delivery_mode: str = Field(default="sync", alias="EMAIL_DELIVERY_MODE")
-    # Project stage-save emails - keep false until Graph Mail.Send is granted
+    # Project stage-save emails - keep false until SMTP is configured
     project_stage_email_notifications_enabled: bool = Field(
         default=False,
         alias="PROJECT_STAGE_EMAIL_NOTIFICATIONS_ENABLED",
     )
-    # Mailbox whose inbox is polled for email→ticket (defaults to AZURE_FROM_EMAIL)
-    graph_mailbox_email: str = Field(default="", alias="GRAPH_MAILBOX_EMAIL")
-    graph_mail_poll_enabled: bool = Field(default=True, alias="GRAPH_MAIL_POLL_ENABLED")
 
-    # Email → Service Request Ticket automation
+    # Email → Service Request Ticket automation (inbox read via IMAP_*)
     email_ticket_enabled: bool = Field(default=False, alias="EMAIL_TICKET_ENABLED")
     email_inbound_webhook_secret: str = Field(default="", alias="EMAIL_INBOUND_WEBHOOK_SECRET")
     email_ticket_default_branch_id: str | None = Field(
@@ -317,30 +310,13 @@ class Settings(BaseSettings):
     openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
     openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
 
-    microsoft_tenant_id: str = Field(default="", alias="MICROSOFT_TENANT_ID")
-    microsoft_client_id: str = Field(default="", alias="MICROSOFT_CLIENT_ID")
-    microsoft_client_secret: str = Field(default="", alias="MICROSOFT_CLIENT_SECRET")
-    microsoft_redirect_uri: str = Field(
-        default="http://localhost:8000/api/v1/auth/microsoft/callback",
-        alias="MICROSOFT_REDIRECT_URI",
+    org_email_domain: str = Field(default="cachedigitech.com", alias="ORG_EMAIL_DOMAIN")
+    # HRMS employee codes that count as real onboarded employees (e.g. CT5345, CDPL2014).
+    hrms_employee_code_pattern: str = Field(
+        default=r"^[A-Za-z]{2,6}[0-9]{3,}$",
+        alias="HRMS_EMPLOYEE_CODE_PATTERN",
     )
-
-    @property
-    def microsoft_login_enabled(self) -> bool:
-        return bool(
-            self.microsoft_client_id.strip()
-            and self.microsoft_client_secret.strip()
-            and self.microsoft_redirect_uri.strip()
-        )
-
-    microsoft_user_email_domain: str = Field(
-        default="cachedigitech.com",
-        alias="MICROSOFT_USER_EMAIL_DOMAIN",
-    )
-    microsoft_platform_admin_emails: str = Field(
-        default="techbank@cachedigitech.com,connectplus@cachedigitech.com",
-        alias="MICROSOFT_PLATFORM_ADMIN_EMAILS",
-    )
+    password_reset_token_minutes: int = Field(default=30, alias="PASSWORD_RESET_TOKEN_MINUTES")
 
     # Landing access gate (iconnectplus.com Sign in → code → demo | iConnectPlus ERP)
     access_code_demo: str = Field(default="ICP-DEMO-2026", alias="ACCESS_CODE_DEMO")
@@ -349,13 +325,6 @@ class Settings(BaseSettings):
         alias="ACCESS_CODE_CONNECTPLUS",
     )
     access_gate_token_hours: int = Field(default=12, alias="ACCESS_GATE_TOKEN_HOURS")
-
-    def microsoft_platform_admin_email_set(self) -> set[str]:
-        return {
-            email.strip().lower()
-            for email in self.microsoft_platform_admin_emails.split(",")
-            if email.strip()
-        }
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -418,38 +387,6 @@ class Settings(BaseSettings):
             and self.aws_secret_access_key.strip()
         )
 
-    def resolved_graph_tenant_id(self) -> str:
-        return (self.azure_tenant_id or self.microsoft_tenant_id or "").strip()
-
-    def resolved_graph_client_id(self) -> str:
-        return (self.azure_client_id or self.microsoft_client_id or "").strip()
-
-    def resolved_graph_client_secret(self) -> str:
-        return (self.azure_client_secret or self.microsoft_client_secret or "").strip()
-
-    def resolved_graph_mailbox(self) -> str:
-        return (self.graph_mailbox_email or self.azure_from_email or self.imap_user or "").strip()
-
-    @property
-    def graph_email_configured(self) -> bool:
-        return bool(
-            self.resolved_graph_tenant_id()
-            and self.resolved_graph_client_id()
-            and self.resolved_graph_client_secret()
-            and (self.azure_from_email.strip() or self.resolved_graph_mailbox())
-        )
-
-    @property
-    def graph_mail_configured(self) -> bool:
-        return bool(
-            self.email_ticket_enabled
-            and self.graph_mail_poll_enabled
-            and self.resolved_graph_tenant_id()
-            and self.resolved_graph_client_id()
-            and self.resolved_graph_client_secret()
-            and self.resolved_graph_mailbox()
-        )
-
     @property
     def smtp_configured(self) -> bool:
         return bool(self.smtp_host and self.smtp_from_address)
@@ -458,42 +395,28 @@ class Settings(BaseSettings):
     def imap_configured(self) -> bool:
         return bool(self.imap_enabled and self.imap_host and self.imap_user and self.imap_password)
 
-    def graph_credential_diagnostics(self) -> dict:
-        """Safe diagnostics for UI (never returns secret values)."""
+    def smtp_diagnostics(self) -> dict:
+        """Safe SMTP diagnostics for UI (never returns secret values)."""
         checks = {
-            "tenant_id": bool(self.resolved_graph_tenant_id()),
-            "client_id": bool(self.resolved_graph_client_id()),
-            "client_secret": bool(self.resolved_graph_client_secret()),
-            "mailbox": bool(self.resolved_graph_mailbox()),
-            "AZURE_FROM_EMAIL": bool(self.azure_from_email.strip()),
+            "SMTP_HOST": bool(self.smtp_host.strip()),
+            "SMTP_FROM_ADDRESS": bool(self.smtp_from_address.strip()),
         }
         missing = [name for name, ok in checks.items() if not ok]
-        present = [name for name, ok in checks.items() if ok]
-        env_paths = [p for p in _ENV_FILES if Path(p).is_file()]
         return {
-            "configured": len(missing) == 0,
+            "configured": not missing,
             "missing": missing,
-            "present": present,
-            "from_email": self.azure_from_email.strip() or None,
-            "mailbox": self.resolved_graph_mailbox() or None,
-            "tenant_id_preview": (
-                f"{self.resolved_graph_tenant_id()[:8]}…"
-                if len(self.resolved_graph_tenant_id()) > 8
-                else (self.resolved_graph_tenant_id() or None)
-            ),
-            "client_id_preview": (
-                f"{self.resolved_graph_client_id()[:8]}…"
-                if len(self.resolved_graph_client_id()) > 8
-                else (self.resolved_graph_client_id() or None)
-            ),
-            "env_files_found": env_paths,
+            "present": [name for name, ok in checks.items() if ok],
+            "host": self.smtp_host.strip() or None,
+            "port": self.smtp_port,
+            "use_tls": self.smtp_use_tls,
+            "auth": bool(self.smtp_user.strip()),
+            "from_email": self.smtp_from_address.strip() or None,
+            "env_files_found": [p for p in _ENV_FILES if Path(p).is_file()],
             "hint": (
                 None
                 if not missing
-                else (
-                    "Set MICROSOFT_* or AZURE_* plus GRAPH_MAILBOX_EMAIL / AZURE_FROM_EMAIL "
-                    "in apps/api/.env, then restart the API. Required: Mail.Send + Mail.Read."
-                )
+                else "Set SMTP_HOST and SMTP_FROM_ADDRESS (plus SMTP_USER / SMTP_PASSWORD if "
+                "your relay needs auth), then restart the API."
             ),
         }
 

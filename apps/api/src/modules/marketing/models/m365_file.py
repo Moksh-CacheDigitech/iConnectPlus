@@ -1,4 +1,4 @@
-"""OneDrive / SharePoint file metadata ORM."""
+"""Campaign workspace file metadata ORM."""
 
 from uuid import UUID, uuid4
 

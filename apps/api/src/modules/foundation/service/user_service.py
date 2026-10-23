@@ -1,12 +1,15 @@
 """User service."""
 
+import secrets
+import string
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from core.config import settings
-from core.exceptions import AppException, ConflictException, ForbiddenException, NotFoundException
+from core.exceptions import AppException, ConflictException, NotFoundException
+from modules.foundation.domain.exceptions import ErpAdminRequiredException
 from modules.foundation.domain.erp_modules import (
+    ADMIN_USER_TYPES,
     ERP_MODULE_KEYS,
     ERP_MODULE_KEY_SET,
     effective_admin_module_keys,
@@ -16,6 +19,7 @@ from modules.foundation.domain.erp_modules import (
 )
 from modules.foundation.domain.entities import UserEntity
 from modules.foundation.repository.session_repository import SessionRepository
+from modules.foundation.service.hrms_user_directory import HrmsUserDirectory
 from modules.foundation.repository.user_module_repository import UserModuleRepository
 from modules.foundation.repository.user_repository import UserRepository
 from modules.foundation.schemas import UserResponse
@@ -33,12 +37,16 @@ class UserService:
         self._rbac = RBACService(db)
 
     @staticmethod
-    def to_response(user: UserEntity) -> UserResponse:
+    def to_response(
+        user: UserEntity,
+        *,
+        employee_code: str | None = None,
+        hrms_valid: bool = False,
+    ) -> UserResponse:
         resolved_type = resolve_session_user_type(
             user.user_type,
             user.email,
             user.role_codes,
-            platform_admin_emails=settings.microsoft_platform_admin_email_set(),
         )
         return UserResponse(
             id=user.id,
@@ -52,7 +60,63 @@ class UserService:
             role_ids=user.role_ids,
             assigned_module_keys=list(user.assigned_module_keys),
             admin_module_keys=list(user.admin_module_keys),
+            must_change_password=user.must_change_password,
+            employee_code=employee_code,
+            hrms_valid=hrms_valid,
         )
+
+    def list_user_responses(self, tenant_id: UUID) -> list[UserResponse]:
+        links = HrmsUserDirectory(self._modules.db).links_by_user(tenant_id)
+        out: list[UserResponse] = []
+        for user in self.list_users(tenant_id):
+            link = links.get(user.id)
+            out.append(
+                self.to_response(
+                    user,
+                    employee_code=link.employee_code if link else None,
+                    hrms_valid=bool(link and link.valid),
+                )
+            )
+        return out
+
+    def require_erp_admin(self, tenant_id: UUID, actor_id: UUID | None) -> UserEntity:
+        actor = self._repo.get_by_id(tenant_id, actor_id) if actor_id is not None else None
+        if actor is None or not self._is_erp_platform_admin(actor):
+            raise ErpAdminRequiredException()
+        return actor
+
+    @staticmethod
+    def _temporary_password(length: int = 12) -> str:
+        alphabet = string.ascii_letters + string.digits
+        core = "".join(secrets.choice(alphabet) for _ in range(length - 4))
+        # Guarantee every policy class (upper, lower, digit, symbol).
+        return f"{secrets.choice(string.ascii_uppercase)}{secrets.choice(string.ascii_lowercase)}{secrets.choice(string.digits)}@{core}"
+
+    def issue_temporary_password(
+        self, tenant_id: UUID, user_id: UUID, *, actor_id: UUID | None
+    ) -> tuple[UserEntity, str]:
+        """ERP admin issues a one-time password; the user must change it after sign-in."""
+        self.require_erp_admin(tenant_id, actor_id)
+        from modules.foundation.models.security import SecUser
+
+        row = self._repo.db.get(SecUser, user_id)
+        if row is None or row.is_deleted or row.tenant_id != tenant_id:
+            raise NotFoundException("User not found")
+        password = self._temporary_password()
+        row.password_hash = PasswordHasher.hash_password(password)
+        row.must_change_password = True
+        row.failed_login_count = 0
+        row.locked_until = None
+        if row.status == "locked":
+            row.status = "active"
+        self._repo.db.flush()
+        self._sessions.revoke_all_for_user(tenant_id, user_id, revoked_by=actor_id)
+        self._audit.log_security_event(
+            tenant_id=tenant_id,
+            event_type="auth.temporary_password_issued",
+            user_id=user_id,
+        )
+        return self.get_user(tenant_id, user_id), password
 
     def effective_modules_for_user(self, user: UserEntity) -> list[str]:
         return effective_module_keys(user.user_type, user.assigned_module_keys, user.role_codes)
@@ -67,9 +131,9 @@ class UserService:
         effective = self.effective_modules_for_user(user)
         return user, assigned, admin_keys, effective
 
-    def _is_erp_platform_admin(self, user: UserEntity) -> bool:
-        email = (user.email or "").strip().lower()
-        return bool(email and email in settings.microsoft_platform_admin_email_set())
+    @staticmethod
+    def _is_erp_platform_admin(user: UserEntity) -> bool:
+        return user.user_type in ADMIN_USER_TYPES
 
     def set_user_modules(
         self,
@@ -79,26 +143,24 @@ class UserService:
         module_keys: list[str],
         updated_by: UUID | None,
     ) -> UserEntity:
+        """Replace a user's module-admin grants. Module admins are managed by ERP admins only."""
+        self.require_erp_admin(tenant_id, updated_by)
         user = self.get_user(tenant_id, user_id)
         if self._is_erp_platform_admin(user):
             raise AppException("ERP admin module access cannot be changed")
-
-        actor: UserEntity | None = None
-        if updated_by is not None:
-            actor = self._repo.get_by_id(tenant_id, updated_by)
 
         previous_admin_keys = list(user.admin_module_keys)
         normalized = sorted({k.strip() for k in module_keys if k and k.strip()})
         invalid = [k for k in normalized if k not in ERP_MODULE_KEY_SET]
         if invalid:
             raise AppException(f"Unknown module keys: {', '.join(invalid)}")
+        if normalized and not set(normalized).issubset(previous_admin_keys):
+            if not HrmsUserDirectory(self._modules.db).is_valid_user(tenant_id, user_id):
+                raise AppException(
+                    "Only HRMS onboarded employees with a valid employee id can get module access"
+                )
 
         granting_all = has_all_modules_admin(normalized)
-        previously_all = has_all_modules_admin(previous_admin_keys)
-        if (granting_all or previously_all) and not (
-            actor is not None and self._is_erp_platform_admin(actor)
-        ):
-            raise ForbiddenException("Only ERP admins can grant or revoke All modules access")
 
         # Explicit All-modules grant always stores the full key set.
         if granting_all:

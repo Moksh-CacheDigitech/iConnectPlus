@@ -138,112 +138,18 @@ def retry_finance_posting() -> dict:
 
 @celery_app.task(name="service.poll_support_mailbox")
 def poll_support_mailbox() -> dict:
-    """Poll support mailbox (Microsoft Graph preferred, IMAP fallback) and create tickets."""
+    """Poll the IMAP support mailbox and create tickets."""
     from core.config import settings
 
     if not settings.email_ticket_enabled:
         return {"status": "skipped", "reason": "email automation disabled"}
 
-    if settings.graph_mail_configured:
-        return _poll_support_mailbox_graph()
     if settings.imap_configured:
         return _poll_support_mailbox_imap()
     return {
         "status": "skipped",
-        "reason": "Configure Microsoft Graph (MICROSOFT_* + GRAPH_MAILBOX_EMAIL) or IMAP credentials",
+        "reason": "Configure IMAP_ENABLED, IMAP_HOST, IMAP_USER and IMAP_PASSWORD",
     }
-
-
-def _poll_support_mailbox_graph() -> dict:
-    from core.config import settings
-    from database.session import SessionLocal
-    from modules.foundation.adapters.graph_email_adapter import GraphEmailAdapter
-    from modules.service.email_inbound_schemas import InboundEmailPayload
-    from modules.service.service.email_to_ticket_service import EmailToTicketService
-    from modules.service.service.mailbox_ticket_classifier import is_noise_sender, skip_ticket_reason
-
-    db = SessionLocal()
-    processed = 0
-    errors = 0
-    scanned = 0
-    skipped = 0
-    try:
-        adapter = GraphEmailAdapter()
-        messages = adapter.list_unread_messages(top=25)
-        scanned = len(messages)
-        service = EmailToTicketService(db)
-        for msg in messages:
-            try:
-                from_obj = ((msg.get("from") or {}).get("emailAddress") or {})
-                from_addr = (from_obj.get("address") or "").strip()
-                from_name = (from_obj.get("name") or "").strip() or None
-                if not from_addr:
-                    continue
-                subject = msg.get("subject") or "(No subject)"
-                skip_reason = skip_ticket_reason(subject=subject, from_address=from_addr)
-                graph_id = msg.get("id")
-                if skip_reason:
-                    skipped += 1
-                    if graph_id:
-                        try:
-                            adapter.mark_message_read(str(graph_id))
-                        except Exception:
-                            pass
-                    continue
-                body = msg.get("body") or {}
-                content = body.get("content") or msg.get("bodyPreview") or ""
-                content_type = (body.get("contentType") or "text").lower()
-                body_text = content if content_type != "html" else None
-                body_html = content if content_type == "html" else None
-                to_recipients = msg.get("toRecipients") or []
-                to_addr = None
-                if to_recipients:
-                    to_addr = ((to_recipients[0].get("emailAddress") or {}).get("address"))
-                internet_id = msg.get("internetMessageId")
-                received = msg.get("receivedDateTime") or ""
-                payload_in = InboundEmailPayload(
-                    message_id=EmailToTicketService.message_id_from_headers(
-                        internet_id, from_addr, subject, received
-                    ),
-                    from_address=from_addr,
-                    from_name=from_name,
-                    to_address=to_addr or settings.resolved_graph_mailbox(),
-                    subject=subject,
-                    body_text=body_text,
-                    body_html=body_html,
-                )
-                result = service.process(payload_in, source="graph")
-                if result.status == "skipped":
-                    if graph_id and is_noise_sender(from_addr):
-                        try:
-                            adapter.mark_message_read(str(graph_id))
-                        except Exception:
-                            pass
-                    continue
-                db.commit()
-                graph_id = msg.get("id")
-                if graph_id:
-                    try:
-                        adapter.mark_message_read(str(graph_id))
-                    except Exception:
-                        pass
-                processed += 1
-            except Exception:
-                db.rollback()
-                errors += 1
-        return {
-            "status": "ok",
-            "source": "graph",
-            "mailbox": settings.resolved_graph_mailbox(),
-            "processed": processed,
-            "skipped": skipped,
-            "errors": errors,
-            "scanned": scanned,
-        }
-    except Exception as exc:
-        return {"status": "error", "source": "graph", "reason": str(exc)[:800]}
-    finally:
-        db.close()
 
 
 def _poll_support_mailbox_imap() -> dict:

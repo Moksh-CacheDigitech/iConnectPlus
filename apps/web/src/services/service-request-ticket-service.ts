@@ -752,7 +752,6 @@ export type EmailAutomationStatus = {
   enabled: boolean;
   smtp_configured: boolean;
   imap_configured: boolean;
-  graph_configured?: boolean;
   mailbox?: string | null;
   webhook_path: string;
   recent_ingests: number;
@@ -773,7 +772,8 @@ export async function pollSupportMailbox(): Promise<Record<string, unknown>> {
 }
 
 export type MailboxMessageItem = {
-  graph_id: string;
+  /** IMAP UID of the message in the support mailbox. */
+  mailbox_id: string;
   message_id: string;
   internet_message_id?: string | null;
   from_address: string;
@@ -811,9 +811,9 @@ export async function listMailboxMessages(top = 50): Promise<MailboxMessagesResu
   return res.data as MailboxMessagesResult;
 }
 
-export async function getMailboxMessage(graphId: string): Promise<MailboxMessageDetail> {
+export async function getMailboxMessage(mailboxId: string): Promise<MailboxMessageDetail> {
   const res = await apiClient<MailboxMessageDetail>(
-    `/service/email-inbound/mailbox-messages/${encodeURIComponent(graphId)}`,
+    `/service/email-inbound/mailbox-messages/${encodeURIComponent(mailboxId)}`,
   );
   return res.data as MailboxMessageDetail;
 }

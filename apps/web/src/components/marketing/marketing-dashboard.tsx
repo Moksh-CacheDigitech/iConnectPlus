@@ -57,7 +57,7 @@ export function MarketingDashboard() {
     <div className="space-y-4">
       <PageHeader
         title="Marketing operations"
-        description="Campaigns, content, Microsoft 365 collaboration, workload, and AI studio."
+        description="Campaigns, content, campaign workspaces, workload, and AI studio."
         actions={
           <div className="flex items-center gap-2">
             <Button

@@ -1,41 +1,37 @@
 """Authentication router."""
 
 from typing import Annotated
-from urllib.parse import quote, urlparse
 
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from core.config import settings
-from core.redis import SessionStore
 from database.session import get_db
 from modules.foundation.auth_cookies import clear_auth_cookies, set_auth_cookies
 from modules.foundation.dependencies import get_client_ip, get_current_user, get_tenant_context
-from security.public_routes import optional_authentication
 from modules.foundation.domain.erp_modules import resolve_session_user_type
-from modules.foundation.domain.exceptions import MicrosoftLoginNotConfiguredException
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecUser
 from modules.foundation.schemas import (
+    ChangePasswordRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     MfaVerifyRequest,
-    MicrosoftExchangeRequest,
-    MicrosoftLoginConfigResponse,
     RefreshRequest,
+    ResetPasswordRequest,
     TokenResponse,
-    UserResponse,
 )
 from modules.foundation.service.auth_service import AuthService
-from modules.foundation.service.microsoft_oauth_service import (
-    MicrosoftOAuthService,
-    resolve_frontend_base,
-)
 from modules.foundation.service.rbac_service import RBACService
 from modules.foundation.service.user_service import UserService
 from shared.schemas import APIResponse
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+FORGOT_PASSWORD_MESSAGE = (
+    "If an account matches that user id, a reset link has been sent to its email. "
+    "If you do not receive it, contact your ERP admin for a temporary password."
+)
 
 
 def _apply_auth_cookies(response: Response, result: dict) -> None:
@@ -46,112 +42,6 @@ def _apply_auth_cookies(response: Response, result: dict) -> None:
     )
 
 
-@router.get("/microsoft/config", response_model=APIResponse[MicrosoftLoginConfigResponse])
-def microsoft_config(
-    _: Annotated[None, Depends(optional_authentication)],
-) -> APIResponse[MicrosoftLoginConfigResponse]:
-    """Public: exposes only whether Microsoft SSO is enabled (no secrets)."""
-    return APIResponse(
-        message="Microsoft sign-in configuration",
-        data=MicrosoftLoginConfigResponse(enabled=MicrosoftOAuthService.is_enabled()),
-    )
-
-
-@router.get("/microsoft/login")
-def microsoft_login(
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    _: Annotated[None, Depends(optional_authentication)],
-    return_to: Annotated[str, Query(max_length=200)] = "/organization",
-    frontend_origin: Annotated[str | None, Query(max_length=300)] = None,
-    client: Annotated[str | None, Query(max_length=32)] = None,
-) -> RedirectResponse:
-    if not MicrosoftOAuthService.is_enabled():
-        raise MicrosoftLoginNotConfiguredException()
-
-    oauth = MicrosoftOAuthService()
-    state = oauth.create_state()
-    safe_return = (
-        return_to
-        if return_to.startswith("/") and not return_to.startswith("//")
-        else "/organization"
-    )
-    # Remember which UI started SSO (localhost vs LAN VM) for post-login redirect.
-    # Employee PWA (client=ess) lands back on the employee app, not admin web.
-    safe_frontend = (
-        settings.employee_app_url.rstrip("/")
-        if (client or "").strip().lower() in {"ess", "employee", "employee-app"}
-        else resolve_frontend_base(frontend_origin)
-    )
-    SessionStore().set_oauth_state(
-        state,
-        {
-            "return_to": safe_return,
-            "frontend_origin": safe_frontend,
-            "ip": get_client_ip(request),
-        },
-    )
-    return RedirectResponse(oauth.build_authorization_url(state=state), status_code=302)
-
-
-@router.get("/microsoft/callback")
-def microsoft_callback(
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    _: Annotated[None, Depends(optional_authentication)],
-    code: Annotated[str, Query(min_length=8)],
-    state: Annotated[str, Query(min_length=8)],
-) -> RedirectResponse:
-    service = AuthService(db)
-    try:
-        exchange_code, _return_to, frontend_base = service.complete_microsoft_oauth(
-            code=code,
-            state=state,
-            ip_address=get_client_ip(request),
-            user_agent=request.headers.get("User-Agent"),
-        )
-        db.commit()
-        redirect_url = (
-            f"{frontend_base.rstrip('/')}/auth/microsoft/callback?code={quote(exchange_code)}"
-        )
-        return RedirectResponse(redirect_url, status_code=302)
-    except Exception as exc:
-        db.rollback()
-        message = getattr(exc, "message", str(exc))
-        # Best-effort: Prefer Referer host when allowed; else FRONTEND_URL.
-        referer = request.headers.get("Referer")
-        origin_guess = None
-        if referer:
-            parsed = urlparse(referer)
-            if parsed.scheme and parsed.netloc:
-                origin_guess = f"{parsed.scheme}://{parsed.netloc}"
-        frontend_base = resolve_frontend_base(origin_guess)
-        redirect_url = f"{frontend_base.rstrip('/')}/login?error={quote(message)}"
-        return RedirectResponse(redirect_url, status_code=302)
-
-
-@router.post("/microsoft/exchange", response_model=APIResponse[TokenResponse])
-def microsoft_exchange(
-    body: MicrosoftExchangeRequest,
-    db: Annotated[Session, Depends(get_db)],
-    response: Response,
-) -> APIResponse[TokenResponse]:
-    service = AuthService(db)
-    payload = service.redeem_microsoft_exchange(body.code)
-    token_payload = {
-        "access_token": payload.get("access_token"),
-        "refresh_token": payload.get("refresh_token"),
-        "token_type": payload.get("token_type", "bearer"),
-        "session_id": payload.get("session_id"),
-        "redirect_to": payload.get("return_to"),
-    }
-    _apply_auth_cookies(response, token_payload)
-    return APIResponse(
-        message="Microsoft sign-in successful",
-        data=TokenResponse(**token_payload),
-    )
-
-
 @router.post("/login", response_model=APIResponse[TokenResponse])
 def login(
     body: LoginRequest,
@@ -159,6 +49,7 @@ def login(
     db: Annotated[Session, Depends(get_db)],
     response: Response,
 ) -> APIResponse[TokenResponse]:
+    """Sign in with a work email or HRMS employee code plus password."""
     service = AuthService(db)
     result = service.login(
         email=body.email,
@@ -189,6 +80,46 @@ def verify_mfa(
     db.commit()
     _apply_auth_cookies(response, result)
     return APIResponse(message="MFA verified", data=TokenResponse(**result))
+
+
+@router.post("/password/forgot", response_model=APIResponse[None])
+def forgot_password(
+    body: ForgotPasswordRequest,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[None]:
+    """Always returns the same message so user ids cannot be enumerated."""
+    AuthService(db).request_password_reset(
+        identifier=body.user_id, ip_address=get_client_ip(request)
+    )
+    db.commit()
+    return APIResponse(message=FORGOT_PASSWORD_MESSAGE, data=None)
+
+
+@router.post("/password/reset", response_model=APIResponse[None])
+def reset_password(
+    body: ResetPasswordRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[None]:
+    AuthService(db).reset_password(token=body.token, new_password=body.new_password)
+    db.commit()
+    return APIResponse(message="Password updated. Sign in with your new password.", data=None)
+
+
+@router.post("/password/change", response_model=APIResponse[None])
+def change_password(
+    body: ChangePasswordRequest,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[None]:
+    assert ctx.user_id is not None
+    AuthService(db).change_password(
+        user_id=ctx.user_id,
+        current_password=body.current_password,
+        new_password=body.new_password,
+    )
+    db.commit()
+    return APIResponse(message="Password changed", data=None)
 
 
 @router.post("/refresh", response_model=APIResponse[TokenResponse])
@@ -230,26 +161,6 @@ def logout(
     return APIResponse(message="Logged out", data=None)
 
 
-@router.get("/me/avatar")
-def me_avatar(
-    user: Annotated[SecUser, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)],
-) -> Response:
-    """Microsoft / Entra profile photo for the signed-in user (cached)."""
-    service = AuthService(db)
-    photo = service.resolve_user_avatar(user_id=user.id, email=user.email)
-    if photo is None:
-        return Response(status_code=204)
-    content, content_type = photo
-    return Response(
-        content=content,
-        media_type=content_type,
-        headers={
-            "Cache-Control": "private, max-age=3600",
-        },
-    )
-
-
 @router.get("/me", response_model=APIResponse[dict])
 def me(
     user: Annotated[SecUser, Depends(get_current_user)],
@@ -264,7 +175,6 @@ def me(
         user_entity.user_type,
         user_entity.email,
         user_entity.role_codes,
-        platform_admin_emails=settings.microsoft_platform_admin_email_set(),
     )
     module_keys = service.effective_modules_for_user(user_entity)
     admin_module_keys = service.effective_admin_modules_for_user(user_entity)
@@ -277,7 +187,6 @@ def me(
         "module_keys": module_keys,
         "admin_module_keys": admin_module_keys,
         "module_roles": module_roles,
-        "avatar_url": "/auth/me/avatar",
     }
     from modules.project.service.project_module_admin import ProjectModuleAdminService
     from modules.hr.service.hr_module_admin import HrModuleAdminService

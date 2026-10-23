@@ -16,6 +16,12 @@ import {
   type M365Workspace,
 } from "@/services/marketing-service";
 
+// storage_tier values are legacy DB codes; show them as workspace stages.
+const STORAGE_TIER_LABELS: Record<string, string> = {
+  onedrive: "Draft",
+  sharepoint: "Final asset",
+};
+
 export function MarketingM365Board() {
   const [workspaces, setWorkspaces] = useState<M365Workspace[]>([]);
   const [files, setFiles] = useState<M365File[]>([]);
@@ -27,7 +33,7 @@ export function MarketingM365Board() {
       setWorkspaces(await listM365Workspaces());
       setFiles(await listM365Files());
     } catch (err) {
-      setError(formatApiError(err, "Failed to load Microsoft 365 records"));
+      setError(formatApiError(err, "Failed to load campaign workspace records"));
     }
   }, []);
 
@@ -50,8 +56,8 @@ export function MarketingM365Board() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Microsoft 365 collaboration"
-        description="Campaign Teams workspaces, SharePoint libraries, and OneDrive drafts. Graph provisions when Entra credentials are configured."
+        title="Campaign workspace"
+        description="Campaign folders, working drafts, and final assets tracked inside the ERP."
         actions={
           <Button
             type="button"
@@ -73,7 +79,7 @@ export function MarketingM365Board() {
       <section className="rounded-md border border-border/70 bg-card p-4">
         <h2 className="mb-3 text-sm font-semibold">Campaign workspaces</h2>
         {workspaces.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Create a campaign to auto-provision a Teams workspace.</p>
+          <p className="text-sm text-muted-foreground">Create a campaign to set up its workspace folders.</p>
         ) : (
           <ul className="space-y-2">
             {workspaces.map((ws) => (
@@ -93,7 +99,7 @@ export function MarketingM365Board() {
         )}
       </section>
       <section className="rounded-md border border-border/70 bg-card p-4">
-        <h2 className="mb-3 text-sm font-semibold">OneDrive working files</h2>
+        <h2 className="mb-3 text-sm font-semibold">Working files</h2>
         <div className="mb-3 flex flex-col gap-2 sm:flex-row">
           <Input
             value={name}
@@ -112,8 +118,7 @@ export function MarketingM365Board() {
               <span>
                 {file.file_name}{" "}
                 <span className="text-muted-foreground">
-                  {file.storage_tier}
-                  {file.folder_path}
+                  {STORAGE_TIER_LABELS[file.storage_tier] ?? file.storage_tier} · {file.folder_path}
                 </span>
               </span>
               <span className="font-mono text-muted-foreground">{file.version_label}</span>

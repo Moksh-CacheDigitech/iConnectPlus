@@ -126,22 +126,14 @@ def has_all_modules_admin(admin_assigned: list[str] | None) -> bool:
 
 def resolve_session_user_type(
     stored_user_type: str,
-    email: str,
+    email: str = "",
     role_codes: list[str] | None = None,
-    *,
-    platform_admin_emails: set[str] | None = None,
 ) -> str:
-    """Only allowlisted platform emails are ERP admins (super_admin).
+    """ERP admin status comes from ``sec_user.user_type`` in the database.
 
-    SUPER_ADMIN / TENANT_ADMIN roles and stored admin user_types do not elevate
-    non-allowlisted users - those accounts use per-module (or All modules) grants.
+    Promote or demote via Organization → Users / ``bootstrap_erp_admin`` — not env.
     """
-    _ = role_codes
-    email_l = (email or "").strip().lower()
-    if platform_admin_emails and email_l in platform_admin_emails:
-        return "super_admin"
-    if stored_user_type in ADMIN_USER_TYPES:
-        return "employee"
+    _ = email, role_codes
     return stored_user_type
 
 

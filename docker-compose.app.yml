@@ -34,7 +34,6 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS}
       CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://172.16.200.30:3000}
-      MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI}
       SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
       REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
       SSL_CERT_DIR: /etc/ssl/certs

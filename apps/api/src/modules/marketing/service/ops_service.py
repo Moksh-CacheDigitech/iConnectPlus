@@ -1,4 +1,4 @@
-"""Marketing operations, tasks, M365, approvals, and workload services."""
+"""Marketing operations, tasks, campaign workspace, approvals, and workload services."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from modules.foundation.domain.value_objects import TenantContext
 from modules.platform.compat.audit_facade import PlatformAuditFacade
-from modules.marketing.adapters.graph_adapter import CAMPAIGN_FOLDERS, MicrosoftGraphAdapter
 from modules.marketing.domain.exceptions import NotFoundException, ValidationException
 from modules.marketing.models import (
     MktApproval,
@@ -32,6 +31,16 @@ from shared.text_safety import assert_safe_plain_text
 from shared.upload_safety import UnsafeUploadError, validate_upload
 
 OPEN_TASK_STATUSES = {"draft", "assigned", "in_progress", "in_review", "blocked"}
+
+CAMPAIGN_FOLDERS = [
+    "Content",
+    "Designs",
+    "Videos",
+    "Presentations",
+    "Approvals",
+    "Reports",
+    "Final Assets",
+]
 
 
 class OpsEventService:
@@ -503,7 +512,6 @@ class M365Service:
     def __init__(self, db: Session) -> None:
         self.db = db
         self._repo = MktScopedRepository(db)
-        self._graph = MicrosoftGraphAdapter()
         self._ops = OpsEventService(db)
 
     def list_workspaces(self, ctx: TenantContext, company_id: UUID | None = None):
@@ -527,20 +535,15 @@ class M365Service:
         )
         if existing is not None:
             return existing
-        result = self._graph.provision_campaign_workspace(campaign.campaign_name)
         row = self._repo.create_row(
             MktM365Workspace,
             ctx,
             company_id=campaign.company_id,
             branch_id=campaign.branch_id,
             campaign_id=campaign.id,
-            display_name=result["display_name"],
-            teams_group_id=result.get("teams_group_id"),
-            teams_web_url=result.get("teams_web_url"),
-            folder_structure=result.get("folder_structure"),
-            graph_payload=result.get("graph_payload"),
-            last_error=result.get("last_error"),
-            provision_status=result["provision_status"],
+            display_name=f"Marketing - {campaign.campaign_name}",
+            folder_structure={"folders": CAMPAIGN_FOLDERS},
+            provision_status="provisioned",
         )
         self._ops.record(
             ctx,
@@ -575,7 +578,7 @@ class M365Service:
         if row is None:
             raise NotFoundException("File not found")
         if row.status != "approved":
-            raise ValidationException("Only approved files promote to SharePoint")
+            raise ValidationException("Only approved files can be promoted to Final Assets")
         old = {"storage_tier": row.storage_tier, "folder_path": row.folder_path}
         row.storage_tier = "sharepoint"
         row.folder_path = "/Final Assets"
@@ -603,24 +606,13 @@ class M365Service:
             emails = list(attendees.get("emails") or [])
         else:
             emails = list(attendees)
-        starts = fields["starts_at"]
-        ends = fields["ends_at"]
-        graph = self._graph.create_online_meeting(
-            subject=fields["subject"],
-            starts_at=starts.isoformat() if hasattr(starts, "isoformat") else str(starts),
-            ends_at=ends.isoformat() if hasattr(ends, "isoformat") else str(ends),
-            attendees=emails,
-        )
+        fields.setdefault("status", "scheduled")
         row = self._repo.create_row(
             MktM365Meeting,
             ctx,
             company_id=company_id,
             organizer_user_id=ctx.user_id,
             attendee_emails={"emails": emails},
-            graph_event_id=graph.get("event_id"),
-            join_url=graph.get("join_url"),
-            last_error=graph.get("last_error"),
-            status=graph.get("status") or "scheduled",
             **fields,
         )
         self._ops.record(

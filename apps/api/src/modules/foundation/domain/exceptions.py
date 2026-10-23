@@ -32,16 +32,13 @@ class WorkflowStateException(FoundationDomainException):
         super().__init__(message, status_code=400)
 
 
-class MicrosoftLoginNotConfiguredException(FoundationDomainException):
+class PasswordResetTokenInvalidException(FoundationDomainException):
     def __init__(
-        self, message: str = "Microsoft sign-in is not configured on this environment"
+        self, message: str = "This reset link is invalid or has expired. Request a new one."
     ) -> None:
-        super().__init__(message, status_code=503)
+        super().__init__(message, status_code=400)
 
 
-class OrganizationLoginForbiddenException(FoundationDomainException):
-    def __init__(
-        self,
-        message: str = "Microsoft sign-in is only available for Organization module users",
-    ) -> None:
+class ErpAdminRequiredException(FoundationDomainException):
+    def __init__(self, message: str = "Only ERP admins can perform this action") -> None:
         super().__init__(message, status_code=403)

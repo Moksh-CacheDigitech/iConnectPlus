@@ -39,7 +39,7 @@ export function EmailDeliveriesPage() {
       <EmailWorkspaceNav />
       <PageHeader
         title="Email deliveries"
-        description="Per-attempt delivery log from Microsoft Graph."
+        description="Per-attempt SMTP delivery log."
         actions={
           <Button
             type="button"

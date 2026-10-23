@@ -170,4 +170,5 @@ class UserRepository(TenantScopedRepository):
                 um.module_key for um in row.user_modules if (um.role or "member") == "admin"
             ),
             employee_id=row.employee_id,
+            must_change_password=bool(getattr(row, "must_change_password", False)),
         )

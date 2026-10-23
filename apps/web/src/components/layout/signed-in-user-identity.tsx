@@ -1,7 +1,6 @@
 "use client";
 
 import { UserAvatar } from "@/components/layout/user-avatar";
-import { useAuthAvatar } from "@/hooks/use-auth-avatar";
 import { useAuthUser } from "@/hooks/use-auth-user";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +18,6 @@ export function SignedInUserIdentity({
   className,
 }: SignedInUserIdentityProps) {
   const { user, loading, signedIn } = useAuthUser();
-  const avatarUrl = useAuthAvatar(Boolean(signedIn && user));
 
   if (loading) {
     return (
@@ -61,7 +59,6 @@ export function SignedInUserIdentity({
       <div className={cn("flex min-w-0 items-center gap-2.5", className)} title={title}>
         <UserAvatar
           displayName={user.displayName}
-          imageUrl={avatarUrl}
           size="sm"
           className="!size-8 !text-[10px]"
         />
@@ -84,7 +81,6 @@ export function SignedInUserIdentity({
     >
       <UserAvatar
         displayName={user.displayName}
-        imageUrl={avatarUrl}
         size="sm"
         className={cn(
           "!size-8 !text-[10px]",

@@ -358,20 +358,20 @@ export function ServiceMailboxPage() {
   }, [q, rows]);
 
   const selectedRow = useMemo(
-    () => filtered.find((row) => row.graph_id === selectedId) ?? null,
+    () => filtered.find((row) => row.mailbox_id === selectedId) ?? null,
     [filtered, selectedId],
   );
 
-  const selectMessage = useCallback(async (graphId: string) => {
-    setSelectedId(graphId);
+  const selectMessage = useCallback(async (mailboxId: string) => {
+    setSelectedId(mailboxId);
     setDetail(null);
     setDetailLoading(true);
     try {
-      const full = await enrichMailboxMessage(await getMailboxMessage(graphId));
+      const full = await enrichMailboxMessage(await getMailboxMessage(mailboxId));
       setDetail(full);
       setRows((prev) =>
         prev.map((row) =>
-          row.graph_id === graphId
+          row.mailbox_id === mailboxId
             ? {
                 ...row,
                 ticket_id: full.ticket_id,
@@ -393,9 +393,9 @@ export function ServiceMailboxPage() {
 
   useEffect(() => {
     if (loading || filtered.length === 0) return;
-    const stillVisible = filtered.some((row) => row.graph_id === selectedId);
+    const stillVisible = filtered.some((row) => row.mailbox_id === selectedId);
     if (!stillVisible) {
-      void selectMessage(filtered[0].graph_id);
+      void selectMessage(filtered[0].mailbox_id);
     }
   }, [filtered, loading, selectMessage, selectedId]);
 
@@ -480,10 +480,10 @@ export function ServiceMailboxPage() {
               ) : (
                 filtered.map((row) => (
                   <MailListItem
-                    key={row.graph_id}
+                    key={row.mailbox_id}
                     row={row}
-                    selected={selectedId === row.graph_id}
-                    onSelect={() => void selectMessage(row.graph_id)}
+                    selected={selectedId === row.mailbox_id}
+                    onSelect={() => void selectMessage(row.mailbox_id)}
                   />
                 ))
               )}

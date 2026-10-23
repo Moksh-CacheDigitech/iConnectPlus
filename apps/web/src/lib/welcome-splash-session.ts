@@ -5,7 +5,7 @@ export type WelcomeSplashPayload = {
   createdAt: number;
 };
 
-/** Persist a one-shot welcome splash after Microsoft login. */
+/** Persist a one-shot welcome splash after sign-in. */
 export function queueWelcomeSplash(userName: string): void {
   if (typeof window === "undefined") return;
   const payload: WelcomeSplashPayload = {

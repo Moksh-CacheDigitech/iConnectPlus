@@ -39,6 +39,7 @@ class UserEntity:
     admin_module_keys: list[str] = field(default_factory=list)
     role_codes: list[str] = field(default_factory=list)
     employee_id: UUID | None = None
+    must_change_password: bool = False
 
 
 @dataclass

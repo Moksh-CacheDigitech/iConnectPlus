@@ -48,6 +48,8 @@ class SecUser(Base, AuditMixin, SoftDeleteMixin, TenantMixin, VersionMixin):
     failed_login_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     employee_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    # Column added in 0529_ess_phase6_compliance (nullable there).
+    must_change_password: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
 
     tenant: Mapped["SecTenant"] = relationship(back_populates="users")
     user_roles: Mapped[list["SecUserRole"]] = relationship(back_populates="user")

@@ -102,11 +102,6 @@ export function moduleTitle(key: string): string {
   return erpModules.find((m) => m.key === key)?.title ?? key;
 }
 
-export function canManageUserModules(permissions: string[], userType?: string): boolean {
-  if (isErpAdmin(userType)) return true;
-  return permissions.includes("foundation.user:update");
-}
-
 /** Organization Users is reserved for ERP-wide module-admin assignment. */
 export function moduleUsersHref(moduleKey: string): string {
   if (moduleKey === "organization") return "/organization/module-users";
