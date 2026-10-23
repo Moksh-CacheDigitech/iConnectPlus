@@ -47,9 +47,13 @@ class SmtpEmailAdapter:
         return self._from_email
 
     def _connect(self) -> smtplib.SMTP:
-        client = smtplib.SMTP(self._host, self._port, timeout=30)
-        if self._use_tls:
-            client.starttls()
+        # Hostinger (and many hosts) use implicit SSL on 465; 587 uses STARTTLS.
+        if self._port == 465:
+            client: smtplib.SMTP = smtplib.SMTP_SSL(self._host, self._port, timeout=30)
+        else:
+            client = smtplib.SMTP(self._host, self._port, timeout=30)
+            if self._use_tls:
+                client.starttls()
         if self._user:
             client.login(self._user, self._password)
         return client

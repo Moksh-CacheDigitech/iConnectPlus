@@ -99,6 +99,7 @@ class EmailDeliveryEngine:
             }
 
         delivery.status = "failed"
+        delivery.delivered_at = utcnow()  # attempt timestamp for failed-row sorting / Time column
         delivery.attempt_no = (delivery.attempt_no or 1) + 0
         event.status = "failed"
         self._db.commit()

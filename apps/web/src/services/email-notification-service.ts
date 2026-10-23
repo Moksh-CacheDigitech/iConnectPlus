@@ -29,6 +29,8 @@ export type EmailDeliveryRow = {
   status: string;
   provider_response: string | null;
   delivered_at: string | null;
+  /** Attempt time: delivered_at, or event.created_at when delivery has no stamp yet. */
+  occurred_at?: string | null;
   event_type: string | null;
   recipient_address: string | null;
   event_status: string | null;
@@ -144,17 +146,20 @@ export async function createEmailTemplate(body: EmailTemplateCreatePayload) {
 }
 
 export async function listEmailDeliveries(limit = 100) {
+  // API Query(ge=1, le=200) — clamp so the UI never trips a 422 validation error.
+  const capped = Math.min(Math.max(1, limit), 200);
   const res = await apiClient<EmailDeliveryRow[]>("/notifications/deliveries", {
     method: "GET",
-    query: { limit },
+    query: { limit: capped },
   });
   return (res.data ?? []).filter((d) => d.channel === "email");
 }
 
 export async function listEmailEvents(limit = 100) {
+  const capped = Math.min(Math.max(1, limit), 200);
   const res = await apiClient<EmailEventRow[]>("/notifications/events", {
     method: "GET",
-    query: { limit },
+    query: { limit: capped },
   });
   return res.data ?? [];
 }

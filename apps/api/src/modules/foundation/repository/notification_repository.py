@@ -177,14 +177,25 @@ class NotificationRepository(TenantScopedRepository):
         stmt = (
             select(NtfDelivery)
             .options(joinedload(NtfDelivery.event))
+            .outerjoin(NtfEvent, NtfEvent.id == NtfDelivery.event_id)
             .where(NtfDelivery.tenant_id == tenant_id)
-            .order_by(NtfDelivery.id.desc())
+            .order_by(
+                func.coalesce(NtfDelivery.delivered_at, NtfEvent.created_at).desc().nullslast(),
+                NtfDelivery.id.desc(),
+            )
             .limit(limit)
         )
         rows = list(self.db.scalars(stmt).unique().all())
         result: list[dict] = []
         for d in rows:
             event = d.event
+            payload = (event.payload_json or {}) if event else {}
+            subject = payload.get("_subject") or payload.get("subject")
+            if isinstance(subject, str):
+                subject = subject.strip() or None
+            else:
+                subject = None
+            occurred = d.delivered_at or (event.created_at if event else None)
             result.append(
                 {
                     "id": str(d.id),
@@ -194,11 +205,12 @@ class NotificationRepository(TenantScopedRepository):
                     "status": d.status,
                     "provider_response": d.provider_response,
                     "delivered_at": d.delivered_at.isoformat() if d.delivered_at else None,
+                    "occurred_at": occurred.isoformat() if occurred else None,
                     "event_type": event.event_type if event else None,
                     "recipient_address": event.recipient_address if event else None,
                     "event_status": event.status if event else None,
                     "created_at": event.created_at.isoformat() if event and event.created_at else None,
-                    "subject": (event.payload_json or {}).get("_subject") if event else None,
+                    "subject": subject,
                 }
             )
         return result
