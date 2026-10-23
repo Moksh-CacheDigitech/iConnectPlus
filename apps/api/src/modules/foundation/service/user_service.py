@@ -1,7 +1,5 @@
 """User service."""
 
-import secrets
-import string
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -26,6 +24,9 @@ from modules.foundation.schemas import UserResponse
 from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.rbac_service import RBACService
 from security.password import PasswordHasher
+
+# Shared temporary password issued by ERP admins from Organization → Users.
+DEFAULT_TEMPORARY_PASSWORD = "Cache@123"
 
 
 class UserService:
@@ -85,24 +86,17 @@ class UserService:
             raise ErpAdminRequiredException()
         return actor
 
-    @staticmethod
-    def _temporary_password(length: int = 12) -> str:
-        alphabet = string.ascii_letters + string.digits
-        core = "".join(secrets.choice(alphabet) for _ in range(length - 4))
-        # Guarantee every policy class (upper, lower, digit, symbol).
-        return f"{secrets.choice(string.ascii_uppercase)}{secrets.choice(string.ascii_lowercase)}{secrets.choice(string.digits)}@{core}"
-
     def issue_temporary_password(
         self, tenant_id: UUID, user_id: UUID, *, actor_id: UUID | None
     ) -> tuple[UserEntity, str]:
-        """ERP admin issues a one-time password; the user must change it after sign-in."""
+        """ERP admin issues the default temporary password; user must change it after sign-in."""
         self.require_erp_admin(tenant_id, actor_id)
         from modules.foundation.models.security import SecUser
 
         row = self._repo.db.get(SecUser, user_id)
         if row is None or row.is_deleted or row.tenant_id != tenant_id:
             raise NotFoundException("User not found")
-        password = self._temporary_password()
+        password = DEFAULT_TEMPORARY_PASSWORD
         row.password_hash = PasswordHasher.hash_password(password)
         row.must_change_password = True
         row.failed_login_count = 0

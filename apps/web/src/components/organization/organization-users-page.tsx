@@ -218,7 +218,7 @@ function UsersTableCard({
 
       {open ? (
         <div id={panelId} className="erp-scroll overflow-x-auto">
-          <table className="w-full min-w-[720px] text-center text-sm">
+          <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
               <tr className="border-b border-border/80 bg-muted/60 text-xs font-semibold tracking-wide text-foreground uppercase">
                 <th className="px-4 py-2.5 text-center">User</th>
@@ -253,8 +253,8 @@ function UsersTableCard({
                       key={`${user.id}:${moduleKey ?? "erp"}`}
                       className="border-b border-border/50 transition-colors duration-150 last:border-0 hover:bg-accent/30"
                     >
-                      <td className="px-4 py-2.5 text-center">
-                        <div className="inline-flex items-center justify-center gap-2.5">
+                      <td className="px-4 py-2.5 text-left">
+                        <div className="flex items-center gap-2.5">
                           <UserAvatar
                             displayName={user.display_name}
                             size="sm"
@@ -263,18 +263,18 @@ function UsersTableCard({
                           <span className="font-medium text-foreground">{user.display_name}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-2.5 text-center font-mono text-xs text-muted-foreground">
+                      <td className="px-4 py-2.5 text-left font-mono text-xs text-muted-foreground">
                         {user.employee_code ?? "—"}
                       </td>
-                      <td className="px-4 py-2.5 text-center text-muted-foreground">{user.email}</td>
+                      <td className="px-4 py-2.5 text-left text-muted-foreground">{user.email}</td>
                       {showModule ? (
-                        <td className="px-4 py-2.5 text-center font-medium text-foreground">
+                        <td className="px-4 py-2.5 text-left font-medium text-foreground">
                           {moduleLabel}
                         </td>
                       ) : null}
                       {canEdit ? (
-                        <td className="px-4 py-2.5 text-center">
-                          <div className="inline-flex justify-center gap-1.5">
+                        <td className="px-4 py-2.5 text-left">
+                          <div className="inline-flex gap-1.5">
                             {variant !== "erp" ? (
                               <Button
                                 type="button"
