@@ -337,9 +337,9 @@ function mergeRow(
   );
   const locationName = String(
     employment?.work_location_text ??
-      employment?.work_location ??
-      hydrated.employment.location ??
-      "",
+    employment?.work_location ??
+    hydrated.employment.location ??
+    "",
   ).trim();
   const locationId =
     String(hydrated.employment.locationId ?? "") ||
@@ -422,9 +422,9 @@ function mergeRow(
     ),
     joiningDate: String(
       employment?.date_of_joining ??
-        master.date_of_joining ??
-        hydrated.employment.joiningDate ??
-        "",
+      master.date_of_joining ??
+      hydrated.employment.joiningDate ??
+      "",
     ),
     lifecycleStatus: mapLifecycle(
       String(master.status ?? ""),
@@ -533,15 +533,15 @@ export async function listEmployeesPage(
 async function loadOptions(): Promise<EmployeeDirectoryOptions> {
   const [branches, departments, locations, designations, employees, shifts, mgmtGroups, companies] =
     await Promise.all([
-    listAllPages("/branches"),
-    listAllPages("/departments"),
-    listAllPages("/locations"),
-    listAllPages("/hr/designations"),
-    listAllPages("/employees"),
-    listAllPages("/hr/shifts"),
-    listAllPages("/hr/management-groups"),
-    listAllPages("/companies"),
-  ]);
+      listAllPages("/branches"),
+      listAllPages("/departments"),
+      listAllPages("/locations"),
+      listAllPages("/hr/designations"),
+      listAllPages("/employees"),
+      listAllPages("/hr/shifts"),
+      listAllPages("/hr/management-groups"),
+      listAllPages("/companies"),
+    ]);
 
   const asRows = (d: unknown) =>
     (Array.isArray(d) ? d : []).filter((r): r is HrRow => !!r && typeof r === "object");
@@ -900,19 +900,19 @@ async function fetchEmployeeDirectoryUncached(): Promise<EmployeeDirectoryResult
         row.extension.documents.length > 0
           ? row.extension.documents
           : (caseRow.portal?.documents || [])
-              .filter((d) => d.fileDataUrl)
-              .map((d, idx) => ({
-                id: `onb-doc-${idx}`,
-                documentType: d.kind || "other",
-                documentNumber: "",
-                issueDate: "",
-                expiryDate: "",
-                fileName: d.kind || "document",
-                fileDataUrl: d.fileDataUrl,
-                uploadedBy: "Onboarding portal",
-                uploadedAt: nowIso(),
-                source: "onboarding" as const,
-              })),
+            .filter((d) => d.fileDataUrl)
+            .map((d, idx) => ({
+              id: `onb-doc-${idx}`,
+              documentType: d.kind || "other",
+              documentNumber: "",
+              issueDate: "",
+              expiryDate: "",
+              fileName: d.kind || "document",
+              fileDataUrl: d.fileDataUrl,
+              uploadedBy: "Onboarding portal",
+              uploadedAt: nowIso(),
+              source: "onboarding" as const,
+            })),
     });
 
     saveExtension(row.id, nextExt);
@@ -1473,7 +1473,7 @@ export async function createEmployeeFromWizard(
   };
 }
 
-export async function updateEmployeeRecord(  record: EmployeeRecord,
+export async function updateEmployeeRecord(record: EmployeeRecord,
   patch: Partial<EmployeeWizardDraft>,
 ): Promise<void> {
   const nextExt: EmployeeExtension = {
@@ -1565,12 +1565,12 @@ export async function updateEmployeeRecord(  record: EmployeeRecord,
       }),
       skills_json: nextExt.previousEmployment.length
         ? {
-            previous_employment: nextExt.previousEmployment.map((entry) => {
-              const previousEmployment = { ...entry };
-              delete previousEmployment.id;
-              return previousEmployment;
-            }),
-          }
+          previous_employment: nextExt.previousEmployment.map((entry) => {
+            const previousEmployment = { ...entry };
+            delete previousEmployment.id;
+            return previousEmployment;
+          }),
+        }
         : null,
       status: nextExt.employment.lifecycleStatus,
     }).catch(() => undefined);
@@ -1665,8 +1665,8 @@ export function exportEmployeesCsv(records: EmployeeRecord[]): string {
     "Reporting Manager",
     "DOJ",
     "Emp. Contact No.",
-    "Email id",
-    "cache email id",
+    "Email ID",
+    "Cache Email ID",
     "Gender",
     "DOB",
   ];

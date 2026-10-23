@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from core.exceptions import NotFoundException, ValidationException
 from modules.foundation.domain.value_objects import TenantContext
-from modules.foundation.service.audit_service import AuditService
 from modules.payroll.domain.exceptions import InvalidSalaryStructureState
 from modules.payroll.domain.salary_structure_calculator import compute_ctc_split
 from modules.payroll.models import PaySalaryStructure
@@ -16,6 +15,7 @@ from modules.payroll.repository.salary_structure_line_repository import SalarySt
 from modules.payroll.repository.salary_structure_repository import SalaryStructureRepository
 from modules.payroll.service.engines import SalaryStructureEngine
 from modules.payroll.service.payroll_scope_validator import PayrollScopeValidator
+from modules.platform.compat.audit_facade import PlatformAuditFacade
 
 _SPLIT_INPUTS = (
     "gross_ctc",
