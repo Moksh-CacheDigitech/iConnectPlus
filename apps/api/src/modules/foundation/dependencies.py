@@ -176,20 +176,44 @@ def get_current_user(
     return user
 
 
+def _module_assignment_unlocks(
+    db: Session,
+    ctx: TenantContext,
+    permission_code: str,
+) -> bool:
+    """True when the user has a sec_user_module row that unlocks this permission."""
+    from sqlalchemy import select
+
+    from modules.foundation.domain.erp_modules import (
+        assignment_module_keys_for_permission,
+        resolve_erp_module_key,
+    )
+    from modules.foundation.models.security import SecPermission
+    from modules.foundation.repository.user_module_repository import UserModuleRepository
+
+    keys = assignment_module_keys_for_permission(permission_code)
+    if not keys:
+        # Seeded permission.module when the code prefix is not an ERP module key.
+        perm = db.scalar(
+            select(SecPermission).where(SecPermission.permission_code == permission_code)
+        )
+        if perm is not None:
+            resolved = resolve_erp_module_key(perm.module)
+            if resolved is not None:
+                keys = assignment_module_keys_for_permission(f"{resolved}.resource:action")
+
+    modules = UserModuleRepository(db)
+    return any(
+        modules.get_assignment(ctx.tenant_id, ctx.user_id, module_key) is not None
+        for module_key in keys
+    )
+
+
 def require_permission(permission_code: str) -> Callable:
     def _checker(
         ctx: Annotated[TenantContext, Depends(get_tenant_context)],
         db: Annotated[Session, Depends(get_db)],
     ) -> TenantContext:
-        from sqlalchemy import select
-
-        from modules.foundation.domain.erp_modules import (
-            module_key_for_permission_code,
-            resolve_erp_module_key,
-        )
-        from modules.foundation.models.security import SecPermission
-        from modules.foundation.repository.user_module_repository import UserModuleRepository
-
         rbac = RBACService(db)
         if ctx.user_type in {"super_admin", "tenant_admin"}:
             return ctx
@@ -198,20 +222,9 @@ def require_permission(permission_code: str) -> Callable:
 
         # Module assignment (member/admin) unlocks that module's APIs so non-ERP-admins
         # can use the modules they were given without a separate role matrix.
-        module_key = module_key_for_permission_code(permission_code)
-        if module_key is None:
-            perm = db.scalar(
-                select(SecPermission).where(SecPermission.permission_code == permission_code)
-            )
-            if perm is not None:
-                module_key = resolve_erp_module_key(perm.module)
-
-        if module_key is not None:
-            assignment = UserModuleRepository(db).get_assignment(
-                ctx.tenant_id, ctx.user_id, module_key
-            )
-            if assignment is not None:
-                return ctx
+        # HR assignment also covers nested HRMS modules (organization / payroll / …).
+        if _module_assignment_unlocks(db, ctx, permission_code):
+            return ctx
 
         raise ForbiddenException(f"Missing permission: {permission_code}")
 
@@ -225,15 +238,6 @@ def require_any_permission(*permission_codes: str) -> Callable:
         ctx: Annotated[TenantContext, Depends(get_tenant_context)],
         db: Annotated[Session, Depends(get_db)],
     ) -> TenantContext:
-        from sqlalchemy import select
-
-        from modules.foundation.domain.erp_modules import (
-            module_key_for_permission_code,
-            resolve_erp_module_key,
-        )
-        from modules.foundation.models.security import SecPermission
-        from modules.foundation.repository.user_module_repository import UserModuleRepository
-
         rbac = RBACService(db)
         if ctx.user_type in {"super_admin", "tenant_admin"}:
             return ctx
@@ -241,21 +245,8 @@ def require_any_permission(*permission_codes: str) -> Callable:
         for permission_code in permission_codes:
             if rbac.has_permission(ctx.user_id, ctx.tenant_id, permission_code):
                 return ctx
-
-            module_key = module_key_for_permission_code(permission_code)
-            if module_key is None:
-                perm = db.scalar(
-                    select(SecPermission).where(SecPermission.permission_code == permission_code)
-                )
-                if perm is not None:
-                    module_key = resolve_erp_module_key(perm.module)
-
-            if module_key is not None:
-                assignment = UserModuleRepository(db).get_assignment(
-                    ctx.tenant_id, ctx.user_id, module_key
-                )
-                if assignment is not None:
-                    return ctx
+            if _module_assignment_unlocks(db, ctx, permission_code):
+                return ctx
 
         codes = ", ".join(permission_codes)
         raise ForbiddenException(f"Missing permission: one of {codes}")
