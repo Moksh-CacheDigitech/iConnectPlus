@@ -4,7 +4,8 @@
 # Object storage: MinIO via S3_ENDPOINT_URL (AWS S3 disabled).
 # Shares Docker network `erp-net` with infra (REDIS_URL=redis://redis:6379/0, etc.).
 # Does NOT bind 80/443/5432/6379/5672/9200/9000.
-# Host ports: API :8010  |  Web :3000  |  Employee :3001  |  Nginx TLS :8443
+# Host ports: Nginx TLS :8443 (web+api via reverse proxy)  |  Employee :3001
+# Web/API are internal on erp-net only — do not publish :3000 / :8010.
 
 networks:
   erp-net:
@@ -33,7 +34,8 @@ services:
       RUN_MIGRATIONS: "true"
       CORS_ORIGINS: ${CORS_ORIGINS}
       CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-}
-      FRONTEND_URL: ${FRONTEND_URL:-http://172.16.200.30:3000}
+      FRONTEND_URL: ${FRONTEND_URL:-https://172.16.200.30:8443}
+      MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-}
       SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
       REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
       SSL_CERT_DIR: /etc/ssl/certs
@@ -48,8 +50,8 @@ services:
       ACCESS_CODE_DEMO: ${ACCESS_CODE_DEMO:-ICP-DEMO-2026}
       ACCESS_CODE_CONNECTPLUS: ${ACCESS_CODE_CONNECTPLUS:-ICP-CONNECT-2026}
       ACCESS_GATE_TOKEN_HOURS: ${ACCESS_GATE_TOKEN_HOURS:-12}
-    ports:
-      - "8010:8000"
+    expose:
+      - "8000"
     volumes:
       - erp_crm_uploads:/app/var/crm-attachments
       - erp_asset_storage:/app/var/asset-storage
@@ -123,8 +125,8 @@ services:
       PORT: "3000"
       HOSTNAME: 0.0.0.0
       API_INTERNAL_URL: http://api:8000
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       api:
         condition: service_healthy

@@ -36,36 +36,51 @@ def test_platform_admin_effective_company_ids_none() -> None:
     assert effective_company_ids(ctx, module_key="crm") is None
 
 
-def test_crm_module_admin_tenant_wide_for_crm_only() -> None:
-    c1 = uuid4()
+def test_crm_module_admin_without_scopes_is_tenant_wide_for_crm_only() -> None:
     ctx = TenantContext(
         tenant_id=uuid4(),
         user_id=uuid4(),
         user_type="employee",
         admin_module_keys=frozenset({"crm"}),
-        scoped_company_ids=(c1,),
-        company_id=c1,
+        scoped_company_ids=(),
+        company_id=None,
     )
     assert has_module_wide_data_access(ctx, "crm") is True
     assert effective_company_ids(ctx, module_key="crm") is None
     assert has_module_wide_data_access(ctx, "finance") is False
-    assert effective_company_ids(ctx, module_key="finance") == [c1]
     assert has_module_wide_data_access(ctx, "procurement") is False
 
 
-def test_finance_module_admin_does_not_elevate_crm() -> None:
-    c1 = uuid4()
+def test_module_admin_assigned_entities_limit_data() -> None:
+    """HR Superadmin entity toggles write scoped_company_ids — those win."""
+    c1, c2 = uuid4(), uuid4()
+    ctx = TenantContext(
+        tenant_id=uuid4(),
+        user_id=uuid4(),
+        user_type="employee",
+        admin_module_keys=frozenset({"hr", "crm"}),
+        scoped_company_ids=(c1, c2),
+        company_id=c1,
+        tenant_wide=True,
+    )
+    assert has_module_wide_data_access(ctx, "hr") is False
+    assert has_module_wide_data_access(ctx, "crm") is False
+    assert effective_company_ids(ctx, module_key="hr") == [c1, c2]
+    assert effective_company_ids(ctx, module_key="crm") == [c1, c2]
+    assert effective_company_ids(ctx, module_key="finance") == [c1, c2]
+
+
+def test_finance_module_admin_without_scopes_does_not_elevate_crm() -> None:
     ctx = TenantContext(
         tenant_id=uuid4(),
         user_id=uuid4(),
         user_type="employee",
         admin_module_keys=frozenset({"finance"}),
-        scoped_company_ids=(c1,),
-        company_id=c1,
+        scoped_company_ids=(),
+        company_id=None,
     )
     assert has_module_wide_data_access(ctx, "finance") is True
     assert has_module_wide_data_access(ctx, "crm") is False
-    assert effective_company_ids(ctx, module_key="crm") == [c1]
 
 
 def test_hr_module_admin_does_not_elevate_procurement() -> None:
@@ -76,6 +91,7 @@ def test_hr_module_admin_does_not_elevate_procurement() -> None:
         admin_module_keys=frozenset({"hr"}),
         tenant_wide=True,  # legacy flag still set for HR admins
         procurement_tenant_wide=False,
+        scoped_company_ids=(),
     )
     assert has_module_wide_data_access(ctx, "hr") is True
     assert has_procurement_tenant_wide_data_access(ctx) is False
@@ -125,3 +141,24 @@ def test_legacy_procurement_tenant_wide_flag() -> None:
         procurement_tenant_wide=True,
     )
     assert has_procurement_tenant_wide_data_access(ctx) is True
+
+
+def test_module_admin_skips_session_branch_pin() -> None:
+    """Multi-entity HR admin must not be limited to the Digitech session branch."""
+    from sqlalchemy import column, select, table
+
+    from modules.foundation.domain.org_data_scope import apply_branch_scope
+
+    model = table("t", column("branch_id"), column("company_id"))
+    c1, c2, branch = uuid4(), uuid4(), uuid4()
+    ctx = TenantContext(
+        tenant_id=uuid4(),
+        user_id=uuid4(),
+        user_type="employee",
+        admin_module_keys=frozenset({"hr"}),
+        scoped_company_ids=(c1, c2),
+        company_id=c1,
+        branch_id=branch,
+    )
+    stmt = apply_branch_scope(select(model), model, ctx, module_key="hr", branch_scoped=True)
+    assert "branch_id" not in str(stmt)

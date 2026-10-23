@@ -5,7 +5,10 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from modules.foundation.domain.org_data_scope import has_tenant_wide_data_access
+from modules.foundation.domain.org_data_scope import (
+    has_tenant_wide_data_access,
+    is_platform_admin,
+)
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecUserOrgScope
 from modules.organization.repository.base import utcnow
@@ -31,13 +34,15 @@ class OrgScopeRepository:
         return self.db.scalar(stmt)
 
     def user_has_company_access(self, ctx: TenantContext, company_id: UUID) -> bool:
-        # Platform admins, or any module admin (CRM/finance/etc.) — org APIs are
-        # shared and must not require a separate "organization" module admin grant.
-        if has_tenant_wide_data_access(ctx) or ctx.admin_module_keys:
+        # Platform admins see every company. Module admins without entity scopes keep
+        # full company access for shared org APIs. Assigned scopes always win.
+        if is_platform_admin(ctx) or has_tenant_wide_data_access(ctx):
+            return True
+        if ctx.scoped_company_ids:
+            return company_id in ctx.scoped_company_ids
+        if ctx.admin_module_keys:
             return True
         if ctx.company_id and ctx.company_id == company_id:
-            return True
-        if ctx.scoped_company_ids and company_id in ctx.scoped_company_ids:
             return True
         stmt = select(SecUserOrgScope).where(
             SecUserOrgScope.user_id == ctx.user_id,
@@ -47,9 +52,7 @@ class OrgScopeRepository:
         return self.db.scalar(stmt) is not None
 
     def user_has_branch_access(self, ctx: TenantContext, branch_id: UUID) -> bool:
-        if ctx.user_type in {"super_admin", "tenant_admin", "company_admin"}:
-            return True
-        if ctx.admin_module_keys:
+        if is_platform_admin(ctx) or ctx.user_type == "company_admin":
             return True
         if ctx.branch_id and ctx.branch_id == branch_id:
             return True
@@ -62,6 +65,9 @@ class OrgScopeRepository:
         if self.db.scalar(stmt) is not None:
             return True
         # Company-scoped users may manage every branch under companies they access.
+        # Module admins with no entity scopes keep full branch access.
+        if ctx.admin_module_keys and not ctx.scoped_company_ids:
+            return True
         from modules.organization.models.branch import OrgBranch
 
         branch = self.db.scalar(

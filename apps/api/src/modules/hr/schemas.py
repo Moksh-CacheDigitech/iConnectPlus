@@ -1763,6 +1763,8 @@ class HrAdminRecord(BaseModel):
     company_ids: list[UUID] = []
     nav_keys: list[str] = []
     nav_unrestricted: bool = True
+    # True when MODULE_ROLE_ADMIN was granted from Organization → Users
+    is_org_module_admin: bool = False
 
 
 class HrAdminPasswordResponse(BaseModel):

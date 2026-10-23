@@ -2,7 +2,9 @@
 
 Rules:
 - Platform admin (super_admin / tenant_admin): entire tenant (no company/branch filter).
-- Org-assigned module admin: same as platform for that module only.
+- Assigned entity scopes (SecUserOrgScope / scoped_company_ids): always limit data,
+  including for org-assigned module admins (HR Superadmin entity toggles write these).
+- Module admin with no assigned scopes: same as platform for that module only.
 - Module member: scoped_company_ids / session company (+ session branch when branch_scoped).
 """
 
@@ -24,6 +26,9 @@ def has_module_wide_data_access(ctx: TenantContext, module_key: str) -> bool:
     """True when list/read queries for this module should span the whole tenant."""
     if is_platform_admin(ctx):
         return True
+    # Entity assignments from HR Superadmin / Organization win over module-admin elevation.
+    if ctx.scoped_company_ids:
+        return False
     key = (module_key or "").strip().lower()
     if key and key in ctx.admin_module_keys:
         return True
@@ -92,10 +97,20 @@ def apply_branch_scope(
     module_key: str,
     branch_scoped: bool = False,
 ):
-    """Apply session branch filter for members; skip for platform/module admins."""
+    """Apply session branch filter for single-company members only.
+
+    Platform admins, module admins, and multi-entity assignments must not be pinned
+    to the session branch — that branch belongs to one company and would hide the
+    other assigned entities across HR/master lists.
+    """
     if not branch_scoped or not ctx.branch_id or not hasattr(model, "branch_id"):
         return stmt
     if has_module_wide_data_access(ctx, module_key):
+        return stmt
+    key = (module_key or "").strip().lower()
+    if key and key in ctx.admin_module_keys:
+        return stmt
+    if len(ctx.scoped_company_ids or ()) > 1:
         return stmt
     return stmt.where(model.branch_id == ctx.branch_id)
 

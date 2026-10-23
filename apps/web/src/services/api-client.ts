@@ -65,6 +65,27 @@ let refreshInFlight: Promise<boolean> | null = null;
 let apiBaseReady: Promise<string> | null = null;
 const getInflight = new Map<string, Promise<ApiResponse<unknown>>>();
 
+/** Global in-flight cap so dashboard Promise.all fans do not stampede nginx/API limits. */
+const MAX_INFLIGHT_REQUESTS = 10;
+let inflightRequests = 0;
+const requestWaitQueue: Array<() => void> = [];
+
+async function withRequestSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (inflightRequests >= MAX_INFLIGHT_REQUESTS) {
+    await new Promise<void>((resolve) => {
+      requestWaitQueue.push(resolve);
+    });
+  }
+  inflightRequests += 1;
+  try {
+    return await fn();
+  } finally {
+    inflightRequests -= 1;
+    const next = requestWaitQueue.shift();
+    if (next) next();
+  }
+}
+
 function ensureApiBase(): Promise<string> {
   if (!apiBaseReady) {
     apiBaseReady = resolveApiUrl().catch(() => getApiUrl());
@@ -128,20 +149,22 @@ export async function apiClient<T>(
     method === "GET" && !options._retried && !options._apiFailover;
   const coalesceKey = coalesce
     ? `${getApiUrl()}|${rewriteHrmsApiPath(path)}|${JSON.stringify(
-        clampListPageSize(rewriteHrmsApiPath(path), options.query) ?? {},
-      )}`
+      clampListPageSize(rewriteHrmsApiPath(path), options.query) ?? {},
+    )}`
     : null;
   if (coalesceKey) {
     const existing = getInflight.get(coalesceKey);
     if (existing) return existing as Promise<ApiResponse<T>>;
   }
 
-    const pending = apiClientExecute<T>(path, options);
+  const pending = withRequestSlot(() => apiClientExecute<T>(path, options));
   if (coalesceKey) {
     getInflight.set(coalesceKey, pending as Promise<ApiResponse<unknown>>);
-    void pending.finally(() => {
-      getInflight.delete(coalesceKey);
-    }).catch(() => undefined);
+    void pending
+      .finally(() => {
+        getInflight.delete(coalesceKey);
+      })
+      .catch(() => undefined);
   }
   return pending;
 }
@@ -229,6 +252,14 @@ export async function apiUpload<T>(
   formData: FormData,
   options: { _retried?: boolean; _apiFailover?: boolean } = {},
 ): Promise<ApiResponse<T>> {
+  return withRequestSlot(() => apiUploadUnqueued(path, formData, options));
+}
+
+async function apiUploadUnqueued<T>(
+  path: string,
+  formData: FormData,
+  options: { _retried?: boolean; _apiFailover?: boolean } = {},
+): Promise<ApiResponse<T>> {
   const token = getAccessToken();
   await ensureApiBase();
   let response: Response;
@@ -245,7 +276,7 @@ export async function apiUpload<T>(
   } catch {
     if (!options._apiFailover) {
       await failoverApiBase();
-      return apiUpload<T>(path, formData, { ...options, _apiFailover: true });
+      return apiUploadUnqueued<T>(path, formData, { ...options, _apiFailover: true });
     }
     throw new ApiClientError(
       "Cannot reach the API. Confirm the backend is running on port 8000.",
@@ -256,7 +287,7 @@ export async function apiUpload<T>(
   if (response.status === 401 && !options._retried) {
     const refreshed = await tryRefreshAccessToken();
     if (refreshed) {
-      return apiUpload<T>(path, formData, { _retried: true });
+      return apiUploadUnqueued<T>(path, formData, { _retried: true });
     }
     clearTokens();
   }
@@ -388,7 +419,8 @@ export const authService = {
       {
         method: "POST",
         auth: false,
-        body: { user_id: userId, password },
+        // Send both keys: APIs that require `email` and clients that send `user_id`.
+        body: { email: userId, user_id: userId, password },
       },
     ).then((res) => {
       if (res.data?.access_token) {

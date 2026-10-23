@@ -177,8 +177,14 @@ class HrSuperadminService:
         login_created: bool,
         temporary_password: str | None = None,
         company_ids: list[UUID] | None = None,
+        is_org_module_admin: bool | None = None,
     ) -> HrAdminRecord:
         nav_keys, nav_unrestricted = self._nav_fields(emp.tenant_id, user.id)
+        org_admin = (
+            is_org_module_admin
+            if is_org_module_admin is not None
+            else self._is_org_hr_module_admin(emp.tenant_id, user.id)
+        )
         return HrAdminRecord(
             employee_id=emp.id,
             employee_code=emp.employee_code,
@@ -191,6 +197,7 @@ class HrSuperadminService:
             company_ids=company_ids if company_ids is not None else self._company_ids_for_user(user.id),
             nav_keys=nav_keys,
             nav_unrestricted=nav_unrestricted,
+            is_org_module_admin=org_admin,
         )
 
     def _nav_fields(self, tenant_id: UUID, user_id: UUID) -> tuple[list[str], bool]:
@@ -329,8 +336,9 @@ class HrSuperadminService:
         ]
 
     def list_admins(self, ctx: TenantContext) -> list[HrAdminRecord]:
+        """Members (Grant HR) and Organization module admins — both get entity/nav here."""
         rows = self._db.execute(
-            select(EmployeeRead, SecUser)
+            select(EmployeeRead, SecUser, SecUserModule.role)
             .join(SecUser, SecUser.id == EmployeeRead.user_id)
             .join(SecUserModule, SecUserModule.user_id == SecUser.id)
             .where(
@@ -338,11 +346,23 @@ class HrSuperadminService:
                 EmployeeRead.is_deleted.is_(False),
                 SecUser.is_deleted.is_(False),
                 SecUserModule.module_key == HR_MODULE_KEY,
-                SecUserModule.role == MODULE_ROLE_MEMBER,
+                SecUserModule.role.in_([MODULE_ROLE_MEMBER, MODULE_ROLE_ADMIN]),
             )
             .order_by(EmployeeRead.first_name, EmployeeRead.last_name)
         ).all()
-        return [self._to_record(emp, user, login_created=False) for emp, user in rows]
+        return [
+            self._to_record(
+                emp,
+                user,
+                login_created=False,
+                is_org_module_admin=(role == MODULE_ROLE_ADMIN),
+            )
+            for emp, user, role in rows
+        ]
+
+    def list_org_module_admins(self, ctx: TenantContext) -> list[HrAdminRecord]:
+        """HR module admins granted from Organization → Users."""
+        return [row for row in self.list_admins(ctx) if row.is_org_module_admin]
 
     def _assert_not_superadmin(self, ctx: TenantContext, user: SecUser) -> None:
         if user.user_type == "super_admin":
@@ -373,6 +393,19 @@ class HrSuperadminService:
         if not self._is_hr_module_member(ctx.tenant_id, user.id):
             raise AppException("Employee is not assigned to the HR module")
         return user
+
+    def _require_hr_admin_or_member(self, ctx: TenantContext, emp: EmployeeRead) -> SecUser:
+        """Allow entity/nav updates for Grant-HR members and Organization module admins."""
+        if not emp.user_id:
+            raise AppException("Employee has no login account")
+        user = self._db.get(SecUser, emp.user_id)
+        if user is None or user.is_deleted:
+            raise NotFoundException("Login user not found")
+        if self._is_hr_module_member(ctx.tenant_id, user.id):
+            return user
+        if self._is_org_hr_module_admin(ctx.tenant_id, user.id):
+            return user
+        raise AppException("Employee is not assigned to the HR module")
 
     def _apply_password(self, ctx: TenantContext, user: SecUser, password: str) -> None:
         user.password_hash = PasswordHasher.hash_password(password)
@@ -506,7 +539,7 @@ class HrSuperadminService:
         company_ids: list[UUID],
     ) -> HrAdminRecord:
         emp = self._employee(ctx, employee_id)
-        user = self._require_hr_member(ctx, emp)
+        user = self._require_hr_admin_or_member(ctx, emp)
         ids = self._resolve_company_ids(ctx, emp, company_ids, require_nonempty=True)
         previous = set(self._company_ids_for_user(user.id))
         applied = self._apply_entity_scopes(

@@ -12,6 +12,8 @@ export type HrAdminRecord = {
   company_ids: string[];
   nav_keys: string[];
   nav_unrestricted: boolean;
+  /** MODULE_ROLE_ADMIN from Organization → Users */
+  is_org_module_admin: boolean;
 };
 
 export type HrNavAccessRecord = {
@@ -51,11 +53,18 @@ function mapAdmin(row: HrAdminRecord): HrAdminRecord {
     company_ids: Array.isArray(row.company_ids) ? row.company_ids.map(String) : [],
     nav_keys: Array.isArray(row.nav_keys) ? row.nav_keys.map(String) : [],
     nav_unrestricted: Boolean(row.nav_unrestricted),
+    is_org_module_admin: Boolean(row.is_org_module_admin),
   };
 }
 
 export async function listHrAdmins(): Promise<HrAdminRecord[]> {
   const res = await apiClient<HrAdminRecord[]>("/hr/superadmin/admins");
+  return (res.data ?? []).map(mapAdmin);
+}
+
+/** HR module admins from Organization → Users (not grantable in this panel). */
+export async function listOrgHrModuleAdmins(): Promise<HrAdminRecord[]> {
+  const res = await apiClient<HrAdminRecord[]>("/hr/superadmin/org-module-admins");
   return (res.data ?? []).map(mapAdmin);
 }
 

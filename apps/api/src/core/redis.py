@@ -1,6 +1,5 @@
 """Redis client and session cache."""
 
-import hashlib
 import json
 import logging
 from typing import Any, cast
@@ -113,33 +112,103 @@ class SessionStore:
             logger.warning("Redis unavailable for increment_login_attempts: %s", exc)
             return 0
 
-    @staticmethod
-    def _reset_key(token: str) -> str:
-        # Only a digest is stored so a Redis dump cannot be replayed as reset links.
-        return f"password_reset:{hashlib.sha256(token.encode()).hexdigest()}"
-
-    def set_password_reset(self, token: str, user_id: UUID, *, ttl_seconds: int) -> None:
+    def set_oauth_state(
+        self, state: str, payload: dict[str, Any], *, ttl_seconds: int = 600
+    ) -> None:
         try:
-            self._client.setex(self._reset_key(token), ttl_seconds, str(user_id))
+            self._client.setex(f"oauth:state:{state}", ttl_seconds, json.dumps(payload))
         except RedisError as exc:
-            logger.error("Redis unavailable for set_password_reset: %s", exc)
+            logger.error("Redis unavailable for set_oauth_state: %s", exc)
             raise RedisUnavailableException(
-                "Password reset temporarily unavailable (session store unreachable)"
+                "Sign-in temporarily unavailable (session store unreachable)"
             ) from exc
 
-    def pop_password_reset(self, token: str) -> UUID | None:
-        key = self._reset_key(token)
+    def pop_oauth_state(self, state: str) -> dict[str, Any] | None:
+        key = f"oauth:state:{state}"
         try:
             raw = cast(str | None, self._client.get(key))
             if raw is None:
                 return None
             self._client.delete(key)
+            return json.loads(raw)
         except RedisError as exc:
-            logger.error("Redis unavailable for pop_password_reset: %s", exc)
+            logger.error("Redis unavailable for pop_oauth_state: %s", exc)
             raise RedisUnavailableException(
-                "Password reset temporarily unavailable (session store unreachable)"
+                "Sign-in temporarily unavailable (session store unreachable)"
             ) from exc
+
+    def set_oauth_exchange(
+        self, exchange_code: str, payload: dict[str, Any], *, ttl_seconds: int = 120
+    ) -> None:
         try:
-            return UUID(raw)
-        except ValueError:
+            self._client.setex(
+                f"oauth:exchange:{exchange_code}", ttl_seconds, json.dumps(payload)
+            )
+        except RedisError as exc:
+            logger.error("Redis unavailable for set_oauth_exchange: %s", exc)
+            raise RedisUnavailableException(
+                "Sign-in temporarily unavailable (session store unreachable)"
+            ) from exc
+
+    def pop_oauth_exchange(self, exchange_code: str) -> dict[str, Any] | None:
+        key = f"oauth:exchange:{exchange_code}"
+        try:
+            raw = cast(str | None, self._client.get(key))
+            if raw is None:
+                return None
+            self._client.delete(key)
+            return json.loads(raw)
+        except RedisError as exc:
+            logger.error("Redis unavailable for pop_oauth_exchange: %s", exc)
+            raise RedisUnavailableException(
+                "Sign-in temporarily unavailable (session store unreachable)"
+            ) from exc
+
+    def set_user_avatar(
+        self,
+        user_id: UUID,
+        *,
+        content_type: str,
+        data_b64: str,
+        ttl_seconds: int = 86_400,
+    ) -> None:
+        key = f"avatar:{user_id}"
+        try:
+            self._client.setex(
+                key,
+                ttl_seconds,
+                json.dumps({"content_type": content_type, "data_b64": data_b64}),
+            )
+            self._client.delete(f"avatar:miss:{user_id}")
+        except RedisError as exc:
+            logger.warning("Redis unavailable for set_user_avatar: %s", exc)
+
+    def get_user_avatar(self, user_id: UUID) -> dict[str, str] | None:
+        try:
+            raw = cast(str | None, self._client.get(f"avatar:{user_id}"))
+        except RedisError as exc:
+            logger.warning("Redis unavailable for get_user_avatar: %s", exc)
             return None
+        if raw is None:
+            return None
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            return None
+        content_type = payload.get("content_type")
+        data_b64 = payload.get("data_b64")
+        if not isinstance(content_type, str) or not isinstance(data_b64, str):
+            return None
+        return {"content_type": content_type, "data_b64": data_b64}
+
+    def set_user_avatar_miss(self, user_id: UUID, *, ttl_seconds: int = 3_600) -> None:
+        try:
+            self._client.setex(f"avatar:miss:{user_id}", ttl_seconds, "1")
+        except RedisError as exc:
+            logger.warning("Redis unavailable for set_user_avatar_miss: %s", exc)
+
+    def has_user_avatar_miss(self, user_id: UUID) -> bool:
+        try:
+            return bool(self._client.exists(f"avatar:miss:{user_id}"))
+        except RedisError as exc:
+            logger.warning("Redis unavailable for has_user_avatar_miss: %s", exc)
+            return False

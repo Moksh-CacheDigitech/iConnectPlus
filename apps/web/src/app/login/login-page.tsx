@@ -68,7 +68,11 @@ export default function LoginPage() {
         await apiClient("/auth/mfa/verify", {
           method: "POST",
           auth: false,
-          body: { user_id: userId.trim(), otp: otp.trim() },
+          body: {
+            email: userId.trim(),
+            user_id: userId.trim(),
+            otp: otp.trim(),
+          },
         });
         await finishSignIn();
         return;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { Copy, KeyRound, ScrollText, Shield, UserPlus } from "lucide-react";
 
 import {
@@ -226,6 +227,11 @@ export function HrSuperadminPage() {
 
   const assignedEmployeeIds = useMemo(
     () => new Set(admins.map((row) => row.employee_id)),
+    [admins],
+  );
+
+  const orgModuleAdminCount = useMemo(
+    () => admins.filter((row) => row.is_org_module_admin).length,
     [admins],
   );
 
@@ -479,7 +485,7 @@ export function HrSuperadminPage() {
               <PanelHeader
                 icon={Shield}
                 title={`Assigned HR Admins (${admins.length})`}
-                caption="Employees with HR Admin / module access. Toggle entities and sidebar menus. Superadmin Panel is never granted here. Turn off HR Admin to revoke access."
+                caption="Entities control which company data the user can see across all HR sidebar menus. Sidebar menus control which screens appear. Module admin role is assigned in Organization → Users."
               >
                 <Input
                   value={query}
@@ -488,12 +494,25 @@ export function HrSuperadminPage() {
                   className="h-9 w-full lg:w-64"
                 />
               </PanelHeader>
+              {orgModuleAdminCount > 0 ? (
+                <div className="mb-4 rounded-xl border border-border/80 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+                  {orgModuleAdminCount} Organization module admin
+                  {orgModuleAdminCount === 1 ? "" : "s"} listed below — set their entities and menus in this table.{" "}
+                  <Link
+                    href="/organization/users"
+                    className="cursor-pointer font-medium text-foreground underline-offset-2 transition-colors duration-200 hover:underline"
+                  >
+                    Assign or remove module admin role in Organization → Users
+                  </Link>
+                  .
+                </div>
+              ) : null}
               {loading ? (
                 <HrLoadingBlock label="Loading employees…" />
               ) : assignedRows.length === 0 ? (
                 <HrEmptyState
                   title="No HR module users yet"
-                  description="Turn on HR access for an employee in the list below."
+                  description="ERP admins assign module admins in Organization → Users, or grant member HR access below."
                 />
               ) : (
                 <div className="mb-6 overflow-auto rounded-xl border border-border/70">
@@ -524,6 +543,11 @@ export function HrSuperadminPage() {
                               <p className="mt-0.5 text-[11px] text-muted-foreground">
                                 {admin.employee_code} · {admin.email}
                               </p>
+                              {admin.is_org_module_admin ? (
+                                <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                                  Organization module admin
+                                </p>
+                              ) : null}
                             </td>
                             <td className="px-3 py-3 text-muted-foreground">
                               {admin.designation || emp?.designationName || "-"}
@@ -623,13 +647,25 @@ export function HrSuperadminPage() {
                               </div>
                             </td>
                             <td className="px-3 py-3">
-                              <div className="flex justify-end">
-                                <ToggleSwitch
-                                  checked
-                                  disabled={busyId === admin.employee_id}
-                                  label="HR access"
-                                  onChange={(next) => void onToggleHr(admin.employee_id, next)}
-                                />
+                              <div className="flex flex-col items-end gap-1">
+                                {admin.is_org_module_admin ? (
+                                  <span className="text-right text-[11px] text-muted-foreground">
+                                    Revoke in{" "}
+                                    <Link
+                                      href="/organization/users"
+                                      className="cursor-pointer font-medium text-foreground underline-offset-2 transition-colors duration-200 hover:underline"
+                                    >
+                                      Organization → Users
+                                    </Link>
+                                  </span>
+                                ) : (
+                                  <ToggleSwitch
+                                    checked
+                                    disabled={busyId === admin.employee_id}
+                                    label="HR access"
+                                    onChange={(next) => void onToggleHr(admin.employee_id, next)}
+                                  />
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -643,7 +679,7 @@ export function HrSuperadminPage() {
               <PanelHeader
                 icon={UserPlus}
                 title="Employees"
-                caption="Turn on HR access to add HRMS to the user's ERP menu (member permissions)."
+                caption="Grant HR member access (not module admin). Module admins are assigned in Organization → Users."
               />
               {!loading && filtered.length === 0 ? (
                 <HrEmptyState title="No employees match" description="Try a different search." />
@@ -691,9 +727,8 @@ export function HrSuperadminPage() {
                       <li key={row.employee_id} className="border-b border-border/70 py-3 last:border-b-0">
                         <PersonRow
                           name={row.display_name}
-                          meta={`${row.employee_code} · ${row.email} · ${
-                            entityNames.length ? entityNames.join(", ") : row.designation || "-"
-                          }`}
+                          meta={`${row.employee_code} · ${row.email} · ${entityNames.length ? entityNames.join(", ") : row.designation || "-"
+                            }`}
                         >
                           <ToggleSwitch
                             checked={issued?.email === row.email}

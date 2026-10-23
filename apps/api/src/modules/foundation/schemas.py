@@ -8,20 +8,28 @@ from typing import Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
 def _login_id_field():
-    """Sign-in id: work email or HRMS employee code (e.g. CT5345)."""
+    """Sign-in id: work email or HRMS employee code (e.g. CT5345).
+
+    Accept both ``email`` and ``user_id`` keys so older/newer clients interoperate.
+    """
     return Field(
         min_length=2,
         max_length=255,
-        validation_alias=AliasChoices("user_id", "email"),
+        validation_alias=AliasChoices("email", "user_id"),
+        serialization_alias="email",
     )
 
 
 class LoginRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     email: str = _login_id_field()
     password: str = Field(min_length=8, max_length=128)
 
 
 class MfaVerifyRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     email: str = _login_id_field()
     otp: str = Field(min_length=6, max_length=6)
 
