@@ -1,7 +1,15 @@
 "use client";
 
-import type { ReactNode } from "react";
+import {
+  Children,
+  forwardRef,
+  isValidElement,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 
+import { SearchableSelect, type SearchableSelectOption } from "@/components/ui/searchable-select";
 import { cn } from "@/lib/utils";
 
 function FieldLabelText({ label }: { label: string }) {
@@ -45,25 +53,132 @@ export function FinanceField({
   );
 }
 
-export function FinanceSelect({
-  className,
-  children,
-  ...props
-}: React.ComponentProps<"select">) {
-  return (
-    <select
-      className={cn(
-        "flex h-8 w-full cursor-pointer rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors",
-        "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
-        "disabled:cursor-not-allowed disabled:opacity-50",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </select>
-  );
+function optionText(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(optionText).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return optionText(node.props.children);
+  }
+  return "";
 }
+
+function extractSelectOptions(children: ReactNode): SearchableSelectOption[] {
+  const out: SearchableSelectOption[] = [];
+  Children.forEach(children, (child) => {
+    if (!isValidElement<{ value?: string | number; disabled?: boolean; children?: ReactNode }>(child)) {
+      return;
+    }
+    if (child.type !== "option") return;
+    const raw = child.props.value;
+    const value = raw == null ? "" : String(raw);
+    out.push({
+      value,
+      label: optionText(child.props.children) || value || "—",
+      disabled: Boolean(child.props.disabled),
+    });
+  });
+  return out;
+}
+
+/**
+ * CRM-style popover select (same look as designation / product-type pickers).
+ * Keeps a visually hidden native &lt;select&gt; for react-hook-form / form posts.
+ * Falls back to native control when `multiple` is set.
+ */
+export const FinanceSelect = forwardRef<HTMLSelectElement, React.ComponentProps<"select">>(
+  function FinanceSelect(
+    {
+      className,
+      children,
+      value,
+      defaultValue,
+      onChange,
+      onBlur,
+      disabled,
+      id,
+      name,
+      required,
+      multiple,
+      ...props
+    },
+    ref,
+  ) {
+    const options = useMemo(() => extractSelectOptions(children), [children]);
+    const [uncontrolled, setUncontrolled] = useState(() =>
+      defaultValue == null ? "" : String(Array.isArray(defaultValue) ? defaultValue[0] : defaultValue),
+    );
+    const current = value !== undefined ? String(value) : uncontrolled;
+
+    if (multiple) {
+      return (
+        <select
+          ref={ref}
+          id={id}
+          name={name}
+          required={required}
+          disabled={disabled}
+          multiple
+          className={cn(
+            "flex h-8 w-full cursor-pointer rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors",
+            "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+            "disabled:cursor-not-allowed disabled:opacity-50",
+            className,
+          )}
+          value={value}
+          defaultValue={defaultValue}
+          onChange={onChange}
+          onBlur={onBlur}
+          {...props}
+        >
+          {children}
+        </select>
+      );
+    }
+
+    const empty = options.find((o) => o.value === "");
+    const placeholder = empty?.label || "Select…";
+
+    return (
+      <div className="min-w-0">
+        <select
+          ref={ref}
+          id={id}
+          name={name}
+          required={required}
+          disabled={disabled}
+          tabIndex={-1}
+          aria-hidden
+          className="sr-only"
+          value={current}
+          onChange={onChange}
+          onBlur={onBlur}
+          {...props}
+        >
+          {children}
+        </select>
+        <SearchableSelect
+          value={current}
+          onChange={(next) => {
+            if (value === undefined) setUncontrolled(next);
+            onChange?.({
+              target: { value: next, name: name ?? "", id: id ?? "" },
+              currentTarget: { value: next, name: name ?? "", id: id ?? "" },
+            } as unknown as React.ChangeEvent<HTMLSelectElement>);
+          }}
+          options={options}
+          placeholder={placeholder}
+          searchPlaceholder="Search…"
+          disabled={disabled}
+          className={cn(className)}
+          allowCustomValue={false}
+          searchable={options.length > 8}
+        />
+      </div>
+    );
+  },
+);
+FinanceSelect.displayName = "FinanceSelect";
 
 export function FinanceTextarea({
   className,

@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, ConflictException, NotFoundException
@@ -16,11 +17,14 @@ from modules.foundation.domain.erp_modules import (
     resolve_session_user_type,
 )
 from modules.foundation.domain.entities import UserEntity
+from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.repository.session_repository import SessionRepository
 from modules.foundation.service.hrms_user_directory import HrmsUserDirectory
 from modules.foundation.repository.user_module_repository import UserModuleRepository
 from modules.foundation.repository.user_repository import UserRepository
 from modules.foundation.schemas import UserResponse
+from modules.organization.models.company import OrgCompany
+from modules.organization.repository.org_scope_repository import OrgScopeRepository
 from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.rbac_service import RBACService
 from security.password import PasswordHasher
@@ -85,6 +89,40 @@ class UserService:
         if actor is None or not self._is_erp_platform_admin(actor):
             raise ErpAdminRequiredException()
         return actor
+
+    def apply_erp_admin_defaults(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        default_company_id: UUID | None = None,
+    ) -> None:
+        """ERP admins get every active entity and every sidebar module by default."""
+        company_ids = list(
+            self._modules.db.scalars(
+                select(OrgCompany.id).where(
+                    OrgCompany.tenant_id == tenant_id,
+                    OrgCompany.is_deleted.is_(False),
+                )
+            ).all()
+        )
+        ctx = TenantContext(tenant_id=tenant_id, user_id=actor_id or user_id, user_type="super_admin")
+        if company_ids:
+            OrgScopeRepository(self._modules.db).replace_company_scopes(
+                ctx,
+                user_id=user_id,
+                company_ids=company_ids,
+                default_company_id=default_company_id,
+            )
+        # Explicit module-admin rows so Organization / audit views show full sidebar access.
+        self._modules.replace_admin_keys(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            module_keys=list(ERP_MODULE_KEYS),
+            assigned_by=actor_id,
+        )
+        self._rbac.invalidate_user(user_id)
 
     def issue_temporary_password(
         self, tenant_id: UUID, user_id: UUID, *, actor_id: UUID | None
@@ -223,6 +261,8 @@ class UserService:
             user_type=user_type,
             created_by=created_by,
         )
+        if user.user_type in ADMIN_USER_TYPES:
+            self.apply_erp_admin_defaults(tenant_id, user.id, actor_id=created_by)
         self._audit.log_entity_change(
             tenant_id=tenant_id,
             entity_name="sec_user",
@@ -234,9 +274,16 @@ class UserService:
         return user
 
     def update_user(self, tenant_id: UUID, user_id: UUID, updated_by: UUID | None = None, **fields):
+        previous = self._repo.get_by_id(tenant_id, user_id)
+        previous_type = previous.user_type if previous is not None else None
         user = self._repo.update(tenant_id, user_id, **fields)
         if user is None:
             raise NotFoundException("User not found")
+        if (
+            user.user_type in ADMIN_USER_TYPES
+            and previous_type not in ADMIN_USER_TYPES
+        ):
+            self.apply_erp_admin_defaults(tenant_id, user_id, actor_id=updated_by)
         self._audit.log_entity_change(
             tenant_id=tenant_id,
             entity_name="sec_user",

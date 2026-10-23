@@ -14,6 +14,7 @@ from modules.foundation.repository.user_module_repository import UserModuleRepos
 from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.rbac_service import RBACService
 from modules.foundation.service.user_service import UserService
+from modules.hr.repository.hr_admin_nav_access_repository import HrAdminNavAccessRepository
 from modules.hr.service.hr_module_admin import HR_ADMIN_ROLE_CODE
 from modules.organization.models.company import OrgCompany
 from modules.organization.repository.org_scope_repository import OrgScopeRepository
@@ -149,6 +150,7 @@ class OrgModuleAdminSyncService:
         return list(rows)
 
     def _promote_hr(self, ctx: TenantContext, user_id: UUID, actor_id: UUID | None) -> None:
+        """Organization → Users HR admin: all entities + all HR sidebar menus by default."""
         self._ensure_role(ctx.tenant_id, user_id, HR_ADMIN_ROLE_CODE, actor_id)
         company_ids = self._all_company_ids(ctx.tenant_id)
         user = self._db.get(SecUser, user_id)
@@ -168,6 +170,8 @@ class OrgModuleAdminSyncService:
                 company_ids=company_ids,
                 default_company_id=default_company,
             )
+        # Clear any prior Superadmin nav restriction so all HR sidebar menus show.
+        HrAdminNavAccessRepository(self._db).soft_delete(ctx.tenant_id, user_id, actor_id)
         self._rbac.invalidate_user(user_id)
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,
@@ -175,7 +179,12 @@ class OrgModuleAdminSyncService:
             entity_id=user_id,
             operation="promote",
             performed_by=actor_id,
-            new_value={"module": "hr", "role": HR_ADMIN_ROLE_CODE},
+            new_value={
+                "module": "hr",
+                "role": HR_ADMIN_ROLE_CODE,
+                "entities": "all",
+                "hr_nav": "all",
+            },
         )
 
     def _demote_hr(self, ctx: TenantContext, user_id: UUID, actor_id: UUID | None) -> None:

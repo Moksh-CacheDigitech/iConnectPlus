@@ -25,11 +25,20 @@ import {
 import { FinanceField, FinanceSelect } from "@/components/finance/journals/finance-form-field";
 import { PageHeader } from "@/components/layout/page-header";
 import { UserAvatar } from "@/components/layout/user-avatar";
+import {
+  ALL_MODULES_KEY,
+  ModuleAssignSelect,
+} from "@/components/organization/module-assign-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { erpModules } from "@/config/modules";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { useAuthUser } from "@/hooks/use-auth-user";
-import { hasAllModulesAdmin, isErpAdmin, moduleTitle } from "@/lib/module-access";
+import {
+  allErpModuleKeys,
+  hasAllModulesAdmin,
+  isErpAdmin,
+  moduleTitle,
+} from "@/lib/module-access";
 import { hasModuleMemberAssignment, memberOnlyModuleKeys } from "@/lib/module-membership";
 import { cn } from "@/lib/utils";
 import { formatApiError } from "@/services/api-client";
@@ -142,6 +151,9 @@ function expandMemberAccessRows(users: FoundationUser[]): AccessTableRow[] {
 
 function currentRole(row: FoundationUser | undefined, moduleKey: string): ModuleAccessRole | null {
   if (!row || !moduleKey) return null;
+  if (moduleKey === ALL_MODULES_KEY) {
+    return hasAllModulesAdmin(row.admin_module_keys ?? []) ? "admin" : null;
+  }
   if ((row.admin_module_keys ?? []).includes(moduleKey)) return "admin";
   if ((row.assigned_module_keys ?? []).includes(moduleKey)) return "member";
   return null;
@@ -347,34 +359,45 @@ function AssignAccessCard({
   onError: (message: string) => void;
   cardRef: RefObject<HTMLDivElement | null>;
 }) {
-  const [search, setSearch] = useState("");
   const [moduleKey, setModuleKey] = useState("");
   const [role, setRole] = useState<ModuleAccessRole>("member");
   const [jobRole, setJobRole] = useState(SERVICE_JOB_ROLES[0].value);
   const [saving, setSaving] = useState(false);
+  const allModules = moduleKey === ALL_MODULES_KEY;
+  const effectiveRole: ModuleAccessRole = allModules ? "admin" : role;
 
-  const options = useMemo(
-    () => users.filter((u) => matchesUserQuery(u, search) || u.id === selectedUserId),
-    [users, search, selectedUserId],
+  const employeeOptions = useMemo(
+    () =>
+      users.map((u) => ({
+        value: u.id,
+        label: `${u.display_name} · ${u.employee_code ?? "—"} (${u.email})`,
+      })),
+    [users],
   );
   const selected = users.find((u) => u.id === selectedUserId);
   const existing = currentRole(selected, moduleKey);
-  const unchanged = existing === role;
+  const unchanged = existing === effectiveRole;
 
   async function submit() {
     if (!selected || !moduleKey || unchanged) return;
     setSaving(true);
     try {
-      const updated = await grantModuleAccess(
-        selected.id,
-        moduleKey,
-        role,
-        moduleKey === "service" && role === "member" ? jobRole : undefined,
-      );
-      onAssigned(
-        updated,
-        `${selected.display_name} is now ${role === "admin" ? "Admin" : "User"} of ${moduleTitle(moduleKey)}.`,
-      );
+      let updated: FoundationUser;
+      if (allModules) {
+        updated = await updateUserModules(selected.id, allErpModuleKeys());
+        onAssigned(updated, `${selected.display_name} is now Admin of all modules.`);
+      } else {
+        updated = await grantModuleAccess(
+          selected.id,
+          moduleKey,
+          effectiveRole,
+          moduleKey === "service" && effectiveRole === "member" ? jobRole : undefined,
+        );
+        onAssigned(
+          updated,
+          `${selected.display_name} is now ${effectiveRole === "admin" ? "Admin" : "User"} of ${moduleTitle(moduleKey)}.`,
+        );
+      }
     } catch (err) {
       onError(formatApiError(err, "Could not update module access"));
     } finally {
@@ -396,59 +419,49 @@ function AssignAccessCard({
           <p id="assign-access-heading" className="text-sm font-semibold text-foreground">
             Assign module access
           </p>
+          <p className="text-xs text-muted-foreground">
+            HRMS onboarded employees ({users.length}). Sync from HRMS after onboard / offboard.
+          </p>
         </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)_minmax(0,1fr)_auto] md:items-end">
         <FinanceField label="Employee" htmlFor="assign-user" className="min-w-0">
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Filter by name, employee id, email…"
-            className="mb-1.5 h-9"
-            aria-label="Filter employees"
-          />
-          <FinanceSelect
-            id="assign-user"
-            className="h-9 bg-background"
+          <SearchableSelect
             value={selectedUserId}
-            onChange={(e) => onSelectUser(e.target.value)}
-          >
-            <option value="">
-              {users.length === 0 ? "No HRMS employees synced yet" : `Select employee (${options.length})…`}
-            </option>
-            {options.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.display_name} · {u.employee_code ?? "—"} ({u.email})
-              </option>
-            ))}
-          </FinanceSelect>
+            onChange={onSelectUser}
+            options={employeeOptions}
+            placeholder={
+              users.length === 0
+                ? "No HRMS employees synced yet"
+                : `Select employee (${users.length})…`
+            }
+            searchPlaceholder="Search name, employee id, email…"
+            className="h-9"
+            allowCustomValue={false}
+          />
         </FinanceField>
 
         <FinanceField label="Module" htmlFor="assign-module" className="min-w-0">
-          <FinanceSelect
+          <ModuleAssignSelect
             id="assign-module"
-            className="h-9 bg-background"
             value={moduleKey}
-            onChange={(e) => setModuleKey(e.target.value)}
-          >
-            <option value="">Select module…</option>
-            {erpModules.map((m) => (
-              <option key={m.key} value={m.key}>
-                {m.title}
-              </option>
-            ))}
-          </FinanceSelect>
+            onChange={(key) => {
+              setModuleKey(key);
+              if (key === ALL_MODULES_KEY) setRole("admin");
+            }}
+          />
         </FinanceField>
 
         <FinanceField label="Role" htmlFor="assign-role" className="min-w-0">
           <FinanceSelect
             id="assign-role"
             className="h-9 bg-background"
-            value={role}
+            value={effectiveRole}
+            disabled={allModules}
             onChange={(e) => setRole(e.target.value as ModuleAccessRole)}
           >
-            <option value="member">User</option>
+            {!allModules ? <option value="member">User</option> : null}
             <option value="admin">Admin</option>
           </FinanceSelect>
         </FinanceField>
@@ -464,7 +477,7 @@ function AssignAccessCard({
         </Button>
       </div>
 
-      {moduleKey === "service" && role === "member" ? (
+      {moduleKey === "service" && effectiveRole === "member" ? (
         <FinanceField label="Service team role" htmlFor="assign-service-role" className="mt-3 max-w-xs">
           <FinanceSelect
             id="assign-service-role"
@@ -483,7 +496,7 @@ function AssignAccessCard({
 
       {selected && moduleKey ? (
         <p className="mt-3 text-xs text-muted-foreground">
-          Current access to {moduleTitle(moduleKey)}:{" "}
+          Current access to {allModules ? "all modules" : moduleTitle(moduleKey)}:{" "}
           <span className="font-medium text-foreground">
             {existing === "admin" ? "Admin" : existing === "member" ? "User" : "None"}
           </span>
@@ -534,12 +547,13 @@ export function OrganizationUsersPage({
       if (manual) setError(null);
       try {
         const result = await syncHrmsUsers();
+        // Always refresh the assign list so onboard / offboard changes appear immediately.
+        await load();
         if (manual || result.created || result.linked || result.updated || result.deactivated) {
           setNotice(
             `HRMS sync: ${result.employee_count} onboarded employees · ${result.created} new logins · ` +
-            `${result.linked} linked · ${result.updated} updated · ${result.deactivated} deactivated.`,
+              `${result.linked} linked · ${result.updated} updated · ${result.deactivated} deactivated.`,
           );
-          await load();
         }
       } catch (err) {
         if (manual) setError(formatApiError(err, "HRMS sync failed"));
@@ -549,6 +563,19 @@ export function OrganizationUsersPage({
     },
     [load],
   );
+
+  // Drop a selected employee from Assign if HRMS sync removed them from the assignable set.
+  useEffect(() => {
+    if (!assignUserId) return;
+    const stillThere = rows.some(
+      (r) =>
+        r.id === assignUserId &&
+        r.hrms_valid &&
+        !isErpAdmin(r.user_type) &&
+        r.status !== "inactive",
+    );
+    if (!stillThere) setAssignUserId("");
+  }, [rows, assignUserId]);
 
   useEffect(() => {
     void load();

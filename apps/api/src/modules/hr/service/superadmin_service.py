@@ -39,6 +39,7 @@ HR_MEMBER_ROLE_CODE = "HR_EMPLOYEE"
 HR_ADMIN_ROLE_CODE = "HR_ADMIN"
 _PASSWORD_SPECIAL = "!@#$%&*"
 _SENSITIVE_KEYS = {"password", "password_hash", "token", "secret", "otp"}
+_PLACEHOLDER_EMAILS = frozenset({"na", "n/a", "none", "null", "-", ".", "nil", "email"})
 
 
 def generate_hr_login_password(length: int = 12) -> str:
@@ -120,6 +121,63 @@ class HrSuperadminService:
     def _is_org_hr_module_admin(self, tenant_id: UUID, user_id: UUID) -> bool:
         return self._modules.is_module_admin(tenant_id, user_id, HR_MODULE_KEY)
 
+    @staticmethod
+    def _is_placeholder_email(email: str | None) -> bool:
+        raw = (email or "").strip().lower()
+        if not raw or "@" not in raw:
+            return True
+        local, _, domain = raw.partition("@")
+        if raw in _PLACEHOLDER_EMAILS or local in _PLACEHOLDER_EMAILS:
+            return True
+        if domain in {"cleared.local", "hr-login.local"}:
+            return domain == "cleared.local"
+        return False
+
+    def _login_email_for_employee(self, emp: EmployeeRead) -> str:
+        """Stable unique login email — never share placeholder emails across people."""
+        raw = (emp.email or "").strip().lower()
+        if not self._is_placeholder_email(raw):
+            return raw
+        code = (emp.employee_code or "").strip().lower().replace(" ", "")
+        if not code:
+            raise AppException(
+                "Employee has no usable email or employee code — cannot create HR login"
+            )
+        return f"{code}@hr-login.local"
+
+    def _claim_login_for_employee(
+        self,
+        ctx: TenantContext,
+        emp: EmployeeRead,
+        user: SecUser,
+    ) -> None:
+        """Ensure this login belongs only to the selected employee (not shared rows)."""
+        commands = EmployeeCommands(self._db)
+        others = self._db.scalars(
+            select(EmployeeRead).where(
+                EmployeeRead.user_id == user.id,
+                EmployeeRead.id != emp.id,
+                EmployeeRead.is_deleted.is_(False),
+            )
+        ).all()
+        for other in others:
+            commands.unlink_user(other.id, updated_by=ctx.user_id)
+        commands.link_user(emp.id, user.id, updated_by=ctx.user_id)
+        user.employee_id = emp.id
+        desired = self._login_email_for_employee(emp)
+        if self._is_placeholder_email(user.email) and user.email != desired:
+            conflict = self._db.scalar(
+                select(SecUser.id).where(
+                    SecUser.tenant_id == ctx.tenant_id,
+                    SecUser.email == desired,
+                    SecUser.is_deleted.is_(False),
+                    SecUser.id != user.id,
+                )
+            )
+            if conflict is None:
+                user.email = desired
+        user.updated_by = ctx.user_id
+
     def _ensure_role_link(
         self,
         *,
@@ -169,6 +227,38 @@ class HrSuperadminService:
             raise NotFoundException("Employee not found")
         return emp
 
+    def _all_entity_ids(self, tenant_id: UUID) -> list[UUID]:
+        rows = self._db.scalars(
+            select(OrgCompany.id)
+            .where(
+                OrgCompany.tenant_id == tenant_id,
+                OrgCompany.is_deleted.is_(False),
+            )
+            .order_by(OrgCompany.company_name)
+        ).all()
+        return list(rows)
+
+    def _ensure_org_admin_defaults(
+        self,
+        ctx: TenantContext,
+        user: SecUser,
+        emp: EmployeeRead,
+    ) -> list[UUID]:
+        """Organization → Users HR admins always get every entity + all HR menus."""
+        all_ids = self._all_entity_ids(ctx.tenant_id)
+        current = set(self._company_ids_for_user(user.id))
+        if all_ids and current != set(all_ids):
+            self._apply_entity_scopes(
+                ctx,
+                user.id,
+                all_ids,
+                default_company_id=emp.company_id,
+            )
+        # Unrestricted menus (no nav row) — soft-delete any prior Superadmin restriction.
+        if self._nav.get(ctx.tenant_id, user.id) is not None:
+            self._nav.soft_delete(ctx.tenant_id, user.id, ctx.user_id)
+        return all_ids
+
     def _to_record(
         self,
         emp: EmployeeRead,
@@ -178,13 +268,26 @@ class HrSuperadminService:
         temporary_password: str | None = None,
         company_ids: list[UUID] | None = None,
         is_org_module_admin: bool | None = None,
+        ctx: TenantContext | None = None,
     ) -> HrAdminRecord:
-        nav_keys, nav_unrestricted = self._nav_fields(emp.tenant_id, user.id)
         org_admin = (
             is_org_module_admin
             if is_org_module_admin is not None
             else self._is_org_hr_module_admin(emp.tenant_id, user.id)
         )
+        if org_admin and ctx is not None:
+            resolved_companies = self._ensure_org_admin_defaults(ctx, user, emp)
+            nav_keys, nav_unrestricted = default_hr_nav_keys(), True
+        elif org_admin:
+            resolved_companies = (
+                company_ids if company_ids is not None else self._all_entity_ids(emp.tenant_id)
+            )
+            nav_keys, nav_unrestricted = default_hr_nav_keys(), True
+        else:
+            resolved_companies = (
+                company_ids if company_ids is not None else self._company_ids_for_user(user.id)
+            )
+            nav_keys, nav_unrestricted = self._nav_fields(emp.tenant_id, user.id)
         return HrAdminRecord(
             employee_id=emp.id,
             employee_code=emp.employee_code,
@@ -194,7 +297,7 @@ class HrSuperadminService:
             user_id=user.id,
             login_created=login_created,
             temporary_password=temporary_password,
-            company_ids=company_ids if company_ids is not None else self._company_ids_for_user(user.id),
+            company_ids=resolved_companies,
             nav_keys=nav_keys,
             nav_unrestricted=nav_unrestricted,
             is_org_module_admin=org_admin,
@@ -231,6 +334,10 @@ class HrSuperadminService:
     ) -> HrAdminRecord:
         emp = self._employee(ctx, employee_id)
         user = self._require_hr_admin_or_member(ctx, emp)
+        if self._is_org_hr_module_admin(ctx.tenant_id, user.id):
+            raise AppException(
+                "Organization HR admins keep all sidebar menus by default — manage role in Organization Users"
+            )
         keys = normalize_hr_nav_keys(nav_keys)
         self._nav.upsert(
             tenant_id=ctx.tenant_id,
@@ -244,7 +351,7 @@ class HrSuperadminService:
             user_id=user.id,
             details_json={"by": str(ctx.user_id), "employee_id": str(emp.id), "keys": keys},
         )
-        return self._to_record(emp, user, login_created=False)
+        return self._to_record(emp, user, login_created=False, ctx=ctx)
 
     def _company_ids_for_user(self, user_id: UUID) -> list[UUID]:
         rows = self._db.scalars(
@@ -336,7 +443,11 @@ class HrSuperadminService:
         ]
 
     def list_admins(self, ctx: TenantContext) -> list[HrAdminRecord]:
-        """Members (Grant HR) and Organization module admins — both get entity/nav here."""
+        """Members (Grant HR) and Organization module admins — both get entity/nav here.
+
+        One row per login user. Prefer the employee linked as ``SecUser.employee_id``
+        so shared/placeholder email mishooks do not duplicate people in the table.
+        """
         rows = self._db.execute(
             select(EmployeeRead, SecUser, SecUserModule.role)
             .join(SecUser, SecUser.id == EmployeeRead.user_id)
@@ -350,14 +461,33 @@ class HrSuperadminService:
             )
             .order_by(EmployeeRead.first_name, EmployeeRead.last_name)
         ).all()
+        by_user: dict[UUID, tuple[EmployeeRead, SecUser, str]] = {}
+        for emp, user, role in rows:
+            previous = by_user.get(user.id)
+            if previous is None:
+                by_user[user.id] = (emp, user, role)
+                continue
+            prev_emp, _, _ = previous
+            if user.employee_id == emp.id:
+                by_user[user.id] = (emp, user, role)
+            elif user.employee_id == prev_emp.id:
+                continue
+        ordered = sorted(
+            by_user.values(),
+            key=lambda item: (
+                (item[0].first_name or "").lower(),
+                (item[0].last_name or "").lower(),
+            ),
+        )
         return [
             self._to_record(
                 emp,
                 user,
                 login_created=False,
                 is_org_module_admin=(role == MODULE_ROLE_ADMIN),
+                ctx=ctx,
             )
-            for emp, user, role in rows
+            for emp, user, role in ordered
         ]
 
     def list_org_module_admins(self, ctx: TenantContext) -> list[HrAdminRecord]:
@@ -432,10 +562,10 @@ class HrSuperadminService:
         user: SecUser | None = None
         if emp.user_id:
             user = self._db.get(SecUser, emp.user_id)
-        if user is None or user.is_deleted:
-            email = (emp.email or "").strip().lower()
-            if not email:
-                raise AppException("Employee has no email - cannot create HR module login")
+            if user is not None and user.is_deleted:
+                user = None
+        if user is None:
+            email = self._login_email_for_employee(emp)
             existing = self._db.scalar(
                 select(SecUser).where(
                     SecUser.tenant_id == ctx.tenant_id,
@@ -443,9 +573,10 @@ class HrSuperadminService:
                     SecUser.is_deleted.is_(False),
                 )
             )
-            if existing:
+            if existing and not self._is_placeholder_email(email):
                 user = existing
-                EmployeeCommands(self._db).link_user(emp.id, existing.id, updated_by=ctx.user_id)
+            elif existing and existing.employee_id in {None, emp.id}:
+                user = existing
             else:
                 temporary_password = generate_hr_login_password()
                 created = self._users.create_user(
@@ -459,10 +590,10 @@ class HrSuperadminService:
                 user = self._db.get(SecUser, created.id)
                 assert user is not None
                 user.must_change_password = True
-                EmployeeCommands(self._db).link_user(emp.id, user.id, updated_by=ctx.user_id)
                 login_created = True
 
         assert user is not None
+        self._claim_login_for_employee(ctx, emp, user)
         self._assert_not_superadmin(ctx, user)
 
         if self._is_org_hr_module_admin(ctx.tenant_id, user.id):
@@ -540,6 +671,10 @@ class HrSuperadminService:
     ) -> HrAdminRecord:
         emp = self._employee(ctx, employee_id)
         user = self._require_hr_admin_or_member(ctx, emp)
+        if self._is_org_hr_module_admin(ctx.tenant_id, user.id):
+            raise AppException(
+                "Organization HR admins keep all entities by default — manage role in Organization Users"
+            )
         ids = self._resolve_company_ids(ctx, emp, company_ids, require_nonempty=True)
         previous = set(self._company_ids_for_user(user.id))
         applied = self._apply_entity_scopes(
@@ -547,7 +682,7 @@ class HrSuperadminService:
         )
         if previous - set(applied):
             self._users.revoke_all_sessions(ctx.tenant_id, user.id, revoked_by=ctx.user_id)
-        return self._to_record(emp, user, login_created=False, company_ids=applied)
+        return self._to_record(emp, user, login_created=False, company_ids=applied, ctx=ctx)
 
     def reset_password(self, ctx: TenantContext, employee_id: UUID) -> HrAdminPasswordResponse:
         emp = self._employee(ctx, employee_id)

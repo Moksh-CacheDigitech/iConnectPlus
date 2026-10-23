@@ -13,7 +13,10 @@ from core.exceptions import ConflictException
 from modules.foundation.domain.erp_modules import ADMIN_USER_TYPES
 from modules.foundation.models.security import SecUser
 from modules.foundation.repository.session_repository import SessionRepository
-from modules.foundation.service.hrms_user_directory import EXITED_STATUSES, is_onboarded_employee
+from modules.foundation.service.hrms_user_directory import (
+    is_onboarded_employee,
+    login_email_for_employee,
+)
 from modules.foundation.service.org_context_service import OrgContextService
 from modules.foundation.service.user_service import UserService
 from modules.master_data.published import EmployeeCommands, EmployeeRead
@@ -60,7 +63,7 @@ class HrmsUserSyncService:
         employees: list[EmployeeRead],
         actor_user_id: UUID | None,
     ) -> tuple[SecUser | None, bool]:
-        """Return (user, created) for one employee email."""
+        """Return (user, created) for one login email."""
         for emp in employees:
             if emp.user_id is None:
                 continue
@@ -88,22 +91,24 @@ class HrmsUserSyncService:
         return self._db.get(SecUser, created.id), True
 
     def sync(self, *, tenant_id: UUID, actor_user_id: UUID | None) -> HrmsUserSyncResult:
+        # Include soft-deleted rows so offboarded people can deactivate their login.
         employees = list(
             self._db.scalars(
-                select(EmployeeRead).where(
-                    EmployeeRead.tenant_id == tenant_id,
-                    EmployeeRead.is_deleted.is_(False),
-                )
+                select(EmployeeRead).where(EmployeeRead.tenant_id == tenant_id)
             ).all()
         )
+        live = [emp for emp in employees if not emp.is_deleted]
         # Stable order so an employee present in several entities always maps the same way.
         onboarded = sorted(
-            (emp for emp in employees if is_onboarded_employee(emp)),
+            (emp for emp in live if is_onboarded_employee(emp)),
             key=lambda emp: (emp.date_of_joining, emp.employee_code, str(emp.id)),
         )
         by_email: dict[str, list[EmployeeRead]] = {}
         for emp in onboarded:
-            by_email.setdefault(emp.email.strip().lower(), []).append(emp)
+            email = login_email_for_employee(emp)
+            if not email:
+                continue
+            by_email.setdefault(email, []).append(emp)
 
         created = linked = updated = skipped = 0
         valid_user_ids: set[UUID] = set()
@@ -132,11 +137,17 @@ class HrmsUserSyncService:
             if hr_name and user.display_name != hr_name:
                 user.display_name = hr_name
                 changed = True
+            if user.email != email:
+                conflict = self._find_user_by_email(tenant_id, email)
+                if conflict is None or conflict.id == user.id:
+                    user.email = email
+                    changed = True
 
             for emp in group:
-                if emp.user_id is None:
+                if emp.user_id != user.id:
+                    if emp.user_id is None:
+                        linked += 1
                     self._employees.link_user(emp.id, user.id, updated_by=actor_user_id)
-                    linked += 1
             if user.employee_id is None or user.employee_id not in {e.id for e in group}:
                 user.employee_id = first.id
                 changed = True
@@ -149,7 +160,7 @@ class HrmsUserSyncService:
                 branch_id=first.branch_id,
             )
 
-        deactivated = self._deactivate_exited(
+        deactivated = self._deactivate_not_onboarded(
             tenant_id=tenant_id,
             employees=employees,
             keep=valid_user_ids,
@@ -165,7 +176,7 @@ class HrmsUserSyncService:
             skipped=skipped,
         )
 
-    def _deactivate_exited(
+    def _deactivate_not_onboarded(
         self,
         *,
         tenant_id: UUID,
@@ -173,16 +184,26 @@ class HrmsUserSyncService:
         keep: set[UUID],
         actor_user_id: UUID | None,
     ) -> int:
-        """Exited employees lose ERP sign-in unless another onboarded record still uses the login."""
-        count = 0
+        """Remove ERP sign-in for people no longer onboarded in HRMS (exit, delete, etc.)."""
+        hrms_linked: set[UUID] = set()
         for emp in employees:
-            if emp.status not in EXITED_STATUSES or emp.user_id is None or emp.user_id in keep:
+            if emp.user_id is not None:
+                hrms_linked.add(emp.user_id)
+
+        count = 0
+        candidates = self._db.scalars(
+            select(SecUser).where(
+                SecUser.tenant_id == tenant_id,
+                SecUser.is_deleted.is_(False),
+                SecUser.status != "inactive",
+            )
+        ).all()
+        for user in candidates:
+            if user.id in keep:
                 continue
-            user = self._db.get(SecUser, emp.user_id)
-            if user is None or user.is_deleted or user.status == "inactive":
-                continue
-            # Preserve ERP admins managed in the database (not env allowlists).
             if user.user_type in ADMIN_USER_TYPES:
+                continue
+            if user.id not in hrms_linked and user.employee_id is None:
                 continue
             user.status = "inactive"
             self._sessions.revoke_all_for_user(tenant_id, user.id, revoked_by=actor_user_id)

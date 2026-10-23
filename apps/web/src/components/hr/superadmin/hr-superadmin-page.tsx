@@ -230,11 +230,6 @@ export function HrSuperadminPage() {
     [admins],
   );
 
-  const orgModuleAdminCount = useMemo(
-    () => admins.filter((row) => row.is_org_module_admin).length,
-    [admins],
-  );
-
   const assignedRows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return admins
@@ -419,10 +414,7 @@ export function HrSuperadminPage() {
   return (
     <div className="space-y-5">
       <SetupToastHost />
-      <PageHeader
-        title="Superadmin Panel"
-        description="Assign HR Admins, choose entities, pick which sidebar menus they see, generate passwords, and review activity logs."
-      />
+      <PageHeader title="Superadmin Panel" />
 
       {issued ? (
         <div className="rounded-2xl border border-primary/30 bg-primary/5 px-5 py-4">
@@ -485,7 +477,6 @@ export function HrSuperadminPage() {
               <PanelHeader
                 icon={Shield}
                 title={`Assigned HR Admins (${admins.length})`}
-                caption="Entities control which company data the user can see across all HR sidebar menus. Sidebar menus control which screens appear. Module admin role is assigned in Organization → Users."
               >
                 <Input
                   value={query}
@@ -494,19 +485,6 @@ export function HrSuperadminPage() {
                   className="h-9 w-full lg:w-64"
                 />
               </PanelHeader>
-              {orgModuleAdminCount > 0 ? (
-                <div className="mb-4 rounded-xl border border-border/80 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-                  {orgModuleAdminCount} Organization module admin
-                  {orgModuleAdminCount === 1 ? "" : "s"} listed below — set their entities and menus in this table.{" "}
-                  <Link
-                    href="/organization/users"
-                    className="cursor-pointer font-medium text-foreground underline-offset-2 transition-colors duration-200 hover:underline"
-                  >
-                    Assign or remove module admin role in Organization → Users
-                  </Link>
-                  .
-                </div>
-              ) : null}
               {loading ? (
                 <HrLoadingBlock label="Loading employees…" />
               ) : assignedRows.length === 0 ? (
@@ -528,11 +506,18 @@ export function HrSuperadminPage() {
                     </thead>
                     <tbody>
                       {assignedRows.map(({ admin, emp }) => {
-                        const assigned = new Set(admin.company_ids ?? []);
-                        const entityNames = admin.company_ids
-                          .map((id) => entityNameById.get(id))
-                          .filter((name): name is string => Boolean(name));
-                        const navKeys = effectiveNavKeys(admin);
+                        const orgLocked = Boolean(admin.is_org_module_admin);
+                        const assigned = orgLocked
+                          ? new Set(entities.map((e) => e.id))
+                          : new Set(admin.company_ids ?? []);
+                        const entityNames = orgLocked
+                          ? entities.map((e) => e.company_name)
+                          : admin.company_ids
+                              .map((id) => entityNameById.get(id))
+                              .filter((name): name is string => Boolean(name));
+                        const navKeys = orgLocked
+                          ? new Set(ALL_HR_NAV_KEYS)
+                          : effectiveNavKeys(admin);
                         const allMenusOn = ALL_HR_NAV_KEYS.every((key) => navKeys.has(key));
                         return (
                           <tr key={admin.employee_id} className="border-b border-border/50 align-top last:border-b-0">
@@ -543,9 +528,9 @@ export function HrSuperadminPage() {
                               <p className="mt-0.5 text-[11px] text-muted-foreground">
                                 {admin.employee_code} · {admin.email}
                               </p>
-                              {admin.is_org_module_admin ? (
+                              {orgLocked ? (
                                 <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                                  Organization module admin
+                                  Organization module admin · all entities & menus
                                 </p>
                               ) : null}
                             </td>
@@ -554,7 +539,11 @@ export function HrSuperadminPage() {
                             </td>
                             <td className="px-3 py-3">
                               <p className="text-foreground">
-                                {entityNames.length ? entityNames.join(", ") : "-"}
+                                {orgLocked
+                                  ? "All entities"
+                                  : entityNames.length
+                                    ? entityNames.join(", ")
+                                    : "-"}
                               </p>
                               {entities.length > 0 ? (
                                 <ul className="mt-2 space-y-1">
@@ -570,7 +559,11 @@ export function HrSuperadminPage() {
                                         <ToggleSwitch
                                           compact
                                           checked={on}
-                                          disabled={busyId === admin.employee_id || entityBusy}
+                                          disabled={
+                                            orgLocked ||
+                                            busyId === admin.employee_id ||
+                                            entityBusy
+                                          }
                                           label={on ? "On" : "Off"}
                                           onChange={(next) =>
                                             void onToggleEntity(admin.employee_id, entity.id, next)
@@ -581,6 +574,11 @@ export function HrSuperadminPage() {
                                   })}
                                 </ul>
                               ) : null}
+                              {orgLocked ? (
+                                <p className="mt-1.5 text-[10px] text-muted-foreground">
+                                  Locked — all entities assigned by default
+                                </p>
+                              ) : null}
                             </td>
                             <td className="px-3 py-3">
                               <div className="mb-2 flex items-center justify-between gap-2 rounded-lg bg-muted/40 px-2 py-1">
@@ -588,13 +586,18 @@ export function HrSuperadminPage() {
                                 <ToggleSwitch
                                   compact
                                   checked={allMenusOn}
-                                  disabled={Boolean(busyId)}
+                                  disabled={orgLocked || Boolean(busyId)}
                                   label={allMenusOn ? "Shown" : "Hidden"}
                                   onChange={(next) =>
                                     void onToggleNavGroup(admin.employee_id, ALL_HR_NAV_KEYS, next)
                                   }
                                 />
                               </div>
+                              {orgLocked ? (
+                                <p className="mb-2 text-[10px] text-muted-foreground">
+                                  Locked — all sidebar menus assigned by default
+                                </p>
+                              ) : (
                               <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
                                 {NAV_ACCESS_GROUPS.map((group, groupIdx) => {
                                   const groupKeys = group.items.map((item) => item.navKey);
@@ -645,6 +648,7 @@ export function HrSuperadminPage() {
                                   );
                                 })}
                               </div>
+                              )}
                             </td>
                             <td className="px-3 py-3">
                               <div className="flex flex-col items-end gap-1">

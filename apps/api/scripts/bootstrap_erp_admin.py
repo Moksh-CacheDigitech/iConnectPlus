@@ -3,6 +3,8 @@
 Sets ``sec_user.user_type = super_admin`` in the database. ERP admin status is
 stored only in the DB — not in environment variables.
 
+Defaults: every active entity + every sidebar module (via UserService.apply_erp_admin_defaults).
+
 Usage (from apps/api):
   python -m scripts.bootstrap_erp_admin --email you@company.com --password 'Secret@123'
 """
@@ -21,7 +23,6 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from database.session import SessionLocal  # noqa: E402
 from modules.foundation.models.security import SecRole, SecTenant, SecUser, SecUserRole  # noqa: E402
-from modules.foundation.service.org_context_service import OrgContextService  # noqa: E402
 from modules.foundation.service.user_service import UserService  # noqa: E402
 from modules.master_data.published import EmployeeCommands, EmployeeRead  # noqa: E402
 from security.field_crypto import pii_lookup  # noqa: E402
@@ -101,25 +102,19 @@ def main() -> None:
                 EmployeeRead.email_lookup == pii_lookup(email),
             )
         )
+        default_company_id = None
         if employee is not None:
             if employee.user_id != user.id:
                 EmployeeCommands(db).link_user(employee.id, user.id)
             user.employee_id = employee.id
-            OrgContextService(db).ensure_default_scope(
-                tenant_id=tenant.id,
-                user_id=user.id,
-                company_id=employee.company_id,
-                branch_id=employee.branch_id,
-            )
-        else:
-            company, branch = OrgContextService(db).get_tenant_primary_org(tenant.id)
-            if company is not None:
-                OrgContextService(db).ensure_default_scope(
-                    tenant_id=tenant.id,
-                    user_id=user.id,
-                    company_id=company.id,
-                    branch_id=branch.id if branch else None,
-                )
+            default_company_id = employee.company_id
+
+        # Always refresh: all entities + all sidebar modules.
+        users.apply_erp_admin_defaults(
+            tenant.id,
+            user.id,
+            default_company_id=default_company_id,
+        )
 
         db.commit()
         linked = f", employee {employee.employee_code}" if employee is not None else ""

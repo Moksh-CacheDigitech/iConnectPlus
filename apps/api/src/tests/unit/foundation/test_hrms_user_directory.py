@@ -9,6 +9,7 @@ from modules.foundation.schemas import LoginRequest
 from modules.foundation.service.hrms_user_directory import (
     is_onboarded_employee,
     is_valid_employee_code,
+    login_email_for_employee,
 )
 
 
@@ -43,8 +44,13 @@ def test_onboarded_employee_requires_active_lifecycle() -> None:
     assert not is_onboarded_employee(_employee(status="resigned"))
 
 
-def test_onboarded_employee_requires_email_and_code() -> None:
-    assert not is_onboarded_employee(_employee(email=""))
+def test_onboarded_employee_requires_code_and_allows_placeholder_email() -> None:
+    # Missing / placeholder work emails still onboard via employee-code login.
+    assert is_onboarded_employee(_employee(email=""))
+    assert is_onboarded_employee(_employee(email="NA"))
+    assert login_email_for_employee(_employee(email="NA", employee_code="CT5329")) == (
+        "ct5329@hr-login.local"
+    )
     assert not is_onboarded_employee(_employee(employee_code="EMP-000001"))
     assert not is_onboarded_employee(_employee(is_deleted=True))
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -22,8 +22,8 @@ type FilterSelectProps = {
 };
 
 /**
- * Rounded filter dropdown (replaces native &lt;select&gt; popup styling).
- * Opens with a soft slide/fade; list scrolls with erp-scroll.
+ * Filter dropdown matching CRM popovers
+ * (`rounded-lg border border-border bg-popover shadow-md`).
  */
 export function FilterSelect({
   value,
@@ -35,14 +35,13 @@ export function FilterSelect({
 }: FilterSelectProps) {
   const listId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLUListElement>(null);
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [coords, setCoords] = useState<{
     top: number;
     left: number;
-    minWidth: number;
-    maxWidth: number;
+    width: number;
   } | null>(null);
 
   const selected = options.find((o) => o.value === value);
@@ -58,7 +57,7 @@ export function FilterSelect({
     const rect = trigger.getBoundingClientRect();
     const menu = menuRef.current;
     const menuHeight = menu?.offsetHeight || 220;
-    const gap = 6;
+    const gap = 4;
     const pad = 8;
 
     let top = rect.bottom + gap;
@@ -66,15 +65,10 @@ export function FilterSelect({
       top = Math.max(pad, rect.top - gap - menuHeight);
     }
 
-    const maxWidth = Math.min(384, window.innerWidth - pad * 2);
-    const minWidth = Math.min(Math.max(rect.width, 180), maxWidth);
-    // Grow to fit longest label (scrollWidth), never narrower than the trigger.
-    const contentWidth = menu ? Math.ceil(menu.scrollWidth) : minWidth;
-    const width = Math.min(Math.max(minWidth, contentWidth), maxWidth);
-
+    const width = Math.min(Math.max(rect.width, 180), window.innerWidth - pad * 2);
     let left = rect.left;
     left = Math.min(Math.max(pad, left), window.innerWidth - width - pad);
-    setCoords({ top, left, minWidth: width, maxWidth });
+    setCoords({ top, left, width });
   }, []);
 
   useLayoutEffect(() => {
@@ -122,11 +116,11 @@ export function FilterSelect({
         aria-controls={open ? listId : undefined}
         title={label}
         className={cn(
-          "flex h-8.5 w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-input/80 bg-background/60 px-3 text-left text-sm outline-none transition-all duration-150",
-          "hover:bg-muted/60 hover:border-border",
+          "flex h-8.5 w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-input/80 bg-background/60 px-3 text-left text-sm outline-none transition-all duration-150",
+          "hover:bg-muted/20",
           "focus-visible:border-primary/60 focus-visible:ring-3 focus-visible:ring-primary/15",
           "shadow-[0_1px_2px_0_rgba(0,0,0,0.02)] backdrop-blur-xs",
-          open && "border-primary/60 ring-3 ring-primary/15",
+          open && "border-ring ring-3 ring-ring/50",
           "disabled:cursor-not-allowed disabled:opacity-50",
         )}
         onClick={() => setOpen((v) => !v)}
@@ -134,7 +128,7 @@ export function FilterSelect({
         <span className={cn("min-w-0 truncate", !selected && "text-muted-foreground")}>{label}</span>
         <ChevronDown
           className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
             open && "rotate-180",
           )}
         />
@@ -142,51 +136,46 @@ export function FilterSelect({
 
       {mounted && open
         ? createPortal(
-            <div
-              ref={menuRef}
-              id={listId}
-              role="listbox"
-              aria-label={placeholder}
-              className="fixed z-[200] overflow-hidden rounded-2xl border border-border/70 bg-card/95 shadow-2xl backdrop-blur-2xl animate-in fade-in-0 zoom-in-95 duration-150"
-              style={{
-                top: coords?.top ?? 0,
-                left: coords?.left ?? 0,
-                minWidth: coords?.minWidth ?? 180,
-                maxWidth: coords?.maxWidth ?? 384,
-                width: "max-content",
-                visibility: coords ? "visible" : "hidden",
-              }}
-            >
-              <div className="erp-scroll max-h-56 overflow-y-auto overscroll-contain p-1.5 space-y-0.5">
-                {options.map((opt) => {
-                  const active = opt.value === value;
-                  return (
-                    <button
-                      key={opt.value || "__all__"}
-                      type="button"
-                      role="option"
-                      aria-selected={active}
-                      title={opt.label}
-                      className={cn(
-                        "flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-left text-sm font-medium transition-all duration-150 active:scale-[0.99]",
-                        active
-                          ? "bg-primary text-primary-foreground shadow-xs"
-                          : "text-foreground hover:bg-muted/70",
-                      )}
-                      onClick={() => {
-                        onChange(opt.value);
-                        setOpen(false);
-                      }}
-                    >
-                      <span className="whitespace-nowrap">{opt.label}</span>
-                      {active ? <Check className="size-3.5 shrink-0 opacity-90" /> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>,
-            document.body,
-          )
+          <ul
+            ref={menuRef}
+            id={listId}
+            role="listbox"
+            aria-label={placeholder}
+            className="fixed z-[200] max-h-48 overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-md"
+            style={{
+              top: coords?.top ?? 0,
+              left: coords?.left ?? 0,
+              width: coords?.width ?? 180,
+              visibility: coords ? "visible" : "hidden",
+            }}
+          >
+            {options.map((opt) => {
+              const active = opt.value === value;
+              return (
+                <li key={opt.value || "__all__"}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    title={opt.label}
+                    className={cn(
+                      "w-full cursor-pointer px-3 py-1.5 text-left text-sm transition-colors duration-200 hover:bg-muted/80",
+                      active && "bg-muted/60 font-medium",
+                    )}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      onChange(opt.value);
+                      setOpen(false);
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>,
+          document.body,
+        )
         : null}
     </div>
   );

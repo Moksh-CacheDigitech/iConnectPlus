@@ -72,6 +72,13 @@ class EmployeeCommands:
         row.user_id = user_id
         self._touch(row, updated_by)
 
+    def unlink_user(self, employee_id: UUID, *, updated_by: UUID | None = None) -> None:
+        row = self._row(employee_id)
+        if row.user_id is None:
+            return
+        row.user_id = None
+        self._touch(row, updated_by)
+
     def set_status(self, employee_id: UUID, status: str, *, updated_by: UUID | None = None) -> None:
         row = self._row(employee_id)
         if row.status == status:
