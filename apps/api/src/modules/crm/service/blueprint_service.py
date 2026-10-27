@@ -787,6 +787,8 @@ class OpportunityBlueprintService:
             action=action,
             remark=payload.get("remark") or payload.get("remarks"),
         )
+        if action == "lost" and row is not None:
+            self._notify_deal_lost_emails(ctx, row)
         return row
 
     def _attach(
@@ -905,6 +907,37 @@ class OpportunityBlueprintService:
             if name and name not in names:
                 names.append(name)
         return total, names
+
+    def _notify_deal_lost_emails(self, ctx: TenantContext, opp: CrmOpportunity) -> None:
+        try:
+            from modules.crm.models.company import CrmCompany
+            from modules.crm.service.crm_email_notification_service import CrmEmailNotificationService
+            from modules.crm.service.crm_notification_service import resolve_employee_user_id
+            from modules.foundation.models.security import SecUser
+
+            customer = "—"
+            if opp.company_account_id is not None:
+                account = self._db.get(CrmCompany, opp.company_account_id)
+                if account is not None:
+                    customer = account.customer_name or "—"
+            salesperson = "—"
+            owner_uid = resolve_employee_user_id(self._db, ctx.tenant_id, opp.owner_employee_id)
+            if owner_uid is not None:
+                user = self._db.get(SecUser, owner_uid)
+                if user is not None:
+                    salesperson = user.display_name or user.email or "—"
+            CrmEmailNotificationService(self._db).notify_deal_lost(
+                tenant_id=ctx.tenant_id,
+                opportunity_id=opp.id,
+                opportunity_name=opp.opportunity_name or "Opportunity",
+                customer_name=customer,
+                salesperson_name=salesperson,
+                loss_reason=opp.lost_reason,
+                owner_employee_id=opp.owner_employee_id,
+                created_by=ctx.user_id,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def _notify_operations_of_service_scope(
         self, ctx: TenantContext, opp: CrmOpportunity

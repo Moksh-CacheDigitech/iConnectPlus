@@ -60,7 +60,7 @@ class SiteInstallationService:
         self._module_admin = ProjectModuleAdminService(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         rows = self._repo.list_rows(ctx, cid)
         return self._assignment.filter_site_installations(ctx, rows)
 
@@ -751,7 +751,7 @@ class SiteInstallationService:
         """Stage-save alerts addressed to the signed-in user (admins and project managers)."""
         if ctx.user_id is None:
             return []
-        cid = self._scope.resolve_company_id(ctx, None)
+        cid = self._scope.resolve_list_company_id(ctx, None)
         rows = ProjectNotificationRepository(self._db).list_site_stage_save_alert_rows(
             ctx, cid, recipient_user_id=ctx.user_id, limit=limit
         )
@@ -1163,7 +1163,7 @@ class SiteInstallationService:
 
     def list_portfolio_follow_ups(self, ctx: TenantContext) -> list[dict]:
         """Module admin: follow-ups sent. Members: follow-ups received for their employee."""
-        cid = self._scope.resolve_company_id(ctx, None)
+        cid = self._scope.resolve_list_company_id(ctx, None)
         repo = ProjectNotificationRepository(self._db)
         if self._module_admin.is_admin(ctx):
             if ctx.user_id is None:
@@ -1334,7 +1334,7 @@ class SiteInstallationService:
             return []
 
         employee_id = employee.id
-        cid = self._scope.resolve_company_id(ctx, None)
+        cid = self._scope.resolve_list_company_id(ctx, None)
         sites = self.list(ctx, cid)
         jobs: list[dict] = []
 

@@ -39,7 +39,7 @@ class FiscalYearService:
         sort_by: str = "start_date",
         sort_dir: str = "desc",
     ) -> list[FiscalYearResponse]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         years = self._repo.list_fiscal_years(
             ctx, cid, status=status, search=search, sort_by=sort_by, sort_dir=sort_dir
         )
@@ -235,7 +235,7 @@ class FiscalYearService:
         )
 
     def summary(self, ctx: TenantContext, company_id: UUID | None = None) -> FiscalSummaryResponse:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         years = self._repo.list_fiscal_years(ctx, cid)
         periods = self._repo.list_periods(ctx, company_id=cid)
         active = self._repo.get_open_fiscal_year(ctx, cid) or self._repo.get_default_fiscal_year(ctx, cid)

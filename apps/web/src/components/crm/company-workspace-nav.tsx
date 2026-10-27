@@ -10,7 +10,7 @@ import { FollowupFormDialog } from "@/components/crm/sales/followup-form-dialog"
 import { MeetingFormDialog } from "@/components/crm/sales/meeting-form-dialog";
 import { OpportunityAttachmentsPanel } from "@/components/crm/sales/opportunity-attachments-panel";
 import { OpportunityTimelinePanel } from "@/components/crm/sales/opportunity-timeline-panel";
-import { TaskAssignmentFormDialog } from "@/components/crm/sales/task-assignment-form-dialog";
+import { OpportunityTasksPanel } from "@/components/crm/sales/opportunity-tasks-panel";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -486,15 +486,14 @@ export function CompanyWorkspaceNav({
 
       {isOpportunityScope && opportunityId ? (
         <>
-          <TaskAssignmentFormDialog
+          <OpportunityTasksPanel
             open={taskOpen}
             opportunityId={opportunityId}
             companyAccountId={companyAccountId}
             opportunity={opportunity ?? null}
             company={company}
             onClose={() => setTaskOpen(false)}
-            onSaved={() => {
-              setTaskOpen(false);
+            onChanged={() => {
               void loadCompanyNavCounts(companyAccountId, opportunityId).then(setCounts);
             }}
           />

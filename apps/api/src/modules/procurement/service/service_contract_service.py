@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, ConflictException, ForbiddenException, NotFoundException
+from modules.foundation.domain.org_data_scope import apply_company_scope
 from modules.foundation.domain.value_objects import TenantContext
 from modules.procurement.adapters.crm_adapter import ProcurementCrmAdapter
 from modules.procurement.models.service_contract import ProcServicePlan, ProcServiceRateContract, ProcServiceVisit
@@ -64,12 +65,17 @@ class ServiceContractService:
 
     # -- contracts ------------------------------------------------------------
     def list_contracts(self, ctx: TenantContext, *, active_only: bool = False) -> list[ProcServiceRateContract]:
-        cid = self._company(ctx)
+        cid = self._scope.resolve_list_company_id(ctx, None)
         stmt = select(ProcServiceRateContract).where(
             ProcServiceRateContract.tenant_id == ctx.tenant_id,
-            ProcServiceRateContract.company_id == cid,
             ProcServiceRateContract.is_deleted.is_(False),
         )
+        if cid is not None:
+            stmt = stmt.where(ProcServiceRateContract.company_id == cid)
+        else:
+            stmt = apply_company_scope(
+                stmt, ProcServiceRateContract, ctx, module_key="procurement"
+            )
         rows = list(self._db.scalars(stmt.order_by(ProcServiceRateContract.created_at.desc())).all())
         if active_only:
             today = date.today()

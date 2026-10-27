@@ -14,10 +14,13 @@ def _cookie_kwargs(*, max_age: int) -> dict:
     same_site = (settings.auth_cookie_samesite or "lax").lower()
     if same_site not in {"lax", "strict", "none"}:
         same_site = "lax"
-    # Secure cookies required when SameSite=None; locally allow insecure for http://localhost.
+    # Prefer AUTH_COOKIE_SECURE from env. Only force insecure for plain http://localhost.
     secure = bool(settings.auth_cookie_secure)
-    if settings.is_development and same_site != "none":
+    frontend = (settings.frontend_url or "").strip().lower()
+    if frontend.startswith("http://localhost") or frontend.startswith("http://127.0.0.1"):
         secure = False
+    elif same_site == "none":
+        secure = True
     return {
         "httponly": True,
         "secure": secure,

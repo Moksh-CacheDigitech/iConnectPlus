@@ -47,7 +47,7 @@ class LeadSourceService:
         self._scope = CrmScopeValidator(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_sources(ctx, cid)
 
     def get(self, ctx: TenantContext, row_id: UUID):
@@ -90,7 +90,7 @@ class LeadService:
         company_id: UUID | None = None,
         company_account_id: UUID | None = None,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         created_by: UUID | None = None
         if self._visibility.requires_creator_scope(ctx):
             created_by = self._visibility.current_user_id(ctx)
@@ -401,6 +401,7 @@ class LeadService:
             performed_by=ctx.user_id,
         )
         self._sync_lead_doc_requests(ctx, row.id)
+        self._notify_admins_lead_created(ctx, row)
         return self.get(ctx, row.id)
 
     def update(self, ctx: TenantContext, lead_id: UUID, **fields):
@@ -458,6 +459,53 @@ class LeadService:
         )
         self._sync_lead_doc_requests(ctx, lead_id)
         return self.get(ctx, lead_id)
+
+    def _notify_admins_lead_created(self, ctx: TenantContext, lead: CrmLead) -> None:
+        try:
+            from modules.crm.models.lead_source import CrmLeadSource
+            from modules.crm.service.crm_email_notification_service import CrmEmailNotificationService
+            from modules.crm.service.crm_notification_service import resolve_employee_user_id
+            from modules.foundation.models.security import SecUser
+
+            source_name = "—"
+            if lead.lead_source_id is not None:
+                src = self._db.get(CrmLeadSource, lead.lead_source_id)
+                if src is not None:
+                    source_name = src.source_name or src.source_code or "—"
+
+            owner_name = "—"
+            owner_uid = resolve_employee_user_id(self._db, ctx.tenant_id, lead.owner_employee_id)
+            if owner_uid is not None:
+                owner = self._db.get(SecUser, owner_uid)
+                if owner is not None:
+                    owner_name = owner.display_name or owner.email or "—"
+
+            company_name = (lead.company_name or "").strip()
+            if lead.company_account_id is not None:
+                from modules.crm.models.company import CrmCompany
+
+                account = self._db.get(CrmCompany, lead.company_account_id)
+                if account is not None and account.customer_name:
+                    company_name = account.customer_name
+
+            lead_name = (
+                (lead.project_title or "").strip()
+                or f"{lead.first_name} {(lead.last_name or '').strip()}".strip()
+                or lead.lead_code
+            )
+            CrmEmailNotificationService(self._db).notify_admins_lead_created(
+                tenant_id=ctx.tenant_id,
+                lead_id=lead.id,
+                lead_code=lead.lead_code,
+                lead_name=lead_name,
+                company_name=company_name or "—",
+                owner_name=owner_name,
+                expected_value=lead.expected_amount,
+                lead_source=source_name,
+                created_by=ctx.user_id,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     @staticmethod
     def _boq_sow_mandatory(lead: CrmLead | None) -> bool:
@@ -883,7 +931,7 @@ class LeadAssignmentService:
         self._scope = CrmScopeValidator(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_assignments(ctx, cid)
 
     def get(self, ctx: TenantContext, row_id: UUID):
@@ -900,7 +948,7 @@ class LeadActivityService:
         self._engine = LeadActivityEngine()
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_activities(ctx, cid)
 
     def get(self, ctx: TenantContext, row_id: UUID):

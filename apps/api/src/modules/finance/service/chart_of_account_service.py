@@ -28,7 +28,7 @@ class ChartOfAccountService:
         self._audit = PlatformAuditFacade(db)
 
     def list_account_groups(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_account_groups(ctx, cid)
 
     def create_account_group(self, ctx: TenantContext, company_id: UUID | None = None, **fields):
@@ -58,7 +58,7 @@ class ChartOfAccountService:
         sort_dir: str = "asc",
         include_balance: bool = True,
     ) -> list[ChartOfAccountResponse]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         accounts = self._repo.list_accounts(
             ctx,
             cid,

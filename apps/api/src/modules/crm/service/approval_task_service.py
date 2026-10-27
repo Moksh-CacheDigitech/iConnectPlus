@@ -64,6 +64,11 @@ class ApprovalTaskService:
         self._scope = CrmScopeValidator(db)
         self._numbers = DocumentNumberService(db)
 
+    def _is_crm_admin(self, ctx: TenantContext) -> bool:
+        from modules.crm.service.crm_module_admin import CrmModuleAdminService
+
+        return CrmModuleAdminService(self._db).is_admin(ctx)
+
     def list(
         self,
         ctx: TenantContext,
@@ -75,7 +80,17 @@ class ApprovalTaskService:
         entity_type: str | None = None,
         entity_id: UUID | None = None,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        # ERP / CRM admins always see the full tenant inbox (every assignee,
+        # every company). Session company pin must not hide jobs owned by others.
+        is_admin = self._is_crm_admin(ctx)
+        if is_admin:
+            my_tasks_only = False
+
+        if is_admin:
+            cid = company_id  # optional narrow; None = all companies in tenant
+        else:
+            cid = self._scope.resolve_list_company_id(ctx, company_id)
+
         assigned_user_id = ctx.user_id if my_tasks_only else None
         rows = self._repo.list_tasks(
             ctx,
@@ -85,6 +100,7 @@ class ApprovalTaskService:
             assigned_user_id=assigned_user_id,
             entity_type=entity_type,
             entity_id=entity_id,
+            tenant_wide=is_admin,
         )
         # When viewing “Assigned to me”, also surface requests I sent so the
         # requester can track open approvals - but not every Admin fan-out copy.
@@ -97,6 +113,7 @@ class ApprovalTaskService:
                 requested_by=ctx.user_id,
                 entity_type=entity_type,
                 entity_id=entity_id,
+                tenant_wide=False,
             )
             by_id = {row.id: row for row in rows}
             for row in sent:
@@ -116,7 +133,8 @@ class ApprovalTaskService:
         return rows
 
     def get(self, ctx: TenantContext, row_id: UUID) -> CrmApprovalTask:
-        row = self._repo.get(ctx, row_id)
+        is_admin = self._is_crm_admin(ctx)
+        row = self._repo.get(ctx, row_id, tenant_wide=is_admin)
         if row is None:
             raise NotFoundException("My Jobs task not found")
         return row
@@ -262,13 +280,28 @@ class ApprovalTaskService:
         return CrmMemberService(self._db).list_approval_user_options(ctx)
 
     def _send_notification_stub(self, task: CrmApprovalTask) -> None:
-        """Notification-engine stub: mark as dispatched.
-
-        A production build would enqueue a notification-service message
-        here; the demo build simply records that notification "was sent".
-        """
+        """Mark dispatched and email the assignee (task + approver CTA)."""
         task.notification_sent = True
         self._db.flush()
+        try:
+            from modules.crm.service.crm_email_notification_service import CrmEmailNotificationService
+
+            title = (task.title or "").strip()
+            is_admin_copy = title.endswith("(Admin)") or (task.assigned_role or "") == "admin_copy"
+            CrmEmailNotificationService(self._db).notify_task_assigned_and_approver(
+                tenant_id=task.tenant_id,
+                assignee_user_id=task.assigned_user_id,
+                task_title=title or "CRM approval task",
+                entity_type=task.entity_type,
+                entity_id=task.entity_id,
+                action=task.action,
+                assigner_user_id=task.requested_by,
+                priority=task.priority or "normal",
+                remarks=task.remarks,
+                is_admin_copy=is_admin_copy,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def decide(
         self,
@@ -310,17 +343,20 @@ class ApprovalTaskService:
             if not file_name or not (content_base64 or file_path):
                 raise ConflictException("A file upload is required to complete this attachment task")
 
+        is_admin = self._is_crm_admin(ctx)
         self._repo.cancel_pending_siblings(
             ctx,
             task.entity_type,
             task.entity_id,
             task.action,
             except_id=task.id,
+            tenant_wide=is_admin,
         )
 
         task = self._repo.update(
             ctx,
             task_id,
+            tenant_wide=is_admin,
             status=decision,
             decision_remark=remark,
             decided_at=utcnow(),
@@ -328,6 +364,7 @@ class ApprovalTaskService:
         )
         if decision == "rejected":
             self._notify_rejection(ctx, task, remark)
+        self._notify_decision_emails(ctx, task, decision, remark)
         self._resume(
             ctx,
             task,
@@ -375,6 +412,72 @@ class ApprovalTaskService:
             remark=reason or None,
             created_by=ctx.user_id,
         )
+
+    def _notify_decision_emails(
+        self,
+        ctx: TenantContext,
+        task: CrmApprovalTask,
+        decision: str,
+        remark: str | None,
+    ) -> None:
+        """Email requester (owner) and original assignee about approve/reject."""
+        try:
+            from modules.crm.service.crm_email_notification_service import (
+                CrmEmailNotificationService,
+                entity_record_url,
+            )
+            from modules.foundation.models.security import SecUser
+
+            status = "approved" if decision == "approved" else "rejected"
+            doc = _REJECT_DOC_LABEL.get(task.action or "", "submission")
+            record_title = (task.title or "").strip() or doc
+            record_url = entity_record_url(task.entity_type, task.entity_id)
+            mail = CrmEmailNotificationService(self._db)
+
+            approver = self._db.get(SecUser, ctx.user_id) if ctx.user_id else None
+            approver_name = (
+                (approver.display_name or approver.email) if approver is not None else "Approver"
+            )
+            requester = self._db.get(SecUser, task.requested_by) if task.requested_by else None
+            owner_name = (
+                (requester.display_name or requester.email) if requester is not None else "—"
+            )
+
+            if task.requested_by:
+                mail.notify_owner_approval_result(
+                    tenant_id=ctx.tenant_id,
+                    recipient_user_id=task.requested_by,
+                    owner_name=owner_name,
+                    entity_label=task.entity_type.replace("_", " ").title(),
+                    record_title=record_title,
+                    approval_status=status,
+                    approver_name=approver_name or "—",
+                    comments=remark,
+                    record_url=record_url,
+                    created_by=ctx.user_id,
+                )
+
+            # Attachment / provide-* tasks: notify the assignee who submitted work.
+            provide_actions = {
+                "provide_boq_attachment",
+                "provide_sow_attachment",
+                "provide_freight",
+                "provide_supporting_items",
+                "provide_service_visits",
+            }
+            if task.action in provide_actions and task.assigned_user_id:
+                mail.notify_assignee_submission_result(
+                    tenant_id=ctx.tenant_id,
+                    recipient_user_id=task.assigned_user_id,
+                    document_type=doc,
+                    record_title=record_title,
+                    approval_status=status,
+                    comments=remark,
+                    record_url=record_url,
+                    created_by=ctx.user_id,
+                )
+        except Exception:  # noqa: BLE001
+            pass
 
     def _resume(
         self,

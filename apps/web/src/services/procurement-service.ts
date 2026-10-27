@@ -527,6 +527,7 @@ export type ProcOrder = {
   company_id?: string;
   branch_id?: string;
   status: string;
+  workflow_status?: string | null;
   currency_code: string;
   payment_terms: string | null;
   total_amount: number;
@@ -975,6 +976,47 @@ export async function upsertCorrespondenceTemplate(body: {
       body,
     }),
   );
+}
+
+export type ScmFinalizeApproval = {
+  id: string;
+  kind: "finalize";
+  order_id: string;
+  document_number: string;
+  company_po_number: string | null;
+  customer_name: string | null;
+  vendor_id: string;
+  vendor_name: string | null;
+  ovf_id: string | null;
+  ovf_no: string | null;
+  status: "pending" | "accepted" | "rejected";
+  requested_at: string | null;
+  decided_at: string | null;
+  order_status: string;
+  workflow_status: string | null;
+};
+
+export async function listScmFinalizeApprovals(): Promise<ScmFinalizeApproval[]> {
+  const res = await apiClient<ScmFinalizeApproval[]>(`${SCM_API}/finalize-approvals`);
+  return unwrapData(res);
+}
+
+export async function requestScmFinalizeApproval(orderId: string): Promise<ProcOrder> {
+  const res = await apiClient<ProcOrder>(
+    `${SCM_API}/orders/${orderId}/request-finalize-approval`,
+    { method: "POST", body: {} },
+  );
+  invalidateProcurementListCache();
+  return unwrapData(res);
+}
+
+export async function rejectScmFinalizeApproval(orderId: string): Promise<ProcOrder> {
+  const res = await apiClient<ProcOrder>(
+    `${SCM_API}/orders/${orderId}/reject-finalize-approval`,
+    { method: "POST", body: {} },
+  );
+  invalidateProcurementListCache();
+  return unwrapData(res);
 }
 
 export async function finalizeScmOrder(orderId: string): Promise<ProcOrder> {

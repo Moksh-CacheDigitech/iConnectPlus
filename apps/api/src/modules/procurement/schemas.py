@@ -696,6 +696,26 @@ class ScmNegotiationResponse(BaseModel):
     can_issue: bool
 
 
+class ScmFinalizeApprovalResponse(BaseModel):
+    """Shared admin Approval inbox row for SCM finalize requests."""
+
+    id: UUID
+    kind: Literal["finalize"] = "finalize"
+    order_id: UUID
+    document_number: str
+    company_po_number: str | None = None
+    customer_name: str | None = None
+    vendor_id: UUID
+    vendor_name: str | None = None
+    ovf_id: UUID | None = None
+    ovf_no: str | None = None
+    status: Literal["pending", "accepted", "rejected"]
+    requested_at: datetime | None = None
+    decided_at: datetime | None = None
+    order_status: str
+    workflow_status: str | None = None
+
+
 class OrderTrackingRequest(BaseModel):
     """Customer self-service lookup: their PO number + their registered email."""
 

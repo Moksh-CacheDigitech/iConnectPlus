@@ -13,6 +13,8 @@ import { CrmSortableTh, sortRows, useTableSort } from "@/components/crm/sales/cr
 import { FinanceStatusBadge } from "@/components/finance/finance-status-badge";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
+import { useAuthUser } from "@/hooks/use-auth-user";
+import { canViewAllModuleScreens } from "@/lib/module-access";
 import { ApiClientError } from "@/services/api-client";
 import { respondMyJob } from "@/services/crm-deal-controls-service";
 import { Input } from "@/components/ui/input";
@@ -133,14 +135,29 @@ export function MyJobsPage({
   companyAccountId?: string;
   embedded?: boolean;
 } = {}) {
+  const { user, adminModuleKeys, moduleRoles, loading: authLoading } = useAuthUser();
+  const isCrmAdmin = canViewAllModuleScreens(
+    "crm",
+    adminModuleKeys,
+    user?.userType,
+    moduleRoles,
+  );
   const [rows, setRows] = useState<ApprovalTask[]>([]);
   const [recordNames, setRecordNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [teamRole, setTeamRole] = useState<string>("");
   const [status, setStatus] = useState<string>("pending");
+  /** CRM / ERP admins default to the full tenant inbox (all assignees). */
   const [mineOnly, setMineOnly] = useState(true);
+  const [mineFilterReady, setMineFilterReady] = useState(false);
   const { sortBy, sortDir, onSort } = useTableSort<SortKey>("title", "asc");
+
+  useEffect(() => {
+    if (authLoading || mineFilterReady) return;
+    setMineOnly(!isCrmAdmin);
+    setMineFilterReady(true);
+  }, [authLoading, isCrmAdmin, mineFilterReady]);
 
   const [decision, setDecision] = useState<{ task: ApprovalTask; outcome: "approved" | "rejected" } | null>(null);
   const [remark, setRemark] = useState("");
@@ -259,8 +276,9 @@ export function MyJobsPage({
   }, [teamRole, status, mineOnly, companyAccountId, loadNames]);
 
   useEffect(() => {
+    if (!mineFilterReady) return;
     void load();
-  }, [load]);
+  }, [load, mineFilterReady]);
 
   async function respond(task: ApprovalTask, canSubmit: boolean, reason?: string) {
     setResponding(true);
@@ -507,15 +525,19 @@ export function MyJobsPage({
             ))}
           </FinanceSelect>
         </div>
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            className="cursor-pointer"
-            checked={mineOnly}
-            onChange={(e) => setMineOnly(e.target.checked)}
-          />
-          Assigned to me / sent by me
-        </label>
+        {isCrmAdmin ? (
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              className="cursor-pointer"
+              checked={mineOnly}
+              onChange={(e) => setMineOnly(e.target.checked)}
+            />
+            Assigned to me / sent by me
+          </label>
+        ) : (
+          <span className="text-xs text-muted-foreground">Showing tasks assigned to you</span>
+        )}
       </div>
 
       {error ? <CrmErrorBanner>{error}</CrmErrorBanner> : null}

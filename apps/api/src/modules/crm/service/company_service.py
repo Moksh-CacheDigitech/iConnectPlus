@@ -65,7 +65,7 @@ class CompanyService:
         self._visibility = CrmRecordVisibility(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         allowed = self._visibility.company_account_ids_for_user(ctx, cid)
         rows = self._repo.list_companies(ctx, cid, account_ids=allowed)
         return [self._heal_unsafe_fields(row) for row in rows]

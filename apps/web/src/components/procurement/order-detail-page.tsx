@@ -30,11 +30,6 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useProcurementRole } from "@/hooks/use-procurement-role";
 import {
-  findLatestApprovalForOrder,
-  findPendingApprovalForOrder,
-  submitPoFinalizeApproval,
-} from "@/lib/procurement-approvals";
-import {
   listUnreadPoApprovalDecisionNotifications,
   markPoApprovalDecisionNotificationsReadForOrder,
   PROCUREMENT_APPROVAL_NOTIFICATIONS_EVENT,
@@ -42,12 +37,12 @@ import {
 } from "@/lib/procurement-approval-notifications";
 import { ApiClientError } from "@/services/api-client";
 import {
-  collectPoApprovalDocuments,
   formatInr,
   formatUsd,
   getPurchaseOrder,
   listOrderReceiptBatches,
   listVendorOptions,
+  requestScmFinalizeApproval,
   listVendorPos,
   resolveVendorOrgScope,
   updateLineReceipt,
@@ -441,24 +436,12 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
     setBusy(true);
     setError(null);
     try {
-      const documents = await collectPoApprovalDocuments({
-        orderId: order.id,
-        ovfId: order.source_document_id,
-      });
-      submitPoFinalizeApproval({
-        orderId: order.id,
-        documentNumber: order.document_number,
-        companyPoNumber: order.company_po_number,
-        customerName: order.customer_name,
-        vendorId: order.vendor_id,
-        vendorName: vendorName || null,
-        ovfId: order.source_document_id,
-        documents,
-      });
+      const updated = await requestScmFinalizeApproval(order.id);
+      setOrder(updated);
       setError(null);
       router.replace(`${pathname}?approval=pending`);
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : "Failed to finalize PO");
+      setError(err instanceof ApiClientError ? err.message : "Failed to send PO for approval");
     } finally {
       setBusy(false);
     }
@@ -847,21 +830,19 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
       !["draft", "submitted", "cancelled"].includes((order.status || "").toLowerCase()),
   );
   const showGrnWorkspace = canReceipt && viewMode === "grn";
-  const pendingApproval = order ? findPendingApprovalForOrder(order.id) : null;
-  const latestApproval = order ? findLatestApprovalForOrder(order.id) : null;
+  const orderStatus = (order?.status || "").toLowerCase();
+  const workflowStatus = (order?.workflow_status || "").toLowerCase();
+  const pendingApproval = orderStatus === "submitted";
   const approvalRejected =
-    Boolean(order) &&
-    (order?.status || "").toLowerCase() === "draft" &&
-    latestApproval?.status === "rejected" &&
-    !pendingApproval;
+    Boolean(order) && orderStatus === "draft" && workflowStatus === "rejected";
   const approvalPendingFlag =
-    searchParams.get("approval") === "pending" || Boolean(pendingApproval);
+    searchParams.get("approval") === "pending" || pendingApproval;
   const awaitingIssue =
     Boolean(order) &&
-    (order?.status || "").toLowerCase() === "draft" &&
-    (approvalPendingFlag || order?.source_module === "crm");
+    (orderStatus === "draft" || orderStatus === "submitted") &&
+    (approvalPendingFlag || order?.source_module === "crm" || approvalRejected);
   const finalizeBlockedByApproval =
-    Boolean(pendingApproval) || (isAdmin && approvalPendingFlag);
+    pendingApproval || (isAdmin && approvalPendingFlag);
   // Management must approve the post-negotiation price before the PO can be
   // issued to the distributor.
   const negotiationApplies = Boolean(
@@ -873,14 +854,15 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
       order.source_module === "crm" &&
       !["draft", "submitted", "cancelled"].includes((order.status || "").toLowerCase()),
   );
-  const negotiationApproved = order?.negotiation_status === "approved";
+  const negotiationBlocksIssue =
+    order?.negotiation_status === "pending" || order?.negotiation_status === "rejected";
   const canFinalize =
     order &&
-    order.status === "draft" &&
-    order.source_module === "crm" &&
+    orderStatus === "draft" &&
+    (order.source_module === "crm" || order.source_document_type === "inventory_initiated") &&
     (order.lines?.length ?? 0) > 0 &&
     !finalizeBlockedByApproval &&
-    negotiationApproved &&
+    !negotiationBlocksIssue &&
     !isAdmin;
   const editPoHref =
     order?.source_module === "crm" && order.source_document_id
@@ -1119,7 +1101,7 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
                 Edit PO
               </Link>
             ) : null}
-            {order?.status === "draft" && approvalPendingFlag ? (
+            {pendingApproval || (orderStatus === "draft" && approvalPendingFlag) ? (
               <span className="inline-flex items-center rounded-lg border border-amber-200/80 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900">
                 {isAdmin ? "Pending your approval" : "Awaiting admin approval"}
               </span>

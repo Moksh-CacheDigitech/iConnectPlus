@@ -20,31 +20,28 @@ class ProjectNotificationRepository(PrjScopedRepository):
         stmt = self.apply_prj_filter(stmt, PrjProjectNotification, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(PrjProjectNotification).where(
-            PrjProjectNotification.company_id == company_id,
             PrjProjectNotification.is_deleted.is_(False),
         )
+        stmt = self.apply_optional_company_filter(stmt, PrjProjectNotification, company_id)
         stmt = self.apply_prj_filter(stmt, PrjProjectNotification, ctx, branch_scoped=False)
         return list(self.db.scalars(stmt).all())
 
     def list_site_stage_follow_up_rows(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         created_by_user_id: UUID | None = None,
         recipient_employee_id: UUID | None = None,
     ) -> list[PrjProjectNotification]:
-        stmt = (
-            select(PrjProjectNotification)
-            .where(
-                PrjProjectNotification.company_id == company_id,
-                PrjProjectNotification.is_deleted.is_(False),
-                PrjProjectNotification.notification_type == "other",
-            )
-            .order_by(PrjProjectNotification.created_at.desc())
+        stmt = select(PrjProjectNotification).where(
+            PrjProjectNotification.is_deleted.is_(False),
+            PrjProjectNotification.notification_type == "other",
         )
+        stmt = self.apply_optional_company_filter(stmt, PrjProjectNotification, company_id)
+        stmt = stmt.order_by(PrjProjectNotification.created_at.desc())
         if created_by_user_id is not None:
             stmt = stmt.where(PrjProjectNotification.created_by == created_by_user_id)
         if recipient_employee_id is not None:
@@ -63,21 +60,21 @@ class ProjectNotificationRepository(PrjScopedRepository):
     def list_site_stage_save_alert_rows(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         recipient_user_id: UUID,
         limit: int = 50,
     ) -> list[PrjProjectNotification]:
+        stmt = select(PrjProjectNotification).where(
+            PrjProjectNotification.is_deleted.is_(False),
+            PrjProjectNotification.notification_type == "other",
+            PrjProjectNotification.recipient_user_id == recipient_user_id,
+        )
+        stmt = self.apply_optional_company_filter(stmt, PrjProjectNotification, company_id)
         stmt = (
-            select(PrjProjectNotification)
-            .where(
-                PrjProjectNotification.company_id == company_id,
-                PrjProjectNotification.is_deleted.is_(False),
-                PrjProjectNotification.notification_type == "other",
-                PrjProjectNotification.recipient_user_id == recipient_user_id,
+            stmt.order_by(PrjProjectNotification.created_at.desc()).limit(
+                max(1, min(limit, 200))
             )
-            .order_by(PrjProjectNotification.created_at.desc())
-            .limit(max(1, min(limit, 200)))
         )
         stmt = self.apply_prj_filter(stmt, PrjProjectNotification, ctx, branch_scoped=False)
         rows = list(self.db.scalars(stmt).all())

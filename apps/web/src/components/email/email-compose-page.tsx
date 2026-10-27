@@ -1,38 +1,25 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Send } from "lucide-react";
 
 import { EmailWorkspaceNav } from "@/components/email/email-workspace-nav";
-import { FinanceField, FinanceSelect, FinanceTextarea } from "@/components/finance/journals/finance-form-field";
+import { FinanceField, FinanceTextarea } from "@/components/finance/journals/finance-form-field";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  createEmailTemplate,
-  listEmailTemplates,
-  sendEmailCompose,
-  type EmailTemplateRow,
-} from "@/services/email-notification-service";
+import { sendEmailCompose } from "@/services/email-notification-service";
 import { ApiClientError } from "@/services/api-client";
 
 export function EmailComposePage() {
   const router = useRouter();
-  const [templates, setTemplates] = useState<EmailTemplateRow[]>([]);
   const [toAddress, setToAddress] = useState("");
   const [subject, setSubject] = useState("");
   const [bodyHtml, setBodyHtml] = useState("<p>Hello,</p><p></p><p>Regards,<br/>ERP Notifications</p>");
-  const [templateId, setTemplateId] = useState("");
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    void listEmailTemplates()
-      .then(setTemplates)
-      .catch(() => setTemplates([]));
-  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -44,7 +31,6 @@ export function EmailComposePage() {
         to_address: toAddress.trim(),
         subject: subject.trim(),
         body_html: bodyHtml,
-        template_id: templateId || null,
         event_type: "email.compose",
       });
       if (!result) {
@@ -102,22 +88,6 @@ export function EmailComposePage() {
             placeholder="Subject line"
           />
         </FinanceField>
-        <FinanceField label="Template (optional)" htmlFor="template">
-          <FinanceSelect
-            id="template"
-            value={templateId}
-            onChange={(e) => setTemplateId(e.target.value)}
-          >
-            <option value="">Direct compose (no template merge)</option>
-            {templates
-              .filter((t) => t.template_code !== "EMAIL_DIRECT")
-              .map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.template_code} - {t.template_name}
-                </option>
-              ))}
-          </FinanceSelect>
-        </FinanceField>
         <FinanceField label="Body (HTML)" htmlFor="body">
           <FinanceTextarea
             id="body"
@@ -132,26 +102,6 @@ export function EmailComposePage() {
           <Button type="submit" disabled={sending} className="cursor-pointer transition-opacity duration-200">
             <Send className="size-3.5" />
             {sending ? "Sending…" : "Send email"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="cursor-pointer"
-            onClick={() => {
-              void createEmailTemplate({
-                template_code: `EMAIL_${Date.now().toString(36).toUpperCase()}`,
-                template_name: subject || "Saved from compose",
-                channel: "email",
-                subject_template: subject || "{{subject}}",
-                body_template: bodyHtml,
-              })
-                .then(() => setMessage("Template saved from compose"))
-                .catch((err) =>
-                  setError(err instanceof ApiClientError ? err.message : "Could not save template"),
-                );
-            }}
-          >
-            Save as template
           </Button>
         </div>
       </form>

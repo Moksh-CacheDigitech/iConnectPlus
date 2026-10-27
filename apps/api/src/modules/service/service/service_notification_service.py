@@ -21,7 +21,7 @@ class ServiceNotificationService:
         self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None, *, mine: bool = False):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         rows = self._repo.list_rows(ctx, cid)
         if mine:
             rows = [r for r in rows if r.recipient_user_id == ctx.user_id]

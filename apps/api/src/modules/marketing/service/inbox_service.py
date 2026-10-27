@@ -21,7 +21,7 @@ class InboxService:
         self._adapter = SocialInboxAdapter()
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None, campaign_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         rows = self._repo.list_by_company(MktSocialInbox, ctx, cid, branch_scoped=True)
         if campaign_id is not None:
             rows = [row for row in rows if row.campaign_id == campaign_id]

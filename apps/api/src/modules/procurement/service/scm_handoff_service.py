@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, load_only
 
 from core.exceptions import ConflictException, NotFoundException, ValidationException
 from modules.crm.service.ovf_service import resolve_scm_hold_started_at
+from modules.foundation.domain.enums import WorkflowStatus
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.repository.user_repository import UserRepository
 from modules.platform.compat.audit_facade import PlatformAuditFacade
@@ -643,14 +644,20 @@ class ScmHandoffService:
 
 
     def list_scm_queue(self, ctx: TenantContext, company_id: UUID | None = None) -> list[dict]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
-        ovfs = self._crm.list_shared_ovfs(ctx, cid)
+        # Pass optional company filter through - do not force session company, or CT
+        # OVFs shared to SCM stay invisible while the user is parked on CDPL.
+        ovfs = self._crm.list_shared_ovfs(ctx, company_id)
+        stock_company_id = company_id or ctx.company_id
         # One vendor load for the whole queue - used for OEM suggestions when no PO yet.
-        vendor_pool = self._master.list_vendors(ctx, company_id=cid, branch_scoped=False)
+        vendor_pool = self._master.list_vendors(
+            ctx, company_id=stock_company_id, branch_scoped=False
+        )
         if not vendor_pool:
             vendor_pool = self._master.list_vendors(ctx, company_id=None, branch_scoped=False)
         items: list[dict] = []
-        on_hand = self._on_hand_qty_by_product(ctx, cid)
+        on_hand = (
+            self._on_hand_qty_by_product(ctx, stock_company_id) if stock_company_id else {}
+        )
         alloc_map = self._allocations_by_ovf(ctx, [ovf.id for ovf in ovfs])
         for ovf in ovfs:
             existing_orders = self._active_orders_for_ovf(ctx, ovf.id)
@@ -1641,7 +1648,8 @@ class ScmHandoffService:
             "negotiation_submitted_at": getattr(order, "negotiation_submitted_at", None),
             "negotiation_decided_at": getattr(order, "negotiation_decided_at", None),
             "negotiation_decided_by_name": getattr(order, "negotiation_decided_by_name", None),
-            "can_issue": getattr(order, "negotiation_status", "not_required") == "approved",
+            "can_issue": getattr(order, "negotiation_status", "not_required")
+            in {"approved", "not_required"},
         }
 
     def submit_negotiation(
@@ -1758,36 +1766,189 @@ class ScmHandoffService:
             return True
         return module == "procurement" and doc_type == "inventory_initiated"
 
-    def finalize_scm_po(
+    def _serialize_finalize_approval(
         self,
         ctx: TenantContext,
-        order_id: UUID,
-        order: ProcOrderHeader | None = None,
+        order: ProcOrderHeader,
+        *,
+        approval_status: str,
+        customer_name: str | None = None,
+    ) -> dict:
+        decided_at = None
+        if approval_status in {"accepted", "rejected"}:
+            decided_at = getattr(order, "updated_at", None)
+        return {
+            "id": order.id,
+            "kind": "finalize",
+            "order_id": order.id,
+            "document_number": order.document_number,
+            "company_po_number": order.company_po_number,
+            "customer_name": customer_name,
+            "vendor_id": order.vendor_id,
+            "vendor_name": self._vendor_display_name(ctx, order.vendor_id),
+            "ovf_id": order.source_document_id if self._is_ovf_sourced(order) else None,
+            "ovf_no": None,
+            "status": approval_status,
+            "requested_at": getattr(order, "updated_at", None)
+            or getattr(order, "created_at", None),
+            "decided_at": decided_at,
+            "order_status": order.status,
+            "workflow_status": getattr(order, "workflow_status", None),
+        }
+
+    def request_finalize_approval(
+        self, ctx: TenantContext, order_id: UUID
     ) -> ProcOrderHeader:
-        """Issue vendor PO - draft → sent (CRM OVF or inventory-initiated)."""
-        if order is None or order.id != order_id:
-            order = self._order_service.get_order(ctx, order_id)
+        """Mark a draft SCM PO as submitted so any admin can see it on Approval."""
+        order = self._order_service.get_order(ctx, order_id)
         if not self._is_scm_finalizable(order):
             raise InvalidDocumentState(
-                "Only CRM OVF or inventory-initiated POs can use SCM finalize"
+                "Only CRM OVF or inventory-initiated POs can request finalize approval"
             )
+        if order.status == OrderStatus.SUBMITTED.value:
+            return order
         if order.status != OrderStatus.DRAFT.value:
-            raise InvalidDocumentState("Only draft SCM POs can be finalized")
+            raise InvalidDocumentState("Only draft SCM POs can be sent for admin approval")
         active_lines = [ln for ln in (order.lines or []) if not getattr(ln, "is_deleted", False)]
         if not active_lines:
-            raise InvalidDocumentState("Cannot finalize a PO with no lines")
-        # No CRM OVF order reaches the distributor before Management signs off
-        # on the post-negotiation price.
+            raise InvalidDocumentState("Cannot send a PO with no lines for approval")
         if self._is_ovf_sourced(order):
             negotiation_status = getattr(order, "negotiation_status", "not_required")
             if negotiation_status == "pending":
                 raise InvalidDocumentState(
                     "This PO is still awaiting Management approval of the negotiated price."
                 )
-            if negotiation_status != "approved":
+            if negotiation_status == "rejected":
                 raise InvalidDocumentState(
-                    "Management approval of the negotiated price is required before this PO "
-                    "can be issued to the distributor. Send it for approval from Negotiation."
+                    "Negotiated price was rejected. Re-negotiate before sending for approval."
+                )
+        order.status = OrderStatus.SUBMITTED.value
+        order.workflow_status = WorkflowStatus.IN_PROGRESS.value
+        order.updated_at = utcnow()
+        order.updated_by = ctx.user_id
+        order.version = int(getattr(order, "version", 0) or 0) + 1
+        self._db.flush()
+        self._audit.log_entity_change(
+            tenant_id=ctx.tenant_id,
+            entity_name="proc_order_header",
+            entity_id=order_id,
+            operation="scm_request_finalize_approval",
+            performed_by=ctx.user_id,
+            new_value={"status": order.status, "workflow_status": order.workflow_status},
+        )
+        return order
+
+    def reject_finalize_approval(
+        self, ctx: TenantContext, order_id: UUID
+    ) -> ProcOrderHeader:
+        """Return a submitted SCM PO to draft after admin rejection."""
+        order = self._order_service.get_order(ctx, order_id)
+        if not self._is_scm_finalizable(order):
+            raise InvalidDocumentState(
+                "Only CRM OVF or inventory-initiated POs can use finalize approval"
+            )
+        if order.status != OrderStatus.SUBMITTED.value:
+            raise InvalidDocumentState("Only submitted SCM POs can be rejected")
+        order.status = OrderStatus.DRAFT.value
+        order.workflow_status = WorkflowStatus.REJECTED.value
+        order.updated_at = utcnow()
+        order.updated_by = ctx.user_id
+        order.version = int(getattr(order, "version", 0) or 0) + 1
+        self._db.flush()
+        self._audit.log_entity_change(
+            tenant_id=ctx.tenant_id,
+            entity_name="proc_order_header",
+            entity_id=order_id,
+            operation="scm_reject_finalize_approval",
+            performed_by=ctx.user_id,
+            new_value={"status": order.status, "workflow_status": order.workflow_status},
+        )
+        return order
+
+    def list_finalize_approvals(
+        self, ctx: TenantContext, company_id: UUID | None = None
+    ) -> list[dict]:
+        """Shared Approval inbox: submitted / accepted / rejected SCM finalize requests."""
+        # Do not pin to session company - admins parked on CDPL still see CT requests.
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
+        orders = self._orders.list_orders_with_lines(ctx, cid)
+        ovf_ids = [
+            order.source_document_id
+            for order in orders
+            if self._is_ovf_sourced(order) and order.source_document_id is not None
+        ]
+        ovf_meta = self._crm.get_ovf_display_meta(ctx, ovf_ids) if ovf_ids else {}
+        result: list[dict] = []
+        for order in orders:
+            if not self._is_scm_finalizable(order):
+                continue
+            workflow = (getattr(order, "workflow_status", None) or "").strip().lower()
+            approval_status: str | None = None
+            if order.status == OrderStatus.SUBMITTED.value:
+                approval_status = "pending"
+            elif (
+                order.status == OrderStatus.SENT.value
+                and workflow == WorkflowStatus.APPROVED.value
+            ):
+                approval_status = "accepted"
+            elif (
+                order.status == OrderStatus.DRAFT.value
+                and workflow == WorkflowStatus.REJECTED.value
+            ):
+                approval_status = "rejected"
+            if approval_status is None:
+                continue
+            customer_name = None
+            if self._is_ovf_sourced(order) and order.source_document_id is not None:
+                customer_name = (ovf_meta.get(order.source_document_id) or {}).get(
+                    "customer_name"
+                )
+            result.append(
+                self._serialize_finalize_approval(
+                    ctx,
+                    order,
+                    approval_status=approval_status,
+                    customer_name=customer_name,
+                )
+            )
+        result.sort(
+            key=lambda row: str(row.get("requested_at") or ""),
+            reverse=True,
+        )
+        return result
+
+    def finalize_scm_po(
+        self,
+        ctx: TenantContext,
+        order_id: UUID,
+        order: ProcOrderHeader | None = None,
+    ) -> ProcOrderHeader:
+        """Issue vendor PO - draft/submitted → sent (CRM OVF or inventory-initiated)."""
+        if order is None or order.id != order_id:
+            order = self._order_service.get_order(ctx, order_id)
+        if not self._is_scm_finalizable(order):
+            raise InvalidDocumentState(
+                "Only CRM OVF or inventory-initiated POs can use SCM finalize"
+            )
+        if order.status not in {
+            OrderStatus.DRAFT.value,
+            OrderStatus.SUBMITTED.value,
+        }:
+            raise InvalidDocumentState("Only draft or submitted SCM POs can be finalized")
+        active_lines = [ln for ln in (order.lines or []) if not getattr(ln, "is_deleted", False)]
+        if not active_lines:
+            raise InvalidDocumentState("Cannot finalize a PO with no lines")
+        # Block only while Management negotiation is open or was rejected.
+        # not_required (no price change) and approved may issue.
+        if self._is_ovf_sourced(order):
+            negotiation_status = getattr(order, "negotiation_status", "not_required")
+            if negotiation_status == "pending":
+                raise InvalidDocumentState(
+                    "This PO is still awaiting Management approval of the negotiated price."
+                )
+            if negotiation_status == "rejected":
+                raise InvalidDocumentState(
+                    "Negotiated price was rejected. Re-negotiate before issuing this PO."
                 )
         if not order.entity_code:
             raise InvalidDocumentState("Entity code is required to assign company PO number")
@@ -1799,6 +1960,7 @@ class ScmHandoffService:
             )
         # In-place status flip - avoid a second locked reload of the same draft.
         order.status = OrderStatus.SENT.value
+        order.workflow_status = WorkflowStatus.APPROVED.value
         order.updated_at = utcnow()
         order.updated_by = ctx.user_id
         order.version = int(getattr(order, "version", 0) or 0) + 1
@@ -1814,7 +1976,7 @@ class ScmHandoffService:
         return order
 
     def list_vendor_pos(self, ctx: TenantContext, company_id: UUID | None = None) -> list[dict]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         orders = self._orders.list_orders_with_lines(ctx, cid)
         result: list[dict] = []
         handoff_cache: dict[UUID, dict] = {}
@@ -3187,9 +3349,7 @@ class ScmHandoffService:
             raise NotFoundException("Stock unit not found")
         if unit.tenant_id != ctx.tenant_id:
             raise NotFoundException("Stock unit not found")
-        cid = self._scope.resolve_company_id(ctx, None)
-        if unit.company_id != cid:
-            raise NotFoundException("Stock unit not found")
+        self._scope.validate_company_access(ctx, unit.company_id)
 
         unit.serial_number = serial
         unit.updated_by = ctx.user_id
@@ -3239,9 +3399,7 @@ class ScmHandoffService:
             raise NotFoundException("Order line not found")
         if line.tenant_id != ctx.tenant_id:
             raise NotFoundException("Order line not found")
-        cid = self._scope.resolve_company_id(ctx, None)
-        if line.company_id != cid:
-            raise NotFoundException("Order line not found")
+        self._scope.validate_company_access(ctx, line.company_id)
         next_value = str(description or "").strip()[:50] or None
         line.product_code = next_value
         line.updated_by = ctx.user_id
@@ -3264,9 +3422,7 @@ class ScmHandoffService:
             raise NotFoundException("Import line not found")
         if row.tenant_id != ctx.tenant_id:
             raise NotFoundException("Import line not found")
-        cid = self._scope.resolve_company_id(ctx, None)
-        if row.company_id != cid:
-            raise NotFoundException("Import line not found")
+        self._scope.validate_company_access(ctx, row.company_id)
         row.serial_number = serial
         row.updated_by = ctx.user_id
         row.updated_at = utcnow()
@@ -3331,7 +3487,7 @@ class ScmHandoffService:
         self, ctx: TenantContext, company_id: UUID | None = None
     ) -> list[dict]:
         """One row per stock unit on hand (ledger) plus optional Excel import lines."""
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         order_cache: dict[UUID, ProcOrderHeader] = {}
         result: list[dict] = []
 

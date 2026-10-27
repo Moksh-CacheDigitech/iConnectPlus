@@ -23,14 +23,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import {
-  latestPoApprovalByOrderId,
-  PROCUREMENT_APPROVALS_EVENT,
-  type PoApprovalRequest,
-} from "@/lib/procurement-approvals";
 import { ApiClientError } from "@/services/api-client";
 import {
   formatInr,
+  listScmFinalizeApprovals,
   listScmQueue,
   invalidateProcurementListCache,
   peekScmQueueFromCache,
@@ -223,8 +219,8 @@ export function ScmQueuePage() {
   const [error, setError] = useState<string | null>(null);
   const [newOvfIds, setNewOvfIds] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState(() => searchParams.get("q")?.trim() ?? "");
-  const [approvalsByOrder, setApprovalsByOrder] = useState<Map<string, PoApprovalRequest>>(
-    () => latestPoApprovalByOrderId(),
+  const [pendingApprovalOrderIds, setPendingApprovalOrderIds] = useState<Set<string>>(
+    () => new Set(),
   );
   const queueOvfIdsRef = useRef<string[]>([]);
 
@@ -267,17 +263,21 @@ export function ScmQueuePage() {
   }, [load]);
 
   useEffect(() => {
-    const syncApprovals = () => {
-      setApprovalsByOrder(latestPoApprovalByOrderId());
-    };
-    syncApprovals();
-    window.addEventListener(PROCUREMENT_APPROVALS_EVENT, syncApprovals);
-    window.addEventListener("storage", syncApprovals);
+    let cancelled = false;
+    void listScmFinalizeApprovals()
+      .then((rows) => {
+        if (cancelled) return;
+        setPendingApprovalOrderIds(
+          new Set(rows.filter((row) => row.status === "pending").map((row) => row.order_id)),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setPendingApprovalOrderIds(new Set());
+      });
     return () => {
-      window.removeEventListener(PROCUREMENT_APPROVALS_EVENT, syncApprovals);
-      window.removeEventListener("storage", syncApprovals);
+      cancelled = true;
     };
-  }, []);
+  }, [rows]);
 
   useEffect(() => {
     if (loading) return;
@@ -295,12 +295,14 @@ export function ScmQueuePage() {
   }, []);
 
   const enriched = useMemo(() => {
-    const pendingIds = pendingFinalizeOrderIds(approvalsByOrder);
+    const pendingIds = pendingFinalizeOrderIds(
+      new Map([...pendingApprovalOrderIds].map((id) => [id, { status: "pending" as const }])),
+    );
     return rows.map((row) => ({
       ...row,
       ovf_status: deriveScmOvfQueueStatus(row, pendingIds),
     }));
-  }, [rows, approvalsByOrder]);
+  }, [rows, pendingApprovalOrderIds]);
 
   const kpis = useMemo(() => {
     const open = enriched.filter(

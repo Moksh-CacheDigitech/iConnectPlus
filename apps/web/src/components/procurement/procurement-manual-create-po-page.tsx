@@ -19,16 +19,15 @@ import {
 import { procurementUi } from "@/components/procurement/procurement-ui";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { submitPoFinalizeApproval } from "@/lib/procurement-approvals";
 import { cn } from "@/lib/utils";
 import { ApiClientError, formatApiError } from "@/services/api-client";
 import {
-  collectPoApprovalDocuments,
   createPoFromInventory,
   createVendorOption,
   listProcurementInventory,
   listVendorOptions,
   peekNextCompanyPoNumber,
+  requestScmFinalizeApproval,
   resolveVendorOrgScope,
   type ProcurementInventoryRow,
   type VendorOption,
@@ -705,20 +704,7 @@ export function ProcurementManualCreatePoPage() {
         import_line_ids: importLineIds,
       });
       // Manual / list Create PO always drafts then queues admin finalize approval.
-      const documents = await collectPoApprovalDocuments({
-        orderId: order.id,
-        ovfId: order.source_document_id,
-      }).catch(() => []);
-      submitPoFinalizeApproval({
-        orderId: order.id,
-        documentNumber: order.document_number,
-        companyPoNumber: order.company_po_number,
-        customerName: order.customer_name,
-        vendorId: order.vendor_id || vendorId,
-        vendorName: selectedVendor?.label || null,
-        ovfId: order.source_document_id,
-        documents,
-      });
+      await requestScmFinalizeApproval(order.id);
       router.replace(`/procurement/orders/${order.id}?approval=pending`);
     } catch (err) {
       setError(formatApiError(err, "Failed to create purchase order"));

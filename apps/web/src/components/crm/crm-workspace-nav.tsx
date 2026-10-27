@@ -48,6 +48,12 @@ type CrmNavItem = {
   icon: LucideIcon;
 };
 
+/** CRM panes visible only to ERP / CRM module admins (not sales members). */
+export const CRM_ADMIN_ONLY_HREFS = new Set([
+  "/crm/sales-performance",
+  "/crm/inventory-aging",
+]);
+
 /** Sales CRM (Zoho-replacement) teamspace navigation. */
 export const CRM_NAV: readonly CrmNavItem[] = [
   { title: "Dashboard", href: "/crm", icon: LayoutDashboard },
@@ -74,6 +80,12 @@ export const CRM_NAV: readonly CrmNavItem[] = [
   { title: "Entity", href: "/crm/entities", icon: Landmark },
   { title: "End Customer", href: "/crm/end-customers", icon: UserRound },
 ];
+
+export function isCrmAdminOnlyHref(href: string): boolean {
+  if (CRM_ADMIN_ONLY_HREFS.has(href)) return true;
+  // Alias used by the CRM resource route.
+  return href === "/crm/stock-aging";
+}
 
 function focusForHref(href: string): CrmSidebarFocus | null {
   if (href === "/crm") return "dashboard";
@@ -132,13 +144,17 @@ export function CrmSidebar() {
   const pathname = usePathname();
   const { user, adminModuleKeys } = useAuthUser();
 
+  const isCrmAdmin = canManageModuleUsers("crm", adminModuleKeys, user?.userType);
+
   const navItems = useMemo(() => {
-    const items: CrmNavItem[] = [...CRM_NAV];
-    if (canManageModuleUsers("crm", adminModuleKeys, user?.userType)) {
+    const items: CrmNavItem[] = CRM_NAV.filter(
+      (item) => isCrmAdmin || !CRM_ADMIN_ONLY_HREFS.has(item.href),
+    );
+    if (isCrmAdmin) {
       items.push({ title: "Users", href: "/crm/users", icon: UserCog });
     }
     return items;
-  }, [adminModuleKeys, user?.userType]);
+  }, [isCrmAdmin]);
 
   return (
     <ModuleSidebar

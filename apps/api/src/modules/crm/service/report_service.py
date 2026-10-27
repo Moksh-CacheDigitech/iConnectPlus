@@ -82,7 +82,7 @@ class CRMReportService:
         self._employees = EmployeeRepository(db)
 
     def summary(self, ctx: TenantContext, company_id: UUID | None = None) -> dict:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         leads = self._leads.list(ctx, cid)
         opps = self._opportunities.list(ctx, cid)
         return {
@@ -100,7 +100,7 @@ class CRMReportService:
         return report_catalog.list_columns(module_key)
 
     def list_saved(self, ctx: TenantContext, company_id: UUID | None = None) -> list[CrmSavedReport]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         stmt = select(CrmSavedReport).where(
             CrmSavedReport.tenant_id == ctx.tenant_id,
             CrmSavedReport.company_id == cid,
@@ -120,7 +120,7 @@ class CRMReportService:
         )
         if row is None or row.tenant_id != ctx.tenant_id:
             raise NotFoundException("Saved report not found")
-        self._scope.resolve_company_id(ctx, row.company_id)
+        self._scope.resolve_list_company_id(ctx, row.company_id)
         if not self._crm_admin.is_admin(ctx) and row.owner_user_id != ctx.user_id:
             raise ForbiddenException("You can only access your own saved reports")
         return row
@@ -239,7 +239,7 @@ class CRMReportService:
         company_id: UUID | None = None,
         preview_limit: int | None = None,
     ) -> dict:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         valid_cols = report_catalog.validate_columns(primary_module, columns)
         module_label = report_catalog.get_module_label(primary_module)
         col_meta = [

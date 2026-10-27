@@ -93,7 +93,7 @@ class IncomingRegistrationService:
         company_id: UUID | None = None,
         branch_id: UUID | None = None,
     ) -> dict[str, int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         if branch_id is not None:
             self._scope.validate_branch_access(ctx, branch_id)
         self._materialize_company_accepted(ctx, cid)
@@ -112,7 +112,7 @@ class IncomingRegistrationService:
         offset: int = 0,
         limit: int = 25,
     ) -> tuple[list[RegistrationQueueRow], int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         if branch_id is not None:
             self._scope.validate_branch_access(ctx, branch_id)
         self._materialize_company_accepted(ctx, cid)

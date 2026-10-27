@@ -36,7 +36,7 @@ class DefectService:
     def list_defects(
         self, ctx: TenantContext, company_id: UUID | None = None, ncr_id: UUID | None = None
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_defects(ctx, cid, ncr_id)
 
     def get_defect(self, ctx: TenantContext, defect_id: UUID) -> QmDefect:
@@ -96,7 +96,7 @@ class NcrService:
         self._audit = PlatformAuditFacade(db)
 
     def list_ncrs(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_ncrs(ctx, cid)
 
     def get_ncr(self, ctx: TenantContext, ncr_id: UUID) -> QmNcr:
@@ -169,7 +169,7 @@ class CapaService:
         self._scope = QmScopeValidator(db)
 
     def list_capas(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_capas(ctx, cid)
 
     def get_capa(self, ctx: TenantContext, capa_id: UUID) -> QmCapa:

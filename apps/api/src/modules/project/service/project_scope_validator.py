@@ -13,7 +13,12 @@ class ProjectScopeValidator(PrjScopedRepository):
         super().__init__(db)
 
     def validate_company_access(self, ctx: TenantContext, company_id: UUID) -> None:
-        self.ensure_company_access(ctx, company_id)
+        self.ensure_company_access(ctx, company_id, module_key="projects")
 
     def validate_branch_access(self, ctx: TenantContext, branch_id: UUID) -> None:
-        self.ensure_branch_access(ctx, branch_id)
+        self.ensure_branch_access(ctx, branch_id, module_key="projects")
+
+    def resolve_list_company_id(
+        self, ctx: TenantContext, company_id: UUID | None
+    ) -> UUID | None:
+        return PrjScopedRepository.resolve_list_company_id(ctx, company_id)

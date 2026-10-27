@@ -86,7 +86,7 @@ class InteractionService:
         self._visibility = CrmRecordVisibility(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._visibility.filter_created_rows(ctx, self._repo.list_interactions(ctx, cid))
 
     def get(self, ctx: TenantContext, row_id: UUID):
@@ -123,7 +123,7 @@ class TaskService:
         *,
         opportunity_id: UUID | None = None,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._visibility.filter_created_rows(
             ctx, self._repo.list_tasks(ctx, cid, opportunity_id=opportunity_id)
         )
@@ -184,7 +184,7 @@ class FollowupService:
         *,
         company_account_id: UUID | None = None,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._visibility.filter_created_rows(
             ctx, self._repo.list_followups(ctx, cid, company_account_id=company_account_id)
         )
@@ -229,7 +229,7 @@ class MeetingService:
         *,
         company_account_id: UUID | None = None,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._visibility.filter_created_rows(
             ctx, self._repo.list_meetings(ctx, cid, company_account_id=company_account_id)
         )
@@ -276,7 +276,7 @@ class CallLogService:
         self._engine = CallLogEngine()
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        return self._repo.list_logs(ctx, self._scope.resolve_company_id(ctx, company_id))
+        return self._repo.list_logs(ctx, self._scope.resolve_list_company_id(ctx, company_id))
 
     def create(self, ctx: TenantContext, *, branch_id: UUID, company_id: UUID | None = None, **fields):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -292,7 +292,7 @@ class EmailLogService:
         self._engine = EmailLogEngine()
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        return self._repo.list_logs(ctx, self._scope.resolve_company_id(ctx, company_id))
+        return self._repo.list_logs(ctx, self._scope.resolve_list_company_id(ctx, company_id))
 
     def create(self, ctx: TenantContext, *, branch_id: UUID, company_id: UUID | None = None, **fields):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -308,7 +308,7 @@ class VisitLogService:
         self._engine = VisitLogEngine()
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        return self._repo.list_logs(ctx, self._scope.resolve_company_id(ctx, company_id))
+        return self._repo.list_logs(ctx, self._scope.resolve_list_company_id(ctx, company_id))
 
     def create(self, ctx: TenantContext, *, branch_id: UUID, company_id: UUID | None = None, **fields):
         cid = self._scope.resolve_company_id(ctx, company_id)

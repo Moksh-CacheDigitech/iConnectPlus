@@ -9,9 +9,7 @@ import {
   Building2,
   ClipboardList,
   FileBarChart,
-  FileSignature,
   FileSpreadsheet,
-  FolderKanban,
   History,
   Hourglass,
   LayoutDashboard,
@@ -49,10 +47,8 @@ export const PROCUREMENT_NAV = [
   { title: "GRNs", href: "/procurement/grns", icon: PackageCheck },
   { title: "Billing/DC", href: "/procurement/delivery-challan", icon: Truck },
   { title: "Delivery Status", href: "/procurement/delivery-status", icon: MapPinned },
-  { title: "Delivery Projects", href: "/procurement/delivery-projects", icon: FolderKanban },
   { title: "Tracker Upload", href: "/procurement/tracker", icon: FileSpreadsheet },
   { title: "Installation", href: "/procurement/installation", icon: Wrench },
-  { title: "Service Contracts", href: "/procurement/service-contracts", icon: FileSignature },
   { title: "Vendors", href: "/procurement/vendors", icon: Building2 },
   { title: "Inventory", href: "/procurement/inventory", icon: Boxes },
   { title: "Stock Aging", href: "/procurement/inventory-aging", icon: Hourglass },
@@ -65,6 +61,12 @@ export const PROCUREMENT_INSIGHT_NAV = [
   { title: "Analytics", href: "/procurement/analytics", icon: BarChart3 },
   { title: "Timeline", href: "/procurement/timeline", icon: History },
 ] as const satisfies ReadonlyArray<ProcurementNavItem>;
+
+/** ERP / procurement module admin only (Insight + Tracker Upload). */
+export const PROCUREMENT_ADMIN_ONLY_HREFS = new Set([
+  "/procurement/tracker",
+  ...PROCUREMENT_INSIGHT_NAV.map((item) => item.href),
+]);
 
 export const ALL_PROCUREMENT_NAV = [
   ...PROCUREMENT_NAV,
@@ -104,7 +106,9 @@ export function ProcurementSidebar() {
   useDeliveryReminderSweep();
 
   const workspaceItems = useMemo(() => {
-    const items: ModuleNavItem[] = PROCUREMENT_NAV.map((item) => ({
+    const items: ModuleNavItem[] = PROCUREMENT_NAV.filter(
+      (item) => isAdmin || !PROCUREMENT_ADMIN_ONLY_HREFS.has(item.href),
+    ).map((item) => ({
       ...item,
       badge:
         item.href === "/procurement/approval" && isAdmin
@@ -138,6 +142,19 @@ export function ProcurementSidebar() {
     warmProcurementNavTarget(router, active.href);
   }, [workspaceItems, pathname, router]);
 
+  const groups = useMemo(() => {
+    const next: { label: string; items: ModuleNavItem[] }[] = [
+      { label: "Workspace", items: workspaceItems },
+    ];
+    if (isAdmin) {
+      next.push({
+        label: "Insight",
+        items: PROCUREMENT_INSIGHT_NAV.map((item) => ({ ...item })),
+      });
+    }
+    return next;
+  }, [isAdmin, workspaceItems]);
+
   return (
     <ModuleSidebar
       moduleKey="procurement"
@@ -145,10 +162,7 @@ export function ProcurementSidebar() {
       subtitle={isAdmin ? "Admin workspace" : "SCM workspace"}
       icon={Package}
       aria-label="Procurement workspace"
-      groups={[
-        { label: "Workspace", items: workspaceItems },
-        { label: "Insight", items: PROCUREMENT_INSIGHT_NAV },
-      ]}
+      groups={groups}
       isActive={(item) => isProcurementNavActive(pathname, item.href)}
       onItemWarm={(item) => warmProcurementNavTarget(router, item.href)}
     />

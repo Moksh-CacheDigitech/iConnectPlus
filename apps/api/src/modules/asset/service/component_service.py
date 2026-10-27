@@ -120,13 +120,13 @@ class AssetComponentService:
         asset_ids: list[UUID],
         status: str | None = "active",
     ) -> list[AstAssetComponent]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_asset_ids(
             ctx, company_id=cid, asset_ids=asset_ids, status=status
         )
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_rows(ctx, cid)
 
     def get(self, ctx: TenantContext, row_id: UUID) -> dict:
@@ -198,7 +198,7 @@ class AssetComponentService:
         limit: int = 50,
     ) -> list[dict]:
         """READY_TO_MOVE assets whose type has eligible_as_component=true."""
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         parent = self._assets.get(ctx, parent_asset_id)
         if parent is None or parent.company_id != cid:
             raise NotFoundException("Parent asset not found")

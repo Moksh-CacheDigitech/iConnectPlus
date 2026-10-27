@@ -31,7 +31,7 @@ class RequisitionService:
         self._audit = PlatformAuditFacade(db)
 
     def list_requisitions(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_requisitions(ctx, cid)
 
     def get_requisition(

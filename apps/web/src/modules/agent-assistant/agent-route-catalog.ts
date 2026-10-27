@@ -14,7 +14,6 @@ export type AgentScreenEntry = {
 const EMAIL_RESOURCE_HREF: Record<string, string> = {
   overview: "/email",
   compose: "/email/compose",
-  templates: "/email/templates",
   deliveries: "/email/deliveries",
   events: "/email/events",
 };

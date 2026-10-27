@@ -27,7 +27,7 @@ class ProjectReportService:
         self._db = db
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         rows = self._repo.list_rows(ctx, cid)
         return self._assignment.filter_project_child_rows(ctx, cid, rows)
 

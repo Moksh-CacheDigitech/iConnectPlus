@@ -24,6 +24,8 @@ PROCUREMENT_MANAGER_ROLE_CODE = "PROCUREMENT_MANAGER"
 SERVICE_HEAD_ROLE_CODE = "SERVICE_COORDINATOR"
 SERVICE_ENGINEER_ROLE_CODE = "SERVICE_ENGINEER"
 SERVICE_FIELD_ENGINEER_ROLE_CODE = "SERVICE_FIELD_ENGINEER"
+CRM_ADMIN_ROLE_CODE = "CRM_ADMIN"
+CRM_SALES_REP_ROLE_CODE = "CRM_SALES_REP"
 
 SERVICE_TEAM_JOB_ROLES = frozenset({"service_engineer", "field_engineer"})
 
@@ -70,6 +72,11 @@ class OrgModuleAdminSyncService:
         if "service" in old_set and "service" not in new_set:
             self._demote_service(ctx, user_id, actor_id)
 
+        if "crm" in new_set and "crm" not in old_set:
+            self.promote_crm_admin(tenant_id, user_id, actor_id)
+        if "crm" in old_set and "crm" not in new_set:
+            self.demote_crm_admin(tenant_id, user_id, actor_id)
+
     def sync_all_org_module_admins(self, tenant_id: UUID) -> None:
         rows = list(
             self._db.scalars(
@@ -97,6 +104,61 @@ class OrgModuleAdminSyncService:
                 self._promote_procurement(ctx, user_id, None)
             if "service" in keys:
                 self._promote_service(ctx, user_id, None)
+            if "crm" in keys:
+                self.promote_crm_admin(tenant_id, user_id, None)
+
+    def promote_crm_member(
+        self, tenant_id: UUID, user_id: UUID, actor_id: UUID | None
+    ) -> None:
+        """CRM module user → sales-rep RBAC (tasks, deals, leads, My Jobs)."""
+        self._ensure_role(tenant_id, user_id, CRM_SALES_REP_ROLE_CODE, actor_id)
+        self._rbac.invalidate_user(user_id)
+        self._audit.log_entity_change(
+            tenant_id=tenant_id,
+            entity_name="org_module_member",
+            entity_id=user_id,
+            operation="promote",
+            performed_by=actor_id,
+            new_value={"module": "crm", "role": CRM_SALES_REP_ROLE_CODE},
+        )
+
+    def demote_crm_member(self, tenant_id: UUID, user_id: UUID, actor_id: UUID | None) -> None:
+        self._revoke_role(tenant_id, user_id, CRM_SALES_REP_ROLE_CODE)
+        self._audit.log_entity_change(
+            tenant_id=tenant_id,
+            entity_name="org_module_member",
+            entity_id=user_id,
+            operation="demote",
+            performed_by=actor_id,
+            new_value={"module": "crm"},
+        )
+
+    def promote_crm_admin(
+        self, tenant_id: UUID, user_id: UUID, actor_id: UUID | None
+    ) -> None:
+        self._ensure_role(tenant_id, user_id, CRM_ADMIN_ROLE_CODE, actor_id)
+        # Admins do not need the sales-rep role; CRM_ADMIN covers task/deal APIs.
+        self._revoke_role(tenant_id, user_id, CRM_SALES_REP_ROLE_CODE)
+        self._rbac.invalidate_user(user_id)
+        self._audit.log_entity_change(
+            tenant_id=tenant_id,
+            entity_name="org_module_admin",
+            entity_id=user_id,
+            operation="promote",
+            performed_by=actor_id,
+            new_value={"module": "crm", "role": CRM_ADMIN_ROLE_CODE},
+        )
+
+    def demote_crm_admin(self, tenant_id: UUID, user_id: UUID, actor_id: UUID | None) -> None:
+        self._revoke_role(tenant_id, user_id, CRM_ADMIN_ROLE_CODE)
+        self._audit.log_entity_change(
+            tenant_id=tenant_id,
+            entity_name="org_module_admin",
+            entity_id=user_id,
+            operation="demote",
+            performed_by=actor_id,
+            new_value={"module": "crm"},
+        )
 
     def _role(self, tenant_id: UUID, role_code: str) -> SecRole | None:
         return self._db.scalar(

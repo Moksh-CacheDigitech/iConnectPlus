@@ -139,7 +139,7 @@ class ServiceRequestTicketService:
         date_to: datetime | None = None,
         mine: bool = False,
     ) -> list[SvcServiceRequest]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         stmt = select(SvcServiceRequest).where(
             SvcServiceRequest.company_id == cid,
             SvcServiceRequest.is_deleted.is_(False),
@@ -184,7 +184,7 @@ class ServiceRequestTicketService:
         self, ctx: TenantContext, *, company_id: UUID | None = None, mine: bool = False
     ) -> list[ServiceRequestSlaTrackerItem]:
         """Active ticket SLAs - tickets with SLA clock running and not yet resolved/closed."""
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         stmt = select(SvcServiceRequest).where(
             SvcServiceRequest.company_id == cid,
             SvcServiceRequest.is_deleted.is_(False),
@@ -309,7 +309,7 @@ class ServiceRequestTicketService:
         mine: bool = False,
     ) -> list[ServiceRequestResolvedTicketItem]:
         """Resolved and closed tickets with solution details."""
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         stmt = select(SvcServiceRequest).where(
             SvcServiceRequest.company_id == cid,
             SvcServiceRequest.is_deleted.is_(False),
@@ -386,7 +386,7 @@ class ServiceRequestTicketService:
         """Return only service engineers who can be assigned as ticket owners."""
         from modules.foundation.models.security import SecRole, SecUser, SecUserRole
 
-        cid = self._scope.resolve_company_id(ctx, None)
+        cid = self._scope.resolve_list_company_id(ctx, None)
         stmt = (
             select(EmployeeRead, SecUser.display_name)
             .join(SecUser, SecUser.id == EmployeeRead.user_id)

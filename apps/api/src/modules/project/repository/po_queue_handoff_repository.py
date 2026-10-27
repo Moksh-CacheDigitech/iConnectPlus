@@ -11,15 +11,10 @@ from modules.project.repository.base import PrjScopedRepository, utcnow
 
 
 class PoQueueHandoffRepository(PrjScopedRepository):
-    def list_active(self, ctx: TenantContext, company_id: UUID) -> list[PrjPoQueueHandoff]:
-        stmt = (
-            select(PrjPoQueueHandoff)
-            .where(
-                PrjPoQueueHandoff.company_id == company_id,
-                PrjPoQueueHandoff.is_deleted.is_(False),
-            )
-            .order_by(PrjPoQueueHandoff.shared_at.desc())
-        )
+    def list_active(self, ctx: TenantContext, company_id: UUID | None) -> list[PrjPoQueueHandoff]:
+        stmt = select(PrjPoQueueHandoff).where(PrjPoQueueHandoff.is_deleted.is_(False))
+        stmt = self.apply_optional_company_filter(stmt, PrjPoQueueHandoff, company_id)
+        stmt = stmt.order_by(PrjPoQueueHandoff.shared_at.desc())
         return list(
             self.db.scalars(
                 self.apply_prj_filter(stmt, PrjPoQueueHandoff, ctx, branch_scoped=True)
@@ -47,14 +42,14 @@ class PoQueueHandoffRepository(PrjScopedRepository):
         )
 
     def list_by_seed_marker(
-        self, ctx: TenantContext, company_id: UUID, seed_marker: str
+        self, ctx: TenantContext, company_id: UUID | None, seed_marker: str
     ) -> list[PrjPoQueueHandoff]:
         stmt = select(PrjPoQueueHandoff).where(
-            PrjPoQueueHandoff.company_id == company_id,
             PrjPoQueueHandoff.is_deleted.is_(False),
             PrjPoQueueHandoff.is_seed.is_(True),
             PrjPoQueueHandoff.seed_marker == seed_marker,
         )
+        stmt = self.apply_optional_company_filter(stmt, PrjPoQueueHandoff, company_id)
         return list(
             self.db.scalars(
                 self.apply_prj_filter(stmt, PrjPoQueueHandoff, ctx, branch_scoped=True)

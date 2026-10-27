@@ -184,7 +184,7 @@ class OvfService:
         return None
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None, opportunity_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         if opportunity_id is not None:
             opp = self._opportunities.get(ctx, opportunity_id)
             if opp is None:
@@ -212,9 +212,35 @@ class OvfService:
         return sorted(by_id.values(), key=lambda r: r.created_at or r.id, reverse=True)
 
     def list_shared_for_scm(self, ctx: TenantContext, company_id: UUID | None = None):
-        """OVFs shared to SCM after Finance/management commercial lock."""
-        cid = self._scope.resolve_company_id(ctx, company_id)
-        return self._repo.list_shared_to_scm(ctx, cid)
+        """OVFs shared to SCM after Finance/management commercial lock.
+
+        Do not pin to the session company alone - Procurement must see shared OVFs
+        across every company the user can access (platform / procurement-wide /
+        multi-entity scope). Explicit ``company_id`` still narrows the queue.
+        """
+        from modules.foundation.domain.org_data_scope import (
+            effective_company_ids,
+            has_module_wide_data_access,
+        )
+
+        if company_id is not None:
+            self._scope.resolve_list_company_id(ctx, company_id)
+            return self._repo.list_shared_to_scm(ctx, company_id)
+
+        if has_module_wide_data_access(ctx, "procurement"):
+            return self._repo.list_shared_to_scm(ctx, None)
+
+        ids = effective_company_ids(ctx, module_key="procurement")
+        if ids is None:
+            return self._repo.list_shared_to_scm(ctx, None)
+        if len(ids) == 0:
+            if ctx.company_id is None:
+                return []
+            return self._repo.list_shared_to_scm(ctx, ctx.company_id)
+        if len(ids) == 1:
+            return self._repo.list_shared_to_scm(ctx, ids[0])
+        # Multiple assigned companies - repository applies IN (...); do not pin to session.
+        return self._repo.list_shared_to_scm(ctx, None)
 
     def list_display_meta_by_ids(
         self, ctx: TenantContext, ovf_ids: Sequence[UUID]
@@ -237,8 +263,13 @@ class OvfService:
             raise NotFoundException("OVF not found")
         # Procurement/SCM module-wide access still uses list_shared_for_scm;
         # CRM users are creator-scoped unless admin or approval assignee.
+        # Shared OVFs are readable by Procurement so SCM can open the handoff.
         if not self._visibility.is_admin(ctx):
-            self._visibility.ensure_ovf_access(ctx, row)
+            if not (
+                bool(row.shared_to_scm)
+                and self._visibility.can_procurement_read_shared_ovf(ctx, row)
+            ):
+                self._visibility.ensure_ovf_access(ctx, row)
         self._ensure_display_snapshot(ctx, row)
         return row
 
@@ -2144,7 +2175,39 @@ class OvfService:
             from_state=from_opp_state, to_state=opp_next_state, action="deal_won",
             remark=f"OVF {ovf.ovf_no} deal won at {amount}",
         )
+        self._notify_deal_won_emails(ctx, opp, amount)
         return row
+
+    def _notify_deal_won_emails(self, ctx: TenantContext, opp, amount) -> None:
+        try:
+            from modules.crm.models.company import CrmCompany
+            from modules.crm.service.crm_email_notification_service import CrmEmailNotificationService
+            from modules.crm.service.crm_notification_service import resolve_employee_user_id
+            from modules.foundation.models.security import SecUser
+
+            customer = "—"
+            if opp.company_account_id is not None:
+                account = self._db.get(CrmCompany, opp.company_account_id)
+                if account is not None:
+                    customer = account.customer_name or "—"
+            salesperson = "—"
+            owner_uid = resolve_employee_user_id(self._db, ctx.tenant_id, opp.owner_employee_id)
+            if owner_uid is not None:
+                user = self._db.get(SecUser, owner_uid)
+                if user is not None:
+                    salesperson = user.display_name or user.email or "—"
+            CrmEmailNotificationService(self._db).notify_deal_won(
+                tenant_id=ctx.tenant_id,
+                opportunity_id=opp.id,
+                opportunity_name=opp.opportunity_name or "Opportunity",
+                customer_name=customer,
+                salesperson_name=salesperson,
+                final_value=amount,
+                owner_employee_id=opp.owner_employee_id,
+                created_by=ctx.user_id,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def _log(self, ctx: TenantContext, ovf: CrmOvf, from_state: str, to_state: str, action: str, remark: str | None) -> None:
         log_state_history(

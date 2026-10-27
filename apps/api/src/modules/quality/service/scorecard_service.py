@@ -44,7 +44,7 @@ class SupplierQualityService:
     def list_scores(
         self, ctx: TenantContext, company_id: UUID | None = None, vendor_id: UUID | None = None
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_scores(ctx, cid, vendor_id)
 
     def get_score(self, ctx: TenantContext, score_id: UUID) -> QmSupplierQuality:
@@ -92,7 +92,7 @@ class CustomerComplaintService:
         self._scope = QmScopeValidator(db)
 
     def list_complaints(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_complaints(ctx, cid)
 
     def get_complaint(self, ctx: TenantContext, complaint_id: UUID) -> QmCustomerComplaint:
@@ -158,7 +158,7 @@ class QualityAuditService:
         self._scope = QmScopeValidator(db)
 
     def list_audits(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_audits(ctx, cid)
 
     def get_audit(self, ctx: TenantContext, audit_id: UUID) -> QmQualityAudit:
@@ -231,7 +231,7 @@ class QualityScoreService:
     def list_scores(
         self, ctx: TenantContext, company_id: UUID | None = None, dimension: str | None = None
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_scores(ctx, cid, dimension)
 
     def get_score(self, ctx: TenantContext, score_id: UUID) -> QmQualityScore:

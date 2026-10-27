@@ -123,7 +123,29 @@ class CrmRecordVisibility:
             return True
         if self.has_pending_approval_on(ctx, entity_type="ovf", entity_id=ovf.id):
             return True
+        if bool(ovf.shared_to_scm) and self.can_procurement_read_shared_ovf(ctx, ovf):
+            return True
         return False
+
+    def can_procurement_read_shared_ovf(self, ctx: TenantContext, ovf: CrmOvf) -> bool:
+        """SCM queue / Create PO may open OVFs that Sales shared to Procurement."""
+        from modules.foundation.domain.org_data_scope import (
+            effective_company_ids,
+            has_module_wide_data_access,
+        )
+        from modules.foundation.repository.user_module_repository import UserModuleRepository
+
+        if ctx.user_id is None or not bool(ovf.shared_to_scm):
+            return False
+        modules = UserModuleRepository(self._db)
+        if modules.get_assignment(ctx.tenant_id, ctx.user_id, "procurement") is None:
+            return False
+        if has_module_wide_data_access(ctx, "procurement"):
+            return True
+        ids = effective_company_ids(ctx, module_key="procurement")
+        if ids is None:
+            return True
+        return ovf.company_id in ids
 
     def ensure_ovf_access(self, ctx: TenantContext, ovf: CrmOvf) -> None:
         if not self.can_access_ovf(ctx, ovf):

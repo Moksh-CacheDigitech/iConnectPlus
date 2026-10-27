@@ -11,6 +11,7 @@ from modules.foundation.domain.erp_modules import (
     ADMIN_USER_TYPES,
     ERP_MODULE_KEYS,
     ERP_MODULE_KEY_SET,
+    MODULE_ROLE_ADMIN,
     effective_admin_module_keys,
     effective_module_keys,
     has_all_modules_admin,
@@ -30,7 +31,8 @@ from modules.foundation.service.rbac_service import RBACService
 from security.password import PasswordHasher
 
 # Shared temporary password issued by ERP admins from Organization → Users.
-DEFAULT_TEMPORARY_PASSWORD = "Cache@123"
+# Avoid "@" — email clients linkify it and users copy a broken password.
+DEFAULT_TEMPORARY_PASSWORD = "CacheDigi#123"
 
 
 class UserService:
@@ -148,6 +150,17 @@ class UserService:
             event_type="auth.temporary_password_issued",
             user_id=user_id,
         )
+        try:
+            from modules.foundation.service.org_access_email_service import OrgAccessEmailService
+
+            OrgAccessEmailService(self._repo.db).notify_temporary_password(
+                tenant_id=tenant_id,
+                user=row,
+                temporary_password=password,
+                created_by=actor_id,
+            )
+        except Exception:  # noqa: BLE001
+            pass
         return self.get_user(tenant_id, user_id), password
 
     def effective_modules_for_user(self, user: UserEntity) -> list[str]:
@@ -221,7 +234,66 @@ class UserService:
             performed_by=updated_by,
             new_value={"admin_module_keys": normalized},
         )
+        newly_granted = sorted(set(normalized) - set(previous_admin_keys))
+        if newly_granted:
+            self._notify_admin_module_emails(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                newly_granted=newly_granted,
+                first_module=not (previous_admin_keys or user.assigned_module_keys),
+                actor_id=updated_by,
+            )
         return self.get_user(tenant_id, user_id)
+
+    def _notify_admin_module_emails(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        newly_granted: list[str],
+        first_module: bool,
+        actor_id: UUID | None,
+    ) -> None:
+        try:
+            from modules.foundation.models.security import SecUser
+            from modules.foundation.service.org_access_email_service import OrgAccessEmailService
+            from security.password import PasswordHasher
+
+            row = self._repo.db.get(SecUser, user_id)
+            if row is None or row.is_deleted:
+                return
+            mail = OrgAccessEmailService(self._repo.db)
+            module_label = (
+                "All modules"
+                if len(newly_granted) >= len(ERP_MODULE_KEYS)
+                else newly_granted[0]
+            )
+            if first_module:
+                row.password_hash = PasswordHasher.hash_password(DEFAULT_TEMPORARY_PASSWORD)
+                row.must_change_password = True
+                row.failed_login_count = 0
+                row.locked_until = None
+                if row.status == "locked":
+                    row.status = "active"
+                self._repo.db.flush()
+                mail.notify_welcome(
+                    tenant_id=tenant_id,
+                    user=row,
+                    module_key=module_label if module_label != "All modules" else "*",
+                    role=MODULE_ROLE_ADMIN,
+                    temporary_password=DEFAULT_TEMPORARY_PASSWORD,
+                    created_by=actor_id,
+                )
+            else:
+                mail.notify_module_assigned(
+                    tenant_id=tenant_id,
+                    user=row,
+                    module_key=module_label if module_label != "All modules" else "*",
+                    role=MODULE_ROLE_ADMIN,
+                    created_by=actor_id,
+                )
+        except Exception:  # noqa: BLE001
+            pass
 
     def list_users(self, tenant_id: UUID):
         # Keep Organization "Module users" in sync with Asset domain memberships.

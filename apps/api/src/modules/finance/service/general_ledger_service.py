@@ -52,7 +52,7 @@ class GeneralLedgerService:
         sort_dir: str = "asc",
         with_running_balance: bool = False,
     ) -> list[GlEntryResponse]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         entries = self._gl.list_entries(
             ctx,
             cid,
@@ -226,7 +226,7 @@ class GeneralLedgerService:
         )
 
     def summary(self, ctx: TenantContext, company_id: UUID | None = None) -> GlSummaryResponse:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         today = date.today()
         total_debits, total_credits, _ = self._gl.aggregate_totals(ctx, cid)
         _, _, today_count = self._gl.aggregate_totals(ctx, cid, from_date=today, to_date=today)

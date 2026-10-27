@@ -242,7 +242,7 @@ class DcChallanService:
         )
 
     def summary(self, ctx: TenantContext, *, company_id: UUID | None = None) -> dict[str, int]:
-        resolved = self._repo.resolve_company_id(ctx, company_id)
+        resolved = self._repo.resolve_list_company_id(ctx, company_id)
         counts = self._repo.summary_counts(ctx, resolved)
         return {
             "pending": counts.get(DcChallanStatus.PENDING.value, 0),

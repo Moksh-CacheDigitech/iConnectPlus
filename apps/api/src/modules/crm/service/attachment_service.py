@@ -61,7 +61,7 @@ class AttachmentService:
         category: str | None = None,
         company_id: UUID | None = None,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         rows = self._repo.list_by_category(ctx, cid, category=category)
         return self._visibility.filter_created_rows(ctx, rows)
 
@@ -218,7 +218,57 @@ class AttachmentService:
             self._sync_opportunity_attachment_flags(ctx, entity_id)
         elif entity_type == "lead":
             self._sync_lead_attachment_flags(ctx, entity_id)
+        self._notify_owner_document_submitted(ctx, entity_type, entity_id, category)
         return row
+
+    def _notify_owner_document_submitted(
+        self,
+        ctx: TenantContext,
+        entity_type: str,
+        entity_id: UUID,
+        category: str,
+    ) -> None:
+        try:
+            from modules.crm.models.lead import CrmLead
+            from modules.crm.models.opportunity import CrmOpportunity
+            from modules.crm.service.crm_email_notification_service import (
+                CrmEmailNotificationService,
+                entity_record_url,
+            )
+
+            doc_type = (category or "document").replace("_", " ").title()
+            owner_employee_id = None
+            record_title = doc_type
+            if entity_type == "opportunity":
+                opp = self._db.get(CrmOpportunity, entity_id)
+                if opp is None or getattr(opp, "is_deleted", False):
+                    return
+                owner_employee_id = opp.owner_employee_id
+                record_title = opp.opportunity_name or doc_type
+            elif entity_type == "lead":
+                lead = self._db.get(CrmLead, entity_id)
+                if lead is None or getattr(lead, "is_deleted", False):
+                    return
+                owner_employee_id = lead.owner_employee_id
+                record_title = (
+                    (lead.project_title or "").strip()
+                    or f"{lead.first_name} {(lead.last_name or '').strip()}".strip()
+                    or lead.lead_code
+                )
+            else:
+                return
+
+            CrmEmailNotificationService(self._db).notify_owner_document_submitted(
+                tenant_id=ctx.tenant_id,
+                owner_employee_id=owner_employee_id,
+                actor_user_id=ctx.user_id,
+                document_type=doc_type,
+                record_title=record_title,
+                record_url=entity_record_url(entity_type, entity_id),
+                created_by=ctx.user_id,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def delete(self, ctx: TenantContext, row_id: UUID) -> None:
         row = self.get(ctx, row_id)

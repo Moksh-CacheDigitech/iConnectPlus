@@ -41,12 +41,11 @@ import {
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { submitPoFinalizeApproval, hasAcceptedCreatePoInStockApproval } from "@/lib/procurement-approvals";
+import { hasAcceptedCreatePoInStockApproval } from "@/lib/procurement-approvals";
 import { useProcurementRole } from "@/hooks/use-procurement-role";
 import { scmHoldCreatePoNotice } from "@/utils/scm-ovf-hold";
 import { ApiClientError } from "@/services/api-client";
 import {
-  collectPoApprovalDocuments,
   createPoFromOvf,
   createVendorOption,
   emptyPostalAddress,
@@ -56,6 +55,7 @@ import {
   getScmOvfPreview,
   listVendorOptions,
   peekNextCompanyPoNumber,
+  requestScmFinalizeApproval,
   uploadScmPoAttachment,
   updateVendorAddresses,
   type ScmOvfPreview,
@@ -1786,30 +1786,7 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
       }
       setScmDocuments([]);
       if (needsApproval) {
-        const documents = await collectPoApprovalDocuments({
-          orderId: order.id,
-          ovfId,
-        });
-        submitPoFinalizeApproval({
-          orderId: order.id,
-          documentNumber: order.document_number,
-          companyPoNumber: order.company_po_number,
-          customerName:
-            order.customer_name ||
-            form.customerName ||
-            preview?.customer_name ||
-            preview?.account_name ||
-            null,
-          vendorId: order.vendor_id || vendorId,
-          vendorName:
-            form.vendorName ||
-            selectedVendor?.label ||
-            activeDistributorName ||
-            preview?.distributor_name ||
-            null,
-          ovfId,
-          documents,
-        });
+        await requestScmFinalizeApproval(order.id);
         router.replace(`/procurement/orders/${order.id}?approval=pending`);
         return;
       }

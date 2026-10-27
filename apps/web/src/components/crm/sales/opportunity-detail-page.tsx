@@ -477,6 +477,55 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
             }
           />
 
+          <div className="grid gap-2 rounded-xl border border-border/80 bg-card px-4 py-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                Account
+              </p>
+              <p className="mt-0.5 text-sm font-medium text-foreground">
+                {company?.customer_name?.trim() || "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                Stage / status
+              </p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                <Badge
+                  variant="outline"
+                  className={
+                    opp.current_stage === "won" || opp.status === "won"
+                      ? "border-emerald-200 bg-emerald-50 capitalize text-emerald-800"
+                      : "capitalize"
+                  }
+                >
+                  {opp.current_stage === "won" || opp.status === "won"
+                    ? "Deal won"
+                    : opp.current_stage.replaceAll("_", " ")}
+                </Badge>
+                <span className="text-xs capitalize text-muted-foreground">{opp.status}</span>
+              </div>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                {opp.status === "won" ? "Won amount" : "Expected revenue"}
+              </p>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums text-foreground">
+                {opp.status === "won" && opp.deal_won_amount != null
+                  ? formatInr(opp.deal_won_amount)
+                  : formatInr(opp.expected_revenue)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                Code
+              </p>
+              <p className="mt-0.5 text-sm font-medium tabular-nums text-foreground">
+                {formatCrmCode(opp.opportunity_code)}
+              </p>
+            </div>
+          </div>
+
           {banner ? <CrmErrorBanner>{banner.text}</CrmErrorBanner> : null}
           {error ? <CrmErrorBanner>{error}</CrmErrorBanner> : null}
 

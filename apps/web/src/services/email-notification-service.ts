@@ -49,17 +49,6 @@ export type EmailEventRow = {
   payload_json: Record<string, unknown> | null;
 };
 
-export type EmailTemplateRow = {
-  id: string;
-  tenant_id: string;
-  template_code: string;
-  template_name: string;
-  channel: string;
-  subject_template: string | null;
-  body_template: string;
-  locale: string;
-  is_active: boolean;
-};
 
 export type EmailOverview = {
   provider: EmailProviderStatus;
@@ -80,16 +69,7 @@ export type EmailComposePayload = {
   subject: string;
   body_html: string;
   event_type?: string;
-  template_id?: string | null;
   payload_json?: Record<string, unknown> | null;
-};
-
-export type EmailTemplateCreatePayload = {
-  template_code: string;
-  template_name: string;
-  channel: string;
-  body_template: string;
-  subject_template?: string | null;
 };
 
 export async function loadEmailOverview() {
@@ -126,22 +106,6 @@ export async function sendEmailCompose(body: EmailComposePayload) {
     "/notifications/email/send",
     { method: "POST", body },
   );
-  return res.data;
-}
-
-export async function listEmailTemplates() {
-  const res = await apiClient<EmailTemplateRow[]>("/notifications/templates", {
-    method: "GET",
-    query: { channel: "email" },
-  });
-  return res.data ?? [];
-}
-
-export async function createEmailTemplate(body: EmailTemplateCreatePayload) {
-  const res = await apiClient<EmailTemplateRow>("/notifications/templates", {
-    method: "POST",
-    body: { ...body, channel: "email" },
-  });
   return res.data;
 }
 

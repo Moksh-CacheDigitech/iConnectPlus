@@ -32,7 +32,7 @@ class SamplingPlanService:
         self._scope = QmScopeValidator(db)
 
     def list_plans(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_plans(ctx, cid)
 
     def get_plan(self, ctx: TenantContext, plan_id: UUID) -> QmSamplingPlan:
@@ -79,7 +79,7 @@ class InspectionPlanService:
     def list_plans(
         self, ctx: TenantContext, company_id: UUID | None = None, inspection_type: str | None = None
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_plans(ctx, cid, inspection_type)
 
     def get_plan(self, ctx: TenantContext, plan_id: UUID) -> QmInspectionPlan:
@@ -138,7 +138,7 @@ class CharacteristicService:
         company_id: UUID | None = None,
         inspection_plan_id: UUID | None = None,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_characteristics(ctx, cid, inspection_plan_id)
 
     def get_characteristic(self, ctx: TenantContext, characteristic_id: UUID) -> QmQualityCharacteristic:
@@ -180,7 +180,7 @@ class DefectTypeService:
         self._scope = QmScopeValidator(db)
 
     def list_types(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_types(ctx, cid)
 
     def get_type(self, ctx: TenantContext, defect_type_id: UUID) -> QmDefectType:

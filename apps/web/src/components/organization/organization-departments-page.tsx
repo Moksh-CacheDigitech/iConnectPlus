@@ -9,6 +9,7 @@ import { FinanceStatusBadge } from "@/components/finance/finance-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NON_ASSIGNABLE_MODULE_KEYS } from "@/components/organization/module-assign-select";
 import { erpModules } from "@/config/modules";
 import { ApiClientError, formatApiError } from "@/services/api-client";
 import {
@@ -22,7 +23,9 @@ import {
   type OrgDepartment,
 } from "@/services/organization-departments-service";
 
-const ASSIGNABLE_MODULES = erpModules.map((m) => ({ id: m.key, label: m.title }));
+const ASSIGNABLE_MODULES = erpModules
+  .filter((m) => !NON_ASSIGNABLE_MODULE_KEYS.has(m.key))
+  .map((m) => ({ id: m.key, label: m.title }));
 
 function formatWhen(value?: string | null): string {
   if (!value) return "—";

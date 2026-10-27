@@ -46,7 +46,7 @@ class IncomingInspectionService:
         self._audit = PlatformAuditFacade(db)
 
     def list_inspections(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_inspections(ctx, cid)
 
     def get_inspection(self, ctx: TenantContext, inspection_id: UUID) -> QmIncomingInspection:
@@ -208,7 +208,7 @@ class InProcessInspectionService:
         self._scope = QmScopeValidator(db)
 
     def list_inspections(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_inspections(ctx, cid)
 
     def get_inspection(self, ctx: TenantContext, inspection_id: UUID) -> QmInprocessInspection:
@@ -267,7 +267,7 @@ class FinalInspectionService:
         self._scope = QmScopeValidator(db)
 
     def list_inspections(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_inspections(ctx, cid)
 
     def get_inspection(self, ctx: TenantContext, inspection_id: UUID) -> QmFinalInspection:

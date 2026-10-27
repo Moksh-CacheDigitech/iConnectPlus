@@ -43,7 +43,7 @@ class ProductionReceiptService:
         self._audit = PlatformAuditFacade(db)
 
     def list_receipts(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_receipts(ctx, cid)
 
     def get_receipt(self, ctx: TenantContext, receipt_id: UUID) -> MfgProductionReceipt:

@@ -6,8 +6,9 @@
  * All calls go through the shared `apiClient` / `resourceService` - the UI
  * never talks to the database directly (DG-01).
  */
-import { ApiClientError, apiClient, resourceService } from "@/services/api-client";
+import { ApiClientError, apiClient, contextService, resourceService } from "@/services/api-client";
 import { getAccessToken } from "@/lib/auth";
+import { getStoredOrgContext } from "@/lib/org-context-storage";
 import { isInlineSafeAttachment, triggerBlobDownload } from "@/lib/safe-attachment";
 import { loadCrmOverview } from "@/services/crm-service";
 import { env } from "@/utils/env";
@@ -674,6 +675,7 @@ export type Opportunity = {
   expected_revenue: number;
   probability_percent: number;
   forecast_amount: number | null;
+  deal_won_amount?: number | null;
   customer_id: string | null;
   sales_quotation_id: string | null;
   sales_order_id: string | null;
@@ -1996,8 +1998,26 @@ export async function listPipelineOptions(): Promise<Option[]> {
   }));
 }
 
+/**
+ * Branches the signed-in user can access for their active company.
+ * Uses `/auth/context/branches` so CRM sales users do not need
+ * `organization.branch:read` (that permission is for Org Setup only).
+ */
 export async function listBranchOptions(): Promise<Option[]> {
-  const res = await resourceService.list("/branches");
+  const stored = getStoredOrgContext();
+  let companyId = stored?.companyId ?? null;
+  if (!companyId) {
+    const ctx = await contextService.getContext();
+    companyId = ctx.data?.company_id ?? null;
+  }
+  if (!companyId) {
+    const companies = await contextService.listCompanies();
+    const first = asArray(companies.data)[0];
+    companyId = first?.id ? String(first.id) : null;
+  }
+  if (!companyId) return [];
+
+  const res = await contextService.listBranches(companyId);
   const rows = asArray(res.data as Record<string, unknown>[] | Record<string, unknown> | null);
   return rows.map((r) => ({
     id: String(r.id),

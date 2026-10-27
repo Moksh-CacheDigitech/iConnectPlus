@@ -60,7 +60,7 @@ class BinService:
         self, ctx: TenantContext, company_id: UUID | None = None,
         warehouse_id: UUID | None = None,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_bins(ctx, cid, warehouse_id)
 
     def get_bin(self, ctx: TenantContext, bin_id: UUID):
@@ -96,7 +96,7 @@ class BatchService:
         self, ctx: TenantContext, company_id: UUID | None = None,
         product_id: UUID | None = None,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_batches(ctx, cid, product_id)
 
     def get_batch(self, ctx: TenantContext, batch_id: UUID):
@@ -138,7 +138,7 @@ class SerialService:
         self, ctx: TenantContext, company_id: UUID | None = None,
         product_id: UUID | None = None,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_serials(ctx, cid, product_id)
 
     def get_serial(self, ctx: TenantContext, serial_id: UUID):
@@ -179,7 +179,7 @@ class StockBalanceService:
         ).StockEngine()
 
     def list_stock(self, ctx: TenantContext, company_id: UUID | None = None, **filters):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_balances(ctx, cid, **filters)
 
     def get_balance(self, ctx: TenantContext, balance_id: UUID):
@@ -189,7 +189,7 @@ class StockBalanceService:
         return row
 
     def list_ledger(self, ctx: TenantContext, company_id: UUID | None = None, **filters):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._ledger.list_ledger(ctx, cid, **filters)
 
     def get_ledger_entry(self, ctx: TenantContext, entry_id: UUID):
@@ -216,7 +216,7 @@ class ReservationService:
         self, ctx: TenantContext, company_id: UUID | None = None,
         status: str | None = None,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_reservations(ctx, cid, status)
 
     def get_reservation(self, ctx: TenantContext, reservation_id: UUID):
@@ -241,7 +241,7 @@ class ValuationService:
         self, ctx: TenantContext, company_id: UUID | None = None,
         warehouse_id: UUID | None = None,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_layers(ctx, cid, warehouse_id)
 
     def run_valuation(self, ctx: TenantContext, company_id: UUID | None = None):
@@ -338,7 +338,7 @@ class TransferService:
         self._workflow_repo = WorkflowRepository(db)
 
     def list_transfers(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_transfers(ctx, cid)
 
     def get_transfer(self, ctx: TenantContext, transfer_id: UUID) -> InvTransferHeader:
@@ -458,7 +458,7 @@ class AdjustmentService:
         self._audit = PlatformAuditFacade(db)
 
     def list_adjustments(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_adjustments(ctx, cid)
 
     def get_adjustment(self, ctx: TenantContext, adjustment_id: UUID) -> InvAdjustmentHeader:
@@ -543,7 +543,7 @@ class CycleCountService:
         self._audit = PlatformAuditFacade(db)
 
     def list_counts(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_counts(ctx, cid)
 
     def get_count(self, ctx: TenantContext, count_id: UUID) -> InvCycleCountHeader:
@@ -624,7 +624,7 @@ class ReorderPolicyService:
         self._scope = InventoryScopeValidator(db)
 
     def list_policies(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_policies(ctx, cid)
 
     def get_policy(self, ctx: TenantContext, policy_id: UUID):

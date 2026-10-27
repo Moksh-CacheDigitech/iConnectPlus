@@ -24,6 +24,7 @@ from modules.procurement.schemas import (
     ScmDeliveryNotificationRunResponse,
     ScmEtdUpdateRequest,
     ScmEtdUpdateResponse,
+    ScmFinalizeApprovalResponse,
     ScmFulfillFromStockRequest,
     ScmFulfillFromStockResponse,
     ScmInventoryDescriptionUpdate,
@@ -574,6 +575,56 @@ def upsert_correspondence_template(
     return APIResponse(
         message="Correspondence template saved",
         data=ScmCorrespondenceTemplateResponse.model_validate(row),
+    )
+
+
+@scm_router.get(
+    "/finalize-approvals",
+    response_model=APIResponse[list[ScmFinalizeApprovalResponse]],
+)
+def list_scm_finalize_approvals(
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
+    db: Annotated[Session, Depends(get_db)],
+    company_id: UUID | None = None,
+) -> APIResponse[list[ScmFinalizeApprovalResponse]]:
+    rows = ScmHandoffService(db).list_finalize_approvals(ctx, company_id)
+    return APIResponse(
+        message="SCM finalize approvals retrieved",
+        data=[ScmFinalizeApprovalResponse.model_validate(r) for r in rows],
+    )
+
+
+@scm_router.post(
+    "/orders/{order_id}/request-finalize-approval",
+    response_model=APIResponse[OrderResponse],
+)
+def request_scm_finalize_approval(
+    order_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[OrderResponse]:
+    row = ScmHandoffService(db).request_finalize_approval(ctx, order_id)
+    db.commit()
+    return APIResponse(
+        message="SCM purchase order sent for admin approval",
+        data=OrderResponse.model_validate(row),
+    )
+
+
+@scm_router.post(
+    "/orders/{order_id}/reject-finalize-approval",
+    response_model=APIResponse[OrderResponse],
+)
+def reject_scm_finalize_approval(
+    order_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:approve"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[OrderResponse]:
+    row = ScmHandoffService(db).reject_finalize_approval(ctx, order_id)
+    db.commit()
+    return APIResponse(
+        message="SCM finalize request rejected",
+        data=OrderResponse.model_validate(row),
     )
 
 

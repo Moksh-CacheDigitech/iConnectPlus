@@ -85,7 +85,7 @@ class NonItAssetService:
         page_size: int = 25,
     ) -> tuple[list[dict], int]:
         self._ensure_read(ctx)
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         offset = (page - 1) * page_size
         rows, total = self._repo.search(
             ctx,
@@ -107,7 +107,7 @@ class NonItAssetService:
         company_id: UUID | None = None,
     ) -> dict:
         self._ensure_read(ctx)
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         raw = self._repo.dashboard_summary(ctx, cid)
 
         status_order = (

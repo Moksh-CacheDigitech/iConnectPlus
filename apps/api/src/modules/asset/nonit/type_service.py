@@ -82,7 +82,7 @@ class NonItAssetTypeService:
         category: str | None = None,
     ) -> list[dict]:
         self._ensure_read(ctx)
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         self.ensure_defaults(ctx, cid)
         cat = self._normalize_category(category) if category else None
         rows = self._repo.list_rows(ctx, cid, active=active, search=search, category=cat)

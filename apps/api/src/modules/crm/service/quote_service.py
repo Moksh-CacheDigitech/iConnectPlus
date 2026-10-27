@@ -76,7 +76,7 @@ class QuoteService:
         )
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None, opportunity_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         if opportunity_id is not None:
             opp = self._opportunities.get(ctx, opportunity_id)
             if opp is None:

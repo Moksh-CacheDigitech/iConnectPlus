@@ -6,6 +6,11 @@ Rules:
   including for org-assigned module admins (HR Superadmin entity toggles write these).
 - Module admin with no assigned scopes: same as platform for that module only.
 - Module member: scoped_company_ids / session company (+ session branch when branch_scoped).
+
+List vs write company resolution:
+- resolve_list_company_id  → None when the user can see multiple/all companies.
+  Never pin list APIs to the parked session company alone (CDPL must not hide CT).
+- resolve_write_company_id → always a concrete company for create/update.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from uuid import UUID
 
 from sqlalchemy import false
 
+from core.exceptions import ForbiddenException
 from modules.foundation.domain.erp_modules import ADMIN_USER_TYPES
 from modules.foundation.domain.value_objects import TenantContext
 
@@ -74,6 +80,44 @@ def effective_company_ids(
     if ctx.company_id is not None:
         return [ctx.company_id]
     return []
+
+
+def resolve_list_company_id(
+    ctx: TenantContext,
+    company_id: UUID | None,
+    *,
+    module_key: str,
+) -> UUID | None:
+    """Optional company filter for list/read APIs.
+
+    Returns None when the caller should see every company they can access for
+    this module (platform admin, module-wide admin, or multi-entity org scope).
+    Do not pin lists to the parked session company alone.
+    """
+    if company_id is not None:
+        return company_id
+    if has_module_wide_data_access(ctx, module_key):
+        return None
+    ids = effective_company_ids(ctx, module_key=module_key)
+    if ids is None:
+        return None
+    if len(ids) == 0:
+        return ctx.company_id
+    if len(ids) == 1:
+        return ids[0]
+    return None
+
+
+def resolve_write_company_id(
+    ctx: TenantContext,
+    company_id: UUID | None,
+) -> UUID:
+    """Concrete company for create/update - always requires a single company."""
+    if company_id is not None:
+        return company_id
+    if ctx.company_id is None:
+        raise ForbiddenException("Company context required")
+    return ctx.company_id
 
 
 def apply_company_scope(stmt, model, ctx: TenantContext, *, module_key: str | None = None):

@@ -77,7 +77,7 @@ class OvfTimelineService:
         self._scope = ProcurementScopeValidator(db)
 
     def list_ovfs(self, ctx: TenantContext, company_id: UUID | None = None) -> list[dict]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         rows = self._ovfs.list_for_procurement_timeline(ctx, cid)
         return [
             {

@@ -9,6 +9,15 @@ import { cn } from "@/lib/utils";
 /** Sentinel value for Organization → Users “All modules” entitlement. */
 export const ALL_MODULES_KEY = "*";
 
+/** Platform / shell modules — not offered in Organization → Users assign picker. */
+export const NON_ASSIGNABLE_MODULE_KEYS = new Set([
+  "foundation",
+  "email",
+  "voice-agent",
+  "organization",
+  "master-data",
+]);
+
 type Props = {
   id?: string;
   value: string;
@@ -27,11 +36,13 @@ export function ModuleAssignSelect({ id: _id, value, onChange, disabled, classNa
         description:
           "Full module-admin access across every ERP module (not the same as ERP admin).",
       },
-      ...erpModules.map((m) => ({
-        value: m.key,
-        label: m.title,
-        description: m.description,
-      })),
+      ...erpModules
+        .filter((m) => !NON_ASSIGNABLE_MODULE_KEYS.has(m.key))
+        .map((m) => ({
+          value: m.key,
+          label: m.title,
+          description: m.description,
+        })),
     ],
     [],
   );
