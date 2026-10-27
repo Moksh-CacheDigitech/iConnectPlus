@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,7 +9,6 @@ import { BRANCH_ALL_VALUE } from "@/components/assets/shared";
 
 const fetchMock = vi.fn();
 const listBranchesMock = vi.fn();
-const listSiteLocationsMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
@@ -21,10 +20,6 @@ vi.mock("@/components/assets/asset-operations-fetch", () => ({
 
 vi.mock("@/lib/org-options", () => ({
   listBranchOptions: () => listBranchesMock(),
-}));
-
-vi.mock("@/services/asset-site-location-service", () => ({
-  listSiteLocations: () => listSiteLocationsMock(),
 }));
 
 const successPayload = {
@@ -71,16 +66,6 @@ afterEach(() => {
 
 beforeEach(() => {
   listBranchesMock.mockResolvedValue([{ id: "b1", label: "Noida" }]);
-  listSiteLocationsMock.mockResolvedValue([
-    {
-      id: "loc1",
-      name: "New Delhi",
-      is_head_office: true,
-      org_location_id: null,
-      company_id: "c1",
-      version: 1,
-    },
-  ]);
   fetchMock.mockResolvedValue(successPayload);
 });
 
@@ -103,7 +88,7 @@ describe("AssetOperationsContainer", () => {
   });
 
   it("shows loading skeletons initially", () => {
-    fetchMock.mockImplementation(() => new Promise(() => {}));
+    fetchMock.mockImplementation(() => new Promise(() => { }));
     render(<AssetOperationsContainer />);
     expect(screen.getAllByLabelText("Loading statistic").length).toBeGreaterThan(0);
   });
@@ -148,17 +133,12 @@ describe("AssetOperationsContainer", () => {
     });
   });
 
-  it("refetches when location changes", async () => {
-    const user = userEvent.setup();
+  it("loads dashboard for all locations", async () => {
     render(<AssetOperationsContainer />);
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(BRANCH_ALL_VALUE);
     });
-    const group = await screen.findByRole("group", { name: "Location" });
-    await user.click(within(group).getByRole("button", { name: "New Delhi" }));
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("loc1");
-    });
+    expect(screen.queryByRole("group", { name: "Location" })).not.toBeInTheDocument();
   });
 
   it("shows empty transfer copy when list is empty", async () => {

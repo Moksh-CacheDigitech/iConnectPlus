@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from modules.finance.models.coa import FinAccountGroup, FinChartOfAccount
@@ -26,8 +26,8 @@ class COARepository(FinanceScopedRepository):
     def __init__(self, db: Session) -> None:
         super().__init__(db)
 
-    def list_account_groups(self, ctx: TenantContext, company_id: UUID) -> list[FinAccountGroup]:
-        stmt = select(FinAccountGroup).where(FinAccountGroup.company_id == company_id)
+    def list_account_groups(self, ctx: TenantContext, company_id: UUID | None) -> list[FinAccountGroup]:
+        stmt = select(FinAccountGroup).where((FinAccountGroup.company_id == company_id if company_id is not None else true()))
         stmt = self.apply_finance_filter(stmt, FinAccountGroup, ctx)
         return list(self.db.scalars(stmt.order_by(FinAccountGroup.display_order, FinAccountGroup.group_code)).all())
 
@@ -40,10 +40,10 @@ class COARepository(FinanceScopedRepository):
         return self.db.scalar(stmt)
 
     def get_account_group_by_code(
-        self, ctx: TenantContext, company_id: UUID, group_code: str
+        self, ctx: TenantContext, company_id: UUID | None, group_code: str
     ) -> FinAccountGroup | None:
         stmt = select(FinAccountGroup).where(
-            FinAccountGroup.company_id == company_id,
+            (FinAccountGroup.company_id == company_id if company_id is not None else true()),
             FinAccountGroup.group_code == group_code,
             FinAccountGroup.tenant_id == ctx.tenant_id,
             FinAccountGroup.is_deleted.is_(False),
@@ -51,7 +51,7 @@ class COARepository(FinanceScopedRepository):
         return self.db.scalar(stmt)
 
     def create_account_group(
-        self, ctx: TenantContext, *, company_id: UUID, **fields: object
+        self, ctx: TenantContext, *, company_id: UUID | None, **fields: object
     ) -> FinAccountGroup:
         row = FinAccountGroup(
             id=uuid4(),
@@ -68,7 +68,7 @@ class COARepository(FinanceScopedRepository):
     def list_accounts(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         status: str | None = None,
         account_type: str | None = None,
@@ -79,7 +79,7 @@ class COARepository(FinanceScopedRepository):
         sort_by: str = "account_code",
         sort_dir: str = "asc",
     ) -> list[FinChartOfAccount]:
-        stmt = select(FinChartOfAccount).where(FinChartOfAccount.company_id == company_id)
+        stmt = select(FinChartOfAccount).where((FinChartOfAccount.company_id == company_id if company_id is not None else true()))
         stmt = self.apply_finance_filter(stmt, FinChartOfAccount, ctx)
         if status:
             stmt = stmt.where(FinChartOfAccount.status == status)
@@ -113,10 +113,10 @@ class COARepository(FinanceScopedRepository):
         return self.db.scalar(stmt)
 
     def get_account_by_code(
-        self, ctx: TenantContext, company_id: UUID, account_code: str
+        self, ctx: TenantContext, company_id: UUID | None, account_code: str
     ) -> FinChartOfAccount | None:
         stmt = select(FinChartOfAccount).where(
-            FinChartOfAccount.company_id == company_id,
+            (FinChartOfAccount.company_id == company_id if company_id is not None else true()),
             FinChartOfAccount.account_code == account_code,
             FinChartOfAccount.tenant_id == ctx.tenant_id,
             FinChartOfAccount.is_deleted.is_(False),
@@ -152,7 +152,7 @@ class COARepository(FinanceScopedRepository):
         return int(self.db.scalar(stmt) or 0)
 
     def create_account(
-        self, ctx: TenantContext, *, company_id: UUID, **fields: object
+        self, ctx: TenantContext, *, company_id: UUID | None, **fields: object
     ) -> FinChartOfAccount:
         row = FinChartOfAccount(
             id=uuid4(),
@@ -191,7 +191,7 @@ class COARepository(FinanceScopedRepository):
         self.db.flush()
         return True
 
-    def account_balances(self, ctx: TenantContext, company_id: UUID) -> dict[UUID, tuple[float, float]]:
+    def account_balances(self, ctx: TenantContext, company_id: UUID | None) -> dict[UUID, tuple[float, float]]:
         stmt = (
             select(
                 FinGlEntry.account_id,
@@ -199,7 +199,7 @@ class COARepository(FinanceScopedRepository):
                 func.coalesce(func.sum(FinGlEntry.base_credit_amount), 0),
             )
             .where(
-                FinGlEntry.company_id == company_id,
+                (FinGlEntry.company_id == company_id if company_id is not None else true()),
                 FinGlEntry.tenant_id == ctx.tenant_id,
             )
             .group_by(FinGlEntry.account_id)
@@ -209,7 +209,7 @@ class COARepository(FinanceScopedRepository):
         rows = self.db.execute(stmt).all()
         return {row[0]: (float(row[1]), float(row[2])) for row in rows}
 
-    def account_balance(self, ctx: TenantContext, company_id: UUID, account_id: UUID) -> tuple[float, float]:
+    def account_balance(self, ctx: TenantContext, company_id: UUID | None, account_id: UUID) -> tuple[float, float]:
         balances = self.account_balances(ctx, company_id)
         return balances.get(account_id, (0.0, 0.0))
 

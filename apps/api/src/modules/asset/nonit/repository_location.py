@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import or_, select
+from sqlalchemy import true, or_, select
 from sqlalchemy.orm import Session
 
 from modules.asset.models import AstNonitLocation
@@ -25,14 +25,14 @@ class NonItLocationRepository(AstScopedRepository):
     def list_rows(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         active: bool | None = None,
         search: str | None = None,
         location_kind: str | None = None,
     ) -> list[AstNonitLocation]:
         stmt = select(AstNonitLocation).where(
-            AstNonitLocation.company_id == company_id,
+            (AstNonitLocation.company_id == company_id if company_id is not None else true()),
             AstNonitLocation.is_deleted.is_(False),
         )
         if active is not None:

@@ -162,6 +162,7 @@ class CompanyService:
         # fallbacks (not ``setdefault``) so company defaults still apply.
         lead_fields["first_name"] = lead_fields.get("first_name") or account.first_name or account.customer_name
         lead_fields["last_name"] = lead_fields.get("last_name") or account.last_name
+        lead_fields["designation"] = lead_fields.get("designation") or account.role
         lead_fields["company_name"] = account.customer_name
         lead_fields["email"] = lead_fields.get("email") or account.customer_email
         lead_fields["mobile"] = lead_fields.get("mobile") or account.phone or ""

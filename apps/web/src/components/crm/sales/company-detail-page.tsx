@@ -149,7 +149,7 @@ function CompanyProfileReadOnly({
         <div className="grid gap-4 lg:grid-cols-2 lg:gap-x-10">
           <div className="space-y-3">
             <CompanyReadOnlyField label="Account Manager Owner" value={employeeName(company.account_owner_id)} />
-            <CompanyReadOnlyField label="Company Name *" value={textOrDash(company.customer_name)} />
+            <CompanyReadOnlyField label="First Name *" value={textOrDash(company.first_name)} />
             <CompanyReadOnlyField label="Company ID" value={textOrDash(company.account_number)} />
             <CompanyReadOnlyField label="GST Number" value={textOrDash(headOfficeGstin)} />
             <CompanyReadOnlyField label="Account Type *" value={textOrDash(company.account_type)} />
@@ -168,8 +168,9 @@ function CompanyProfileReadOnly({
           </div>
 
           <div className="space-y-3">
-            <CompanyReadOnlyField label="First Name *" value={textOrDash(company.first_name)} />
+            <CompanyReadOnlyField label="Company Name *" value={textOrDash(company.customer_name)} />
             <CompanyReadOnlyField label="Last Name *" value={textOrDash(company.last_name)} />
+            <CompanyReadOnlyField label="Designation *" value={textOrDash(company.role)} />
             <CompanyReadOnlyField label="Customer Email *" value={textOrDash(company.customer_email)} />
             <CompanyReadOnlyField label="Phone *" value={textOrDash(company.phone)} />
             <CompanyReadOnlyField label="Website *" value={textOrDash(company.website)} />

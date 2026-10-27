@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmOpportunity
@@ -22,12 +22,12 @@ class OpportunityRepository(CrmScopedRepository):
     def list_opportunities(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         opportunity_ids: list[UUID] | None = None,
     ):
         stmt = select(CrmOpportunity).where(
-            CrmOpportunity.company_id == company_id,
+            (CrmOpportunity.company_id == company_id if company_id is not None else true()),
             CrmOpportunity.is_deleted.is_(False),
         )
         if opportunity_ids is not None:

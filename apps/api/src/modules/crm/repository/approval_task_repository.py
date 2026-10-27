@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmApprovalTask
@@ -49,7 +49,7 @@ class ApprovalTaskRepository(CrmScopedRepository):
     ):
         stmt = select(CrmApprovalTask).where(CrmApprovalTask.is_deleted.is_(False))
         if company_id is not None:
-            stmt = stmt.where(CrmApprovalTask.company_id == company_id)
+            stmt = stmt.where((CrmApprovalTask.company_id == company_id if company_id is not None else true()))
         if team_role is not None:
             stmt = stmt.where(CrmApprovalTask.team_role == team_role)
         if status is not None:
@@ -110,13 +110,13 @@ class ApprovalTaskRepository(CrmScopedRepository):
         stmt = self._apply_job_scope(stmt, ctx, tenant_wide=tenant_wide)
         return self.db.scalar(stmt)
 
-    def list_for_entity_ids(self, ctx: TenantContext, company_id: UUID, entity_ids: list[UUID]):
+    def list_for_entity_ids(self, ctx: TenantContext, company_id: UUID | None, entity_ids: list[UUID]):
         if not entity_ids:
             return []
         stmt = (
             select(CrmApprovalTask)
             .where(
-                CrmApprovalTask.company_id == company_id,
+                (CrmApprovalTask.company_id == company_id if company_id is not None else true()),
                 CrmApprovalTask.entity_id.in_(entity_ids),
                 CrmApprovalTask.is_deleted.is_(False),
             )

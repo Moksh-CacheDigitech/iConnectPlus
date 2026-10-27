@@ -26,6 +26,13 @@ class AstScopedRepository(OrgScopedRepository):
         super().__init__(db)
 
     @staticmethod
+    def apply_optional_company_filter(stmt, model, company_id: UUID | None):
+        """Pin to one company when provided; skip when list scope is tenant-wide."""
+        if company_id is not None and hasattr(model, "company_id"):
+            stmt = stmt.where(model.company_id == company_id)
+        return stmt
+
+    @staticmethod
     def apply_ast_filter(stmt, model, ctx: TenantContext, *, branch_scoped: bool = False):
         stmt = AstScopedRepository.apply_tenant_filter(stmt, model, ctx)
         return apply_org_scope_filter(

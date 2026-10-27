@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmContact
@@ -40,10 +40,10 @@ class ContactRepository(CrmScopedRepository):
         return self.db.scalar(stmt)
 
     def list_contacts(
-        self, ctx: TenantContext, company_id: UUID, company_account_id: UUID | None = None
+        self, ctx: TenantContext, company_id: UUID | None, company_account_id: UUID | None = None
     ):
         stmt = select(CrmContact).where(
-            CrmContact.company_id == company_id,
+            (CrmContact.company_id == company_id if company_id is not None else true()),
             CrmContact.is_deleted.is_(False),
         )
         if company_account_id is not None:

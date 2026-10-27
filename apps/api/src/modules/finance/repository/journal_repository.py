@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import or_, select
+from sqlalchemy import true, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from modules.finance.models.journal import FinJournalHeader, FinJournalLine
@@ -18,7 +18,7 @@ class JournalRepository(FinanceScopedRepository):
     def list_journals(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         status: str | None = None,
         journal_type: str | None = None,
@@ -27,7 +27,7 @@ class JournalRepository(FinanceScopedRepository):
         sort_by: str = "journal_date",
         sort_dir: str = "desc",
     ) -> list[FinJournalHeader]:
-        stmt = select(FinJournalHeader).where(FinJournalHeader.company_id == company_id)
+        stmt = select(FinJournalHeader).where((FinJournalHeader.company_id == company_id if company_id is not None else true()))
         stmt = self.apply_finance_filter(stmt, FinJournalHeader, ctx, branch_scoped=True)
         if status:
             stmt = stmt.where(FinJournalHeader.status == status)
@@ -84,7 +84,7 @@ class JournalRepository(FinanceScopedRepository):
         return self.db.scalar(stmt)
 
     def create_journal(
-        self, ctx: TenantContext, *, company_id: UUID, branch_id: UUID, **fields: object
+        self, ctx: TenantContext, *, company_id: UUID | None, branch_id: UUID, **fields: object
     ) -> FinJournalHeader:
         row = FinJournalHeader(
             id=uuid4(),

@@ -3,7 +3,7 @@
 from datetime import date
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from modules.finance.models.fiscal import FinFiscalYear, FinPeriod
@@ -36,14 +36,14 @@ class FiscalRepository(FinanceScopedRepository):
     def list_fiscal_years(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         status: str | None = None,
         search: str | None = None,
         sort_by: str = "start_date",
         sort_dir: str = "desc",
     ) -> list[FinFiscalYear]:
-        stmt = select(FinFiscalYear).where(FinFiscalYear.company_id == company_id)
+        stmt = select(FinFiscalYear).where((FinFiscalYear.company_id == company_id if company_id is not None else true()))
         stmt = self.apply_finance_filter(stmt, FinFiscalYear, ctx)
         if status:
             stmt = stmt.where(FinFiscalYear.status == status)
@@ -68,18 +68,18 @@ class FiscalRepository(FinanceScopedRepository):
         )
         return self.db.scalar(stmt)
 
-    def get_open_fiscal_year(self, ctx: TenantContext, company_id: UUID) -> FinFiscalYear | None:
+    def get_open_fiscal_year(self, ctx: TenantContext, company_id: UUID | None) -> FinFiscalYear | None:
         stmt = select(FinFiscalYear).where(
-            FinFiscalYear.company_id == company_id,
+            (FinFiscalYear.company_id == company_id if company_id is not None else true()),
             FinFiscalYear.tenant_id == ctx.tenant_id,
             FinFiscalYear.status == "open",
             FinFiscalYear.is_deleted.is_(False),
         )
         return self.db.scalar(stmt)
 
-    def get_default_fiscal_year(self, ctx: TenantContext, company_id: UUID) -> FinFiscalYear | None:
+    def get_default_fiscal_year(self, ctx: TenantContext, company_id: UUID | None) -> FinFiscalYear | None:
         stmt = select(FinFiscalYear).where(
-            FinFiscalYear.company_id == company_id,
+            (FinFiscalYear.company_id == company_id if company_id is not None else true()),
             FinFiscalYear.tenant_id == ctx.tenant_id,
             FinFiscalYear.is_default.is_(True),
             FinFiscalYear.is_deleted.is_(False),
@@ -89,13 +89,13 @@ class FiscalRepository(FinanceScopedRepository):
     def overlapping_fiscal_year(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         start_date: date,
         end_date: date,
         exclude_id: UUID | None = None,
     ) -> FinFiscalYear | None:
         stmt = select(FinFiscalYear).where(
-            FinFiscalYear.company_id == company_id,
+            (FinFiscalYear.company_id == company_id if company_id is not None else true()),
             FinFiscalYear.tenant_id == ctx.tenant_id,
             FinFiscalYear.is_deleted.is_(False),
             FinFiscalYear.start_date <= end_date,
@@ -106,7 +106,7 @@ class FiscalRepository(FinanceScopedRepository):
         return self.db.scalar(stmt.limit(1))
 
     def create_fiscal_year(
-        self, ctx: TenantContext, *, company_id: UUID, **fields: object
+        self, ctx: TenantContext, *, company_id: UUID | None, **fields: object
     ) -> FinFiscalYear:
         row = FinFiscalYear(
             id=uuid4(),
@@ -145,9 +145,9 @@ class FiscalRepository(FinanceScopedRepository):
         self.db.flush()
         return True
 
-    def clear_default_flag(self, ctx: TenantContext, company_id: UUID, exclude_id: UUID | None = None) -> None:
+    def clear_default_flag(self, ctx: TenantContext, company_id: UUID | None, exclude_id: UUID | None = None) -> None:
         stmt = select(FinFiscalYear).where(
-            FinFiscalYear.company_id == company_id,
+            (FinFiscalYear.company_id == company_id if company_id is not None else true()),
             FinFiscalYear.tenant_id == ctx.tenant_id,
             FinFiscalYear.is_default.is_(True),
             FinFiscalYear.is_deleted.is_(False),
@@ -162,14 +162,14 @@ class FiscalRepository(FinanceScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         fiscal_year_id: UUID | None = None,
         status: str | None = None,
         search: str | None = None,
         sort_by: str = "period_number",
         sort_dir: str = "asc",
     ) -> list[FinPeriod]:
-        stmt = select(FinPeriod).where(FinPeriod.company_id == company_id)
+        stmt = select(FinPeriod).where((FinPeriod.company_id == company_id if company_id is not None else true()))
         stmt = self.apply_finance_filter(stmt, FinPeriod, ctx)
         if fiscal_year_id:
             stmt = stmt.where(FinPeriod.fiscal_year_id == fiscal_year_id)
@@ -203,10 +203,10 @@ class FiscalRepository(FinanceScopedRepository):
         return self.db.scalar(stmt)
 
     def get_period_for_date(
-        self, ctx: TenantContext, company_id: UUID, journal_date: date
+        self, ctx: TenantContext, company_id: UUID | None, journal_date: date
     ) -> FinPeriod | None:
         stmt = select(FinPeriod).where(
-            FinPeriod.company_id == company_id,
+            (FinPeriod.company_id == company_id if company_id is not None else true()),
             FinPeriod.tenant_id == ctx.tenant_id,
             FinPeriod.start_date <= journal_date,
             FinPeriod.end_date >= journal_date,
@@ -214,11 +214,11 @@ class FiscalRepository(FinanceScopedRepository):
         )
         return self.db.scalar(stmt)
 
-    def get_current_period(self, ctx: TenantContext, company_id: UUID, today: date) -> FinPeriod | None:
+    def get_current_period(self, ctx: TenantContext, company_id: UUID | None, today: date) -> FinPeriod | None:
         stmt = (
             select(FinPeriod)
             .where(
-                FinPeriod.company_id == company_id,
+                (FinPeriod.company_id == company_id if company_id is not None else true()),
                 FinPeriod.tenant_id == ctx.tenant_id,
                 FinPeriod.start_date <= today,
                 FinPeriod.end_date >= today,
@@ -229,7 +229,7 @@ class FiscalRepository(FinanceScopedRepository):
         )
         return self.db.scalar(stmt)
 
-    def create_period(self, ctx: TenantContext, *, company_id: UUID, **fields: object) -> FinPeriod:
+    def create_period(self, ctx: TenantContext, *, company_id: UUID | None, **fields: object) -> FinPeriod:
         row = FinPeriod(
             id=uuid4(),
             tenant_id=ctx.tenant_id,

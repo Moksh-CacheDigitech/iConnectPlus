@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmOvf, CrmOvfExpense, CrmOvfLine, CrmOvfPayment
@@ -38,14 +38,14 @@ class OvfRepository(CrmScopedRepository):
     def list_ovfs(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         opportunity_id: UUID | None = None,
         opportunity_ids: list[UUID] | None = None,
         created_by: UUID | None = None,
     ):
         stmt = select(CrmOvf).where(
-            CrmOvf.company_id == company_id,
+            (CrmOvf.company_id == company_id if company_id is not None else true()),
             CrmOvf.is_deleted.is_(False),
         )
         if opportunity_id is not None:
@@ -68,7 +68,7 @@ class OvfRepository(CrmScopedRepository):
             CrmOvf.blueprint_state.in_(("shared_scm", "deal_won")),
         )
         if company_id is not None:
-            stmt = stmt.where(CrmOvf.company_id == company_id)
+            stmt = stmt.where((CrmOvf.company_id == company_id if company_id is not None else true()))
         stmt = _apply_procurement_ovf_scope(stmt, CrmOvf, ctx)
         stmt = stmt.order_by(CrmOvf.updated_at.desc())
         return list(self.db.scalars(stmt).all())
@@ -82,7 +82,7 @@ class OvfRepository(CrmScopedRepository):
             CrmOvf.shared_to_scm.is_(True),
         )
         if company_id is not None:
-            stmt = stmt.where(CrmOvf.company_id == company_id)
+            stmt = stmt.where((CrmOvf.company_id == company_id if company_id is not None else true()))
         stmt = _apply_procurement_ovf_scope(stmt, CrmOvf, ctx)
         stmt = stmt.order_by(CrmOvf.updated_at.desc())
         return list(self.db.scalars(stmt).all())

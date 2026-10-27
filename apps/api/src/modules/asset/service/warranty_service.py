@@ -43,7 +43,7 @@ class WarrantyService:
         offset: int = 0,
         limit: int = 25,
     ) -> tuple[list[AstAssetWarranty], int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         filters = AssetWarrantyListFilters(
             company_id=cid,
             asset_id=asset_id,

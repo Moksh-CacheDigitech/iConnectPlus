@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmOpportunityStage
@@ -19,9 +19,9 @@ class OpportunityStageRepository(CrmScopedRepository):
         stmt = self.apply_crm_filter(stmt, CrmOpportunityStage, ctx, branch_scoped=True)
         return self.db.scalar(stmt)
 
-    def list_stages(self, ctx: TenantContext, company_id: UUID):
+    def list_stages(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(CrmOpportunityStage).where(
-            CrmOpportunityStage.company_id == company_id,
+            (CrmOpportunityStage.company_id == company_id if company_id is not None else true()),
             CrmOpportunityStage.is_deleted.is_(False),
         )
         stmt = self.apply_crm_filter(stmt, CrmOpportunityStage, ctx, branch_scoped=True)

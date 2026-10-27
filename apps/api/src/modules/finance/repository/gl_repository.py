@@ -3,7 +3,7 @@
 from datetime import date
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from modules.finance.models.coa import FinChartOfAccount
@@ -31,7 +31,7 @@ class GLRepository(FinanceScopedRepository):
     def list_entries(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         account_id: UUID | None = None,
         period_id: UUID | None = None,
@@ -46,7 +46,7 @@ class GLRepository(FinanceScopedRepository):
         sort_by: str = "entry_date",
         sort_dir: str = "asc",
     ) -> list[FinGlEntry]:
-        stmt = select(FinGlEntry).where(FinGlEntry.company_id == company_id)
+        stmt = select(FinGlEntry).where((FinGlEntry.company_id == company_id if company_id is not None else true()))
         stmt = self.apply_finance_filter(stmt, FinGlEntry, ctx, branch_scoped=True)
         if account_id:
             stmt = stmt.where(FinGlEntry.account_id == account_id)
@@ -114,7 +114,7 @@ class GLRepository(FinanceScopedRepository):
     def trial_balance(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         period_id: UUID,
     ) -> list[tuple[UUID, str, float, float]]:
         stmt = (
@@ -125,7 +125,7 @@ class GLRepository(FinanceScopedRepository):
                 func.coalesce(func.sum(FinGlEntry.base_credit_amount), 0),
             )
             .where(
-                FinGlEntry.company_id == company_id,
+                (FinGlEntry.company_id == company_id if company_id is not None else true()),
                 FinGlEntry.tenant_id == ctx.tenant_id,
                 FinGlEntry.period_id == period_id,
             )
@@ -138,7 +138,7 @@ class GLRepository(FinanceScopedRepository):
     def aggregate_totals(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         from_date: date | None = None,
         to_date: date | None = None,
@@ -150,7 +150,7 @@ class GLRepository(FinanceScopedRepository):
             func.coalesce(func.sum(FinGlEntry.base_credit_amount), 0),
             func.count(FinGlEntry.id),
         ).where(
-            FinGlEntry.company_id == company_id,
+            (FinGlEntry.company_id == company_id if company_id is not None else true()),
             FinGlEntry.tenant_id == ctx.tenant_id,
         )
         if ctx.branch_id and not has_module_wide_data_access(ctx, "finance"):
@@ -166,9 +166,9 @@ class GLRepository(FinanceScopedRepository):
         row = self.db.execute(stmt).one()
         return float(row[0]), float(row[1]), int(row[2])
 
-    def distinct_account_count(self, ctx: TenantContext, company_id: UUID) -> int:
+    def distinct_account_count(self, ctx: TenantContext, company_id: UUID | None) -> int:
         stmt = select(func.count(func.distinct(FinGlEntry.account_id))).where(
-            FinGlEntry.company_id == company_id,
+            (FinGlEntry.company_id == company_id if company_id is not None else true()),
             FinGlEntry.tenant_id == ctx.tenant_id,
         )
         if ctx.branch_id and not has_module_wide_data_access(ctx, "finance"):
@@ -208,13 +208,13 @@ class GLRepository(FinanceScopedRepository):
         return self.db.scalar(stmt)
 
     def account_balance_before(
-        self, ctx: TenantContext, company_id: UUID, account_id: UUID, before_date: date
+        self, ctx: TenantContext, company_id: UUID | None, account_id: UUID, before_date: date
     ) -> tuple[float, float]:
         stmt = select(
             func.coalesce(func.sum(FinGlEntry.base_debit_amount), 0),
             func.coalesce(func.sum(FinGlEntry.base_credit_amount), 0),
         ).where(
-            FinGlEntry.company_id == company_id,
+            (FinGlEntry.company_id == company_id if company_id is not None else true()),
             FinGlEntry.tenant_id == ctx.tenant_id,
             FinGlEntry.account_id == account_id,
             FinGlEntry.entry_date < before_date,

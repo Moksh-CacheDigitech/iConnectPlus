@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException
@@ -21,7 +21,7 @@ OPEN_STATUSES = (
 
 @dataclass(frozen=True)
 class AssetWarrantyListFilters:
-    company_id: UUID
+    company_id: UUID | None
     asset_id: UUID | None = None
     vendor_id: UUID | None = None
     warranty_type: str | None = None
@@ -42,7 +42,7 @@ class AssetWarrantyRepository(AstScopedRepository):
         stmt = self.apply_ast_filter(stmt, AstAssetWarranty, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
         items, _ = self.search(
             ctx,
             AssetWarrantyListFilters(company_id=company_id),
@@ -55,12 +55,12 @@ class AssetWarrantyRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         asset_id: UUID,
         exclude_id: UUID | None = None,
     ) -> AstAssetWarranty | None:
         stmt = select(AstAssetWarranty).where(
-            AstAssetWarranty.company_id == company_id,
+            (AstAssetWarranty.company_id == company_id if company_id is not None else true()),
             AstAssetWarranty.asset_id == asset_id,
             AstAssetWarranty.is_deleted.is_(False),
             AstAssetWarranty.status.in_(OPEN_STATUSES),
@@ -82,7 +82,7 @@ class AssetWarrantyRepository(AstScopedRepository):
             select(AstAssetWarranty)
             .outerjoin(AstAsset, AstAsset.id == AstAssetWarranty.asset_id)
             .where(
-                AstAssetWarranty.company_id == filters.company_id,
+                (AstAssetWarranty.company_id == filters.company_id if filters.company_id is not None else true()),
                 AstAssetWarranty.is_deleted.is_(False),
             )
         )

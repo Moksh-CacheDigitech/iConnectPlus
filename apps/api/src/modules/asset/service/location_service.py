@@ -42,7 +42,7 @@ class LocationService:
         offset: int = 0,
         limit: int = 25,
     ) -> tuple[list[AstAssetLocation], int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         filters = AssetLocationListFilters(
             company_id=cid,
             asset_id=asset_id,

@@ -2,9 +2,8 @@
 
 Rules:
 - Platform admin (super_admin / tenant_admin): entire tenant (no company/branch filter).
-- Assigned entity scopes (SecUserOrgScope / scoped_company_ids): always limit data,
-  including for org-assigned module admins (HR Superadmin entity toggles write these).
-- Module admin with no assigned scopes: same as platform for that module only.
+- Module admin (admin_module_keys): full read/write for that module across the tenant
+  (all companies/branches). Entity scopes do not shrink module-admin elevation.
 - Module member: scoped_company_ids / session company (+ session branch when branch_scoped).
 
 List vs write company resolution:
@@ -29,12 +28,13 @@ def is_platform_admin(ctx: TenantContext) -> bool:
 
 
 def has_module_wide_data_access(ctx: TenantContext, module_key: str) -> bool:
-    """True when list/read queries for this module should span the whole tenant."""
+    """True when list/read/write for this module should span the whole tenant.
+
+    Org-assigned module admins get full module data access (all companies), even if
+    they also have SecUserOrgScope rows for other member workflows.
+    """
     if is_platform_admin(ctx):
         return True
-    # Entity assignments from HR Superadmin / Organization win over module-admin elevation.
-    if ctx.scoped_company_ids:
-        return False
     key = (module_key or "").strip().lower()
     if key and key in ctx.admin_module_keys:
         return True

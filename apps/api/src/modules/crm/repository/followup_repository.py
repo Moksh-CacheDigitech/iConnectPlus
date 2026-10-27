@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmFollowup
@@ -22,12 +22,12 @@ class FollowupRepository(CrmScopedRepository):
     def list_followups(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         company_account_id: UUID | None = None,
     ):
         stmt = select(CrmFollowup).where(
-            CrmFollowup.company_id == company_id,
+            (CrmFollowup.company_id == company_id if company_id is not None else true()),
             CrmFollowup.is_deleted.is_(False),
         )
         if company_account_id is not None:

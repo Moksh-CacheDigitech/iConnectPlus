@@ -86,7 +86,7 @@ class TransferService:
         effective_from: date | None = None,
         effective_to: date | None = None,
     ) -> tuple[list[AstAssetTransfer], int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         filters = AssetTransferListFilters(
             company_id=cid,
             asset_id=asset_id,

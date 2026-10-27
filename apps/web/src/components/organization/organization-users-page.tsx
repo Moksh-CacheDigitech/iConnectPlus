@@ -210,6 +210,11 @@ function UsersTableCard({
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-foreground">{title}</p>
+            {variant === "admin" ? (
+              <p className="truncate text-xs text-muted-foreground">
+                Full read and write across all companies for each assigned module
+              </p>
+            ) : null}
           </div>
           <ChevronDown
             className={cn(
@@ -552,7 +557,7 @@ export function OrganizationUsersPage({
         if (manual || result.created || result.linked || result.updated || result.deactivated) {
           setNotice(
             `HRMS sync: ${result.employee_count} onboarded employees · ${result.created} new logins · ` +
-              `${result.linked} linked · ${result.updated} updated · ${result.deactivated} deactivated.`,
+            `${result.linked} linked · ${result.updated} updated · ${result.deactivated} deactivated.`,
           );
         }
       } catch (err) {

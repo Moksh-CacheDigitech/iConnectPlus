@@ -17,7 +17,6 @@ import {
 } from "@/components/assets/dashboard.mapper";
 import { BRANCH_ALL_VALUE, type BranchOption } from "@/components/assets/shared";
 import { listBranchOptions } from "@/lib/org-options";
-import { listSiteLocations } from "@/services/asset-site-location-service";
 import type { AssetDashboardSummaryDto } from "@/services/assets-service";
 
 const EMPTY_SUMMARY: AssetDashboardSummaryDto = {
@@ -33,8 +32,6 @@ const EMPTY_SUMMARY: AssetDashboardSummaryDto = {
 const EMPTY_LIST = { items: [], total: 0, page: 1, page_size: 10 };
 
 export function AssetOperationsContainer() {
-  const [locationId, setLocationId] = useState(BRANCH_ALL_VALUE);
-  const [locations, setLocations] = useState<BranchOption[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [kpis, setKpis] = useState<AssetOperationsKpiModel | null>(null);
   const [kpiTrends, setKpiTrends] = useState<AssetOperationsKpiTrends | null>(null);
@@ -49,15 +46,6 @@ export function AssetOperationsContainer() {
 
   useEffect(() => {
     let cancelled = false;
-    void listSiteLocations()
-      .then((rows) => {
-        if (!cancelled) {
-          setLocations(rows.map((o) => ({ id: o.id, label: o.name })));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLocations([]);
-      });
     void listBranchOptions()
       .then((options) => {
         if (!cancelled) {
@@ -80,7 +68,7 @@ export function AssetOperationsContainer() {
     setErrorMessage(null);
     setTransferError(null);
 
-    const result = await fetchAssetOperationsData(locationId);
+    const result = await fetchAssetOperationsData(BRANCH_ALL_VALUE);
 
     const nothingLoaded = !result.summary && !result.transfersList;
 
@@ -128,7 +116,7 @@ export function AssetOperationsContainer() {
 
     setKpisLoading(false);
     setTransfersLoading(false);
-  }, [locationId]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -140,9 +128,6 @@ export function AssetOperationsContainer() {
 
   return (
     <AssetOperationsDashboard
-      locationId={locationId}
-      locations={locations}
-      onLocationChange={setLocationId}
       kpisLoading={kpisLoading}
       transfersLoading={transfersLoading}
       kpis={kpis}

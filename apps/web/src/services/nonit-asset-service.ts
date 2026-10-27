@@ -121,7 +121,7 @@ export type NonItImportSummary = {
 };
 
 export type NonItDashboardSummary = {
-  company_id: string;
+  company_id: string | null;
   total_assets: number;
   in_stock: number;
   assigned: number;

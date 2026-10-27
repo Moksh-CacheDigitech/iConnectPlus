@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmLeadAssignment
@@ -19,9 +19,9 @@ class LeadAssignmentRepository(CrmScopedRepository):
         stmt = self.apply_crm_filter(stmt, CrmLeadAssignment, ctx, branch_scoped=True)
         return self.db.scalar(stmt)
 
-    def list_assignments(self, ctx: TenantContext, company_id: UUID):
+    def list_assignments(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(CrmLeadAssignment).where(
-            CrmLeadAssignment.company_id == company_id,
+            (CrmLeadAssignment.company_id == company_id if company_id is not None else true()),
             CrmLeadAssignment.is_deleted.is_(False),
         )
         stmt = self.apply_crm_filter(stmt, CrmLeadAssignment, ctx, branch_scoped=True)

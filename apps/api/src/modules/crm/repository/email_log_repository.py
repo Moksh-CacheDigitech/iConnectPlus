@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmEmailLog
@@ -19,9 +19,9 @@ class EmailLogRepository(CrmScopedRepository):
         stmt = self.apply_crm_filter(stmt, CrmEmailLog, ctx, branch_scoped=True)
         return self.db.scalar(stmt)
 
-    def list_logs(self, ctx: TenantContext, company_id: UUID):
+    def list_logs(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(CrmEmailLog).where(
-            CrmEmailLog.company_id == company_id,
+            (CrmEmailLog.company_id == company_id if company_id is not None else true()),
             CrmEmailLog.is_deleted.is_(False),
         )
         stmt = self.apply_crm_filter(stmt, CrmEmailLog, ctx, branch_scoped=True)

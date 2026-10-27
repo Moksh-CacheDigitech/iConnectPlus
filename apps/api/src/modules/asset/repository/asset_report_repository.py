@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException
@@ -45,7 +45,7 @@ SORT_COLUMNS = {
 
 @dataclass(frozen=True)
 class AssetReportListFilters:
-    company_id: UUID
+    company_id: UUID | None
     report_type: str | None = None
     status: str | None = None
     category_id: UUID | None = None
@@ -57,7 +57,7 @@ class AssetReportListFilters:
 
 @dataclass(frozen=True)
 class LiveReportFilters:
-    company_id: UUID
+    company_id: UUID | None
     branch_id: UUID | None = None
     category_id: UUID | None = None
     department_id: UUID | None = None
@@ -80,7 +80,7 @@ class AssetReportRepository(AstScopedRepository):
         stmt = self.apply_ast_filter(stmt, AstAssetReport, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
         items, _ = self.search(
             ctx,
             AssetReportListFilters(company_id=company_id),
@@ -98,7 +98,7 @@ class AssetReportRepository(AstScopedRepository):
         limit: int,
     ) -> tuple[list[AstAssetReport], int]:
         stmt = select(AstAssetReport).where(
-            AstAssetReport.company_id == filters.company_id,
+            (AstAssetReport.company_id == filters.company_id if filters.company_id is not None else true()),
             AstAssetReport.is_deleted.is_(False),
         )
         if filters.report_type is not None:
@@ -169,7 +169,7 @@ class AssetReportRepository(AstScopedRepository):
 
     def _asset_base(self, ctx: TenantContext, filters: LiveReportFilters):
         stmt = select(AstAsset).where(
-            AstAsset.company_id == filters.company_id,
+            (AstAsset.company_id == filters.company_id if filters.company_id is not None else true()),
             AstAsset.is_deleted.is_(False),
         )
         if filters.branch_id is not None:
@@ -188,7 +188,7 @@ class AssetReportRepository(AstScopedRepository):
         stmt = (
             select(AstAsset.status, func.count())
             .where(
-                AstAsset.company_id == filters.company_id,
+                (AstAsset.company_id == filters.company_id if filters.company_id is not None else true()),
                 AstAsset.is_deleted.is_(False),
             )
         )
@@ -202,9 +202,9 @@ class AssetReportRepository(AstScopedRepository):
         stmt = stmt.group_by(AstAsset.status)
         return {str(status): int(cnt) for status, cnt in self.db.execute(stmt).all()}
 
-    def count_active_assignments(self, ctx: TenantContext, company_id: UUID) -> int:
+    def count_active_assignments(self, ctx: TenantContext, company_id: UUID | None) -> int:
         stmt = select(func.count()).where(
-            AstAssetAssignment.company_id == company_id,
+            (AstAssetAssignment.company_id == company_id if company_id is not None else true()),
             AstAssetAssignment.is_deleted.is_(False),
             AstAssetAssignment.status == "active",
         )
@@ -223,7 +223,7 @@ class AssetReportRepository(AstScopedRepository):
             )
             .outerjoin(AstAssetCategory, AstAssetCategory.id == AstAsset.asset_category_id)
             .where(
-                AstAsset.company_id == filters.company_id,
+                (AstAsset.company_id == filters.company_id if filters.company_id is not None else true()),
                 AstAsset.is_deleted.is_(False),
             )
             .group_by(
@@ -249,7 +249,7 @@ class AssetReportRepository(AstScopedRepository):
         stmt = (
             select(AstAsset.department_id, func.count())
             .where(
-                AstAsset.company_id == filters.company_id,
+                (AstAsset.company_id == filters.company_id if filters.company_id is not None else true()),
                 AstAsset.is_deleted.is_(False),
             )
             .group_by(AstAsset.department_id)
@@ -261,12 +261,12 @@ class AssetReportRepository(AstScopedRepository):
         ]
 
     def count_expiring_warranties(
-        self, ctx: TenantContext, company_id: UUID, *, horizon_days: int = DEFAULT_HORIZON_DAYS
+        self, ctx: TenantContext, company_id: UUID | None, *, horizon_days: int = DEFAULT_HORIZON_DAYS
     ) -> int:
         today = date.today()
         end = today + timedelta(days=horizon_days)
         stmt = select(func.count()).where(
-            AstAssetWarranty.company_id == company_id,
+            (AstAssetWarranty.company_id == company_id if company_id is not None else true()),
             AstAssetWarranty.is_deleted.is_(False),
             AstAssetWarranty.status.in_(["active", "extended"]),
             AstAssetWarranty.end_date >= today,
@@ -276,12 +276,12 @@ class AssetReportRepository(AstScopedRepository):
         return int(self.db.scalar(stmt) or 0)
 
     def count_expiring_insurance(
-        self, ctx: TenantContext, company_id: UUID, *, horizon_days: int = DEFAULT_HORIZON_DAYS
+        self, ctx: TenantContext, company_id: UUID | None, *, horizon_days: int = DEFAULT_HORIZON_DAYS
     ) -> int:
         today = date.today()
         end = today + timedelta(days=horizon_days)
         stmt = select(func.count()).where(
-            AstAssetInsurance.company_id == company_id,
+            (AstAssetInsurance.company_id == company_id if company_id is not None else true()),
             AstAssetInsurance.is_deleted.is_(False),
             AstAssetInsurance.status.in_(["active", "renewed"]),
             AstAssetInsurance.end_date >= today,
@@ -290,9 +290,9 @@ class AssetReportRepository(AstScopedRepository):
         stmt = self.apply_ast_filter(stmt, AstAssetInsurance, ctx, branch_scoped=False)
         return int(self.db.scalar(stmt) or 0)
 
-    def count_maintenance_open(self, ctx: TenantContext, company_id: UUID) -> int:
+    def count_maintenance_open(self, ctx: TenantContext, company_id: UUID | None) -> int:
         stmt = select(func.count()).where(
-            AstAssetMaintenance.company_id == company_id,
+            (AstAssetMaintenance.company_id == company_id if company_id is not None else true()),
             AstAssetMaintenance.is_deleted.is_(False),
             AstAssetMaintenance.status.in_(
                 ["draft", "submitted", "approved", "scheduled", "in_progress"]
@@ -302,12 +302,12 @@ class AssetReportRepository(AstScopedRepository):
         return int(self.db.scalar(stmt) or 0)
 
     def count_depreciation_by_status(
-        self, ctx: TenantContext, company_id: UUID
+        self, ctx: TenantContext, company_id: UUID | None
     ) -> dict[str, int]:
         stmt = (
             select(AstAssetDepreciation.status, func.count())
             .where(
-                AstAssetDepreciation.company_id == company_id,
+                (AstAssetDepreciation.company_id == company_id if company_id is not None else true()),
                 AstAssetDepreciation.is_deleted.is_(False),
             )
             .group_by(AstAssetDepreciation.status)
@@ -316,12 +316,12 @@ class AssetReportRepository(AstScopedRepository):
         return {str(s): int(c) for s, c in self.db.execute(stmt).all()}
 
     def count_documents_by_type(
-        self, ctx: TenantContext, company_id: UUID
+        self, ctx: TenantContext, company_id: UUID | None
     ) -> list[dict[str, Any]]:
         stmt = (
             select(AstAssetDocument.document_type, func.count())
             .where(
-                AstAssetDocument.company_id == company_id,
+                (AstAssetDocument.company_id == company_id if company_id is not None else true()),
                 AstAssetDocument.is_deleted.is_(False),
             )
             .group_by(AstAssetDocument.document_type)
@@ -334,12 +334,12 @@ class AssetReportRepository(AstScopedRepository):
         return sorted(rows, key=lambda r: r["count"], reverse=True)
 
     def count_documents_by_status(
-        self, ctx: TenantContext, company_id: UUID
+        self, ctx: TenantContext, company_id: UUID | None
     ) -> dict[str, int]:
         stmt = (
             select(AstAssetDocument.status, func.count())
             .where(
-                AstAssetDocument.company_id == company_id,
+                (AstAssetDocument.company_id == company_id if company_id is not None else true()),
                 AstAssetDocument.is_deleted.is_(False),
             )
             .group_by(AstAssetDocument.status)
@@ -347,9 +347,9 @@ class AssetReportRepository(AstScopedRepository):
         stmt = self.apply_ast_filter(stmt, AstAssetDocument, ctx, branch_scoped=False)
         return {str(status): int(cnt) for status, cnt in self.db.execute(stmt).all()}
 
-    def count_assets_with_documents(self, ctx: TenantContext, company_id: UUID) -> int:
+    def count_assets_with_documents(self, ctx: TenantContext, company_id: UUID | None) -> int:
         stmt = select(func.count(func.distinct(AstAssetDocument.asset_id))).where(
-            AstAssetDocument.company_id == company_id,
+            (AstAssetDocument.company_id == company_id if company_id is not None else true()),
             AstAssetDocument.is_deleted.is_(False),
             AstAssetDocument.status == "active",
         )
@@ -357,12 +357,12 @@ class AssetReportRepository(AstScopedRepository):
         return int(self.db.scalar(stmt) or 0)
 
     def count_components_by_type(
-        self, ctx: TenantContext, company_id: UUID
+        self, ctx: TenantContext, company_id: UUID | None
     ) -> list[dict[str, Any]]:
         stmt = (
             select(AstAssetComponent.component_type, func.count())
             .where(
-                AstAssetComponent.company_id == company_id,
+                (AstAssetComponent.company_id == company_id if company_id is not None else true()),
                 AstAssetComponent.is_deleted.is_(False),
             )
             .group_by(AstAssetComponent.component_type)
@@ -375,12 +375,12 @@ class AssetReportRepository(AstScopedRepository):
         return sorted(rows, key=lambda r: r["count"], reverse=True)
 
     def count_components_by_status(
-        self, ctx: TenantContext, company_id: UUID
+        self, ctx: TenantContext, company_id: UUID | None
     ) -> dict[str, int]:
         stmt = (
             select(AstAssetComponent.status, func.count())
             .where(
-                AstAssetComponent.company_id == company_id,
+                (AstAssetComponent.company_id == company_id if company_id is not None else true()),
                 AstAssetComponent.is_deleted.is_(False),
             )
             .group_by(AstAssetComponent.status)
@@ -389,10 +389,10 @@ class AssetReportRepository(AstScopedRepository):
         return {str(status): int(cnt) for status, cnt in self.db.execute(stmt).all()}
 
     def count_assignment_usage(
-        self, ctx: TenantContext, company_id: UUID
+        self, ctx: TenantContext, company_id: UUID | None
     ) -> dict[str, int]:
         active_stmt = select(func.count()).where(
-            AstAssetAssignment.company_id == company_id,
+            (AstAssetAssignment.company_id == company_id if company_id is not None else true()),
             AstAssetAssignment.is_deleted.is_(False),
             AstAssetAssignment.status == "active",
         )
@@ -400,7 +400,7 @@ class AssetReportRepository(AstScopedRepository):
             active_stmt, AstAssetAssignment, ctx, branch_scoped=False
         )
         closed_stmt = select(func.count()).where(
-            AstAssetAssignment.company_id == company_id,
+            (AstAssetAssignment.company_id == company_id if company_id is not None else true()),
             AstAssetAssignment.is_deleted.is_(False),
             AstAssetAssignment.status != "active",
         )
@@ -410,7 +410,7 @@ class AssetReportRepository(AstScopedRepository):
         unique_stmt = select(
             func.count(func.distinct(AstAssetAssignment.asset_id))
         ).where(
-            AstAssetAssignment.company_id == company_id,
+            (AstAssetAssignment.company_id == company_id if company_id is not None else true()),
             AstAssetAssignment.is_deleted.is_(False),
             AstAssetAssignment.status == "active",
         )
@@ -423,25 +423,25 @@ class AssetReportRepository(AstScopedRepository):
             "assets_currently_assigned": int(self.db.scalar(unique_stmt) or 0),
         }
 
-    def count_disposals_open(self, ctx: TenantContext, company_id: UUID) -> int:
+    def count_disposals_open(self, ctx: TenantContext, company_id: UUID | None) -> int:
         stmt = select(func.count()).where(
-            AstAssetDisposal.company_id == company_id,
+            (AstAssetDisposal.company_id == company_id if company_id is not None else true()),
             AstAssetDisposal.is_deleted.is_(False),
             AstAssetDisposal.status.in_(["draft", "submitted", "approved"]),
         )
         stmt = self.apply_ast_filter(stmt, AstAssetDisposal, ctx, branch_scoped=False)
         return int(self.db.scalar(stmt) or 0)
 
-    def count_assets_with_depreciation(self, ctx: TenantContext, company_id: UUID) -> int:
+    def count_assets_with_depreciation(self, ctx: TenantContext, company_id: UUID | None) -> int:
         stmt = select(func.count(func.distinct(AstAssetDepreciation.asset_id))).where(
-            AstAssetDepreciation.company_id == company_id,
+            (AstAssetDepreciation.company_id == company_id if company_id is not None else true()),
             AstAssetDepreciation.is_deleted.is_(False),
         )
         stmt = self.apply_ast_filter(stmt, AstAssetDepreciation, ctx, branch_scoped=False)
         return int(self.db.scalar(stmt) or 0)
 
     def group_asset_registrations_by_month(
-        self, ctx: TenantContext, company_id: UUID, *, months: int = 6
+        self, ctx: TenantContext, company_id: UUID | None, *, months: int = 6
     ) -> list[dict[str, Any]]:
         # Postgres date_trunc; fall back to empty if dialect lacks it.
         month_bucket = func.date_trunc("month", AstAsset.created_at)
@@ -449,7 +449,7 @@ class AssetReportRepository(AstScopedRepository):
         stmt = (
             select(month_bucket.label("month"), func.count())
             .where(
-                AstAsset.company_id == company_id,
+                (AstAsset.company_id == company_id if company_id is not None else true()),
                 AstAsset.is_deleted.is_(False),
                 AstAsset.created_at >= start,
             )
@@ -473,7 +473,7 @@ class AssetReportRepository(AstScopedRepository):
         stmt = (
             select(AstAsset.operational_status, func.count())
             .where(
-                AstAsset.company_id == filters.company_id,
+                (AstAsset.company_id == filters.company_id if filters.company_id is not None else true()),
                 AstAsset.is_deleted.is_(False),
                 AstAsset.operational_status.is_not(None),
             )
@@ -493,12 +493,12 @@ class AssetReportRepository(AstScopedRepository):
         }
 
     def recent_transfers(
-        self, ctx: TenantContext, company_id: UUID, *, limit: int = 10
+        self, ctx: TenantContext, company_id: UUID | None, *, limit: int = 10
     ) -> list[dict[str, Any]]:
         stmt = (
             select(AstAssetTransfer)
             .where(
-                AstAssetTransfer.company_id == company_id,
+                (AstAssetTransfer.company_id == company_id if company_id is not None else true()),
                 AstAssetTransfer.is_deleted.is_(False),
             )
             .order_by(AstAssetTransfer.created_at.desc())
@@ -517,12 +517,12 @@ class AssetReportRepository(AstScopedRepository):
         ]
 
     def recent_notifications(
-        self, ctx: TenantContext, company_id: UUID, *, limit: int = 10
+        self, ctx: TenantContext, company_id: UUID | None, *, limit: int = 10
     ) -> list[dict[str, Any]]:
         stmt = (
             select(AstAssetNotification)
             .where(
-                AstAssetNotification.company_id == company_id,
+                (AstAssetNotification.company_id == company_id if company_id is not None else true()),
                 AstAssetNotification.is_deleted.is_(False),
             )
             .order_by(AstAssetNotification.created_at.desc())
@@ -581,7 +581,7 @@ class AssetReportRepository(AstScopedRepository):
         date_column=None,
     ) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
         stmt = select(model).where(
-            model.company_id == filters.company_id,
+            (model.company_id == filters.company_id if filters.company_id is not None else true()),
             model.is_deleted.is_(False),
         )
         if filters.branch_id is not None and hasattr(model, "branch_id"):
@@ -598,7 +598,7 @@ class AssetReportRepository(AstScopedRepository):
         status_stmt = (
             select(model.status, func.count())
             .where(
-                model.company_id == filters.company_id,
+                (model.company_id == filters.company_id if filters.company_id is not None else true()),
                 model.is_deleted.is_(False),
             )
             .group_by(model.status)

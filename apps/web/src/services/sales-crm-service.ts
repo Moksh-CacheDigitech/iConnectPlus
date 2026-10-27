@@ -336,6 +336,8 @@ export type LeadCreateFromCompanyInput = {
   requires_sow?: boolean;
   notes?: string | null;
   presales_owner_id?: string | null;
+  presales_call_aligned?: boolean | null;
+  presales_call_contact_name?: string | null;
 };
 
 export async function createLeadFromCompany(
@@ -575,6 +577,8 @@ export type SalesLead = {
   requires_sow?: boolean;
   boq_attached?: boolean;
   sow_attached?: boolean;
+  presales_call_aligned?: boolean | null;
+  presales_call_contact_name?: string | null;
   oem_name?: string | null;
   oem_contact_person?: string | null;
   oem_contact_number?: string | null;

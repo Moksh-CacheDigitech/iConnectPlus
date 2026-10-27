@@ -69,7 +69,7 @@ class DomainMembershipRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         user_id: UUID,
         domain: str,
         role: str,

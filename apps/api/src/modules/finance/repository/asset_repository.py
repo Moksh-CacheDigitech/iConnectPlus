@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.finance.models.asset import FinAssetTransaction
@@ -14,8 +14,8 @@ class AssetRepository(FinanceScopedRepository):
     def __init__(self, db: Session) -> None:
         super().__init__(db)
 
-    def list_transactions(self, ctx: TenantContext, company_id: UUID) -> list[FinAssetTransaction]:
-        stmt = select(FinAssetTransaction).where(FinAssetTransaction.company_id == company_id)
+    def list_transactions(self, ctx: TenantContext, company_id: UUID | None) -> list[FinAssetTransaction]:
+        stmt = select(FinAssetTransaction).where((FinAssetTransaction.company_id == company_id if company_id is not None else true()))
         stmt = self.apply_finance_filter(stmt, FinAssetTransaction, ctx, branch_scoped=True)
         return list(self.db.scalars(stmt).all())
 
@@ -28,7 +28,7 @@ class AssetRepository(FinanceScopedRepository):
         return self.db.scalar(stmt)
 
     def create_transaction(
-        self, ctx: TenantContext, *, company_id: UUID, branch_id: UUID, **fields: object
+        self, ctx: TenantContext, *, company_id: UUID | None, branch_id: UUID, **fields: object
     ) -> FinAssetTransaction:
         row = FinAssetTransaction(
             id=uuid4(),

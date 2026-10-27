@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmProduct
@@ -19,9 +19,9 @@ class ProductRepository(CrmScopedRepository):
         stmt = self.apply_crm_filter(stmt, CrmProduct, ctx)
         return self.db.scalar(stmt)
 
-    def list_products(self, ctx: TenantContext, company_id: UUID):
+    def list_products(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(CrmProduct).where(
-            CrmProduct.company_id == company_id,
+            (CrmProduct.company_id == company_id if company_id is not None else true()),
             CrmProduct.is_deleted.is_(False),
         )
         stmt = self.apply_crm_filter(stmt, CrmProduct, ctx)

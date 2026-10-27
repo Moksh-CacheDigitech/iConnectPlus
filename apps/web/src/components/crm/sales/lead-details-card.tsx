@@ -10,8 +10,11 @@ import {
   Users,
 } from "lucide-react";
 
-import { CrmSection } from "@/components/crm/crm-ui";
+import { CRM_TABLE_HEAD_CELL, CRM_TABLE_HEAD_ROW, CrmSection } from "@/components/crm/crm-ui";
 import { FinanceField } from "@/components/finance/journals/finance-form-field";
+import {
+  LeadPresalesCallSection,
+} from "@/components/crm/sales/lead-presales-call-section";
 import { isEventLeadSourceLabel, isMultiTierLeadSourceLabel } from "@/lib/crm/company-lead-sources";
 import {
   displayLeadSourcingChannels,
@@ -20,6 +23,11 @@ import {
   parseLeadSourcingChannels,
 } from "@/lib/crm/lead-sourcing-channels";
 import { parseLeadProductTypes } from "@/lib/crm/lead-product-options";
+import {
+  parseDistributorPartnerRows,
+  parseOemPartnerRows,
+  type LeadPartnerRow,
+} from "@/lib/crm/lead-partner-rows";
 import {
   formatInr,
   fullName,
@@ -32,6 +40,49 @@ function textOrDash(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "-";
   const text = String(value).trim();
   return text || "-";
+}
+
+function PartnerRowsReadOnly({
+  title,
+  icon: Icon,
+  nameLabel,
+  rows,
+}: {
+  title: string;
+  icon: typeof Package;
+  nameLabel: string;
+  rows: LeadPartnerRow[];
+}) {
+  return (
+    <CrmSection title={title} icon={Icon}>
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">None</p>
+      ) : (
+        <div className="erp-scroll overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+            <thead>
+              <tr className={CRM_TABLE_HEAD_ROW}>
+                <th className={CRM_TABLE_HEAD_CELL}>{nameLabel}</th>
+                <th className={CRM_TABLE_HEAD_CELL}>Contact Person</th>
+                <th className={CRM_TABLE_HEAD_CELL}>Contact Number</th>
+                <th className={CRM_TABLE_HEAD_CELL}>Contact Email</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id} className="border-b border-border/60">
+                  <td className="px-3 py-2">{textOrDash(row.name)}</td>
+                  <td className="px-3 py-2">{textOrDash(row.contact_person)}</td>
+                  <td className="px-3 py-2">{textOrDash(row.contact_number)}</td>
+                  <td className="px-3 py-2">{textOrDash(row.contact_email)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </CrmSection>
+  );
 }
 
 function ReadOnlyValue({ value }: { value: string }) {
@@ -74,6 +125,9 @@ type Props = {
   title?: string;
   /** Merge first/last into one Full Name field (opportunity view). */
   mergeFullName?: boolean;
+  /** Show PreSales call gate above Lead Information (lead detail only). */
+  showPresalesCallGate?: boolean;
+  onLeadUpdated?: (lead: SalesLead) => void;
 };
 
 export function LeadDetailsCard({
@@ -85,6 +139,8 @@ export function LeadDetailsCard({
   marketingEvents = [],
   title = "Lead Information",
   mergeFullName = false,
+  showPresalesCallGate = false,
+  onLeadUpdated,
 }: Props) {
   const employeeName = (id: string | null | undefined) => {
     if (!id) return "None";
@@ -109,6 +165,10 @@ export function LeadDetailsCard({
 
   return (
     <div className="space-y-5">
+      {showPresalesCallGate && onLeadUpdated ? (
+        <LeadPresalesCallSection lead={lead} onSaved={onLeadUpdated} />
+      ) : null}
+
       <CrmSection title={title} icon={UserPlus}>
         <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
           <LeadReadOnlyField label="DR Number" value={textOrDash(lead.dr_number || lead.lead_code)} />
@@ -122,16 +182,7 @@ export function LeadDetailsCard({
             />
           ) : (
             <>
-              <FinanceField label="First Name *">
-                <div className="flex gap-2">
-                  <div className="w-14 shrink-0">
-                    <ReadOnlyValue value={salutation || "-"} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <ReadOnlyValue value={textOrDash(lead.first_name)} />
-                  </div>
-                </div>
-              </FinanceField>
+              <LeadReadOnlyField label="First Name *" value={textOrDash(lead.first_name)} />
               <LeadReadOnlyField label="Last Name *" value={textOrDash(lead.last_name)} />
             </>
           )}
@@ -199,10 +250,6 @@ export function LeadDetailsCard({
             label="Expected Order Value *"
             value={lead.expected_amount != null ? formatInr(lead.expected_amount) : "-"}
           />
-          <LeadReadOnlyField
-            label="Committed Amount"
-            value={lead.committed_amount != null ? formatInr(lead.committed_amount) : "-"}
-          />
           <LeadReadOnlyField label="Status" value={formatLeadStatus(lead)} />
 
           <LeadReadOnlyField
@@ -227,32 +274,19 @@ export function LeadDetailsCard({
         </div>
       </CrmSection>
 
-      <CrmSection title="OEM Information" icon={Package}>
-        <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
-          <LeadReadOnlyField label="OEM Name *" value={textOrDash(lead.oem_name)} />
-          <LeadReadOnlyField label="OEM Contact Person" value={textOrDash(lead.oem_contact_person)} />
-          <LeadReadOnlyField label="OEM Contact Number" value={textOrDash(lead.oem_contact_number)} />
-          <LeadReadOnlyField label="OEM Contact Email" value={textOrDash(lead.oem_contact_email)} />
-        </div>
-      </CrmSection>
+      <PartnerRowsReadOnly
+        title="OEM Information"
+        icon={Package}
+        nameLabel="OEM Name"
+        rows={parseOemPartnerRows(lead).filter((row) => row.name.trim())}
+      />
 
-      <CrmSection title="Distributor Information" icon={Truck}>
-        <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
-          <LeadReadOnlyField label="Distributor Name" value={textOrDash(lead.distributor_name)} />
-          <LeadReadOnlyField
-            label="Distributor Contact Person"
-            value={textOrDash(lead.distributor_contact_person)}
-          />
-          <LeadReadOnlyField
-            label="Distributor Contact Number"
-            value={textOrDash(lead.distributor_contact)}
-          />
-          <LeadReadOnlyField
-            label="Distributor Contact Email"
-            value={textOrDash(lead.distributor_contact_email)}
-          />
-        </div>
-      </CrmSection>
+      <PartnerRowsReadOnly
+        title="Distributor Information"
+        icon={Truck}
+        nameLabel="Distributor Name"
+        rows={parseDistributorPartnerRows(lead).filter((row) => row.name.trim())}
+      />
 
       <CrmSection title="End Customer Detail" icon={Users}>
         <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
@@ -261,7 +295,7 @@ export function LeadDetailsCard({
         </div>
       </CrmSection>
 
-      <CrmSection title="Entity Information" icon={Building2}>
+      <CrmSection title="Cache Legal Entity" icon={Building2}>
         <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
           <LeadReadOnlyField label="Entity Name *" value={textOrDash(lead.entity_name)} />
           <LeadReadOnlyField label="Entity Email" value={textOrDash(lead.entity_email)} />

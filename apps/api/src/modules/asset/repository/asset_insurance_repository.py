@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException
@@ -21,7 +21,7 @@ OPEN_STATUSES = (
 
 @dataclass(frozen=True)
 class AssetInsuranceListFilters:
-    company_id: UUID
+    company_id: UUID | None
     asset_id: UUID | None = None
     vendor_id: UUID | None = None
     status: str | None = None
@@ -41,7 +41,7 @@ class AssetInsuranceRepository(AstScopedRepository):
         stmt = self.apply_ast_filter(stmt, AstAssetInsurance, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
         items, _ = self.search(
             ctx,
             AssetInsuranceListFilters(company_id=company_id),
@@ -54,12 +54,12 @@ class AssetInsuranceRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         asset_id: UUID,
         exclude_id: UUID | None = None,
     ) -> AstAssetInsurance | None:
         stmt = select(AstAssetInsurance).where(
-            AstAssetInsurance.company_id == company_id,
+            (AstAssetInsurance.company_id == company_id if company_id is not None else true()),
             AstAssetInsurance.asset_id == asset_id,
             AstAssetInsurance.is_deleted.is_(False),
             AstAssetInsurance.status.in_(OPEN_STATUSES),
@@ -81,7 +81,7 @@ class AssetInsuranceRepository(AstScopedRepository):
             select(AstAssetInsurance)
             .outerjoin(AstAsset, AstAsset.id == AstAssetInsurance.asset_id)
             .where(
-                AstAssetInsurance.company_id == filters.company_id,
+                (AstAssetInsurance.company_id == filters.company_id if filters.company_id is not None else true()),
                 AstAssetInsurance.is_deleted.is_(False),
             )
         )

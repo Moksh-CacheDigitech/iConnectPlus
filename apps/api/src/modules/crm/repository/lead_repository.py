@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmLead
@@ -22,13 +22,13 @@ class LeadRepository(CrmScopedRepository):
     def list_leads(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         company_account_id: UUID | None = None,
         owner_employee_id: UUID | None = None,
         created_by: UUID | None = None,
     ):
         stmt = select(CrmLead).where(
-            CrmLead.company_id == company_id,
+            (CrmLead.company_id == company_id if company_id is not None else true()),
             CrmLead.is_deleted.is_(False),
             # Converted leads live under Opportunities - keep Leads free of duplicates.
             CrmLead.blueprint_state != "converted",
@@ -47,14 +47,14 @@ class LeadRepository(CrmScopedRepository):
     def list_by_ids(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         lead_ids: list[UUID],
     ) -> list[CrmLead]:
         """Load leads by id, including converted - used for opportunity report joins."""
         if not lead_ids:
             return []
         stmt = select(CrmLead).where(
-            CrmLead.company_id == company_id,
+            (CrmLead.company_id == company_id if company_id is not None else true()),
             CrmLead.is_deleted.is_(False),
             CrmLead.id.in_(lead_ids),
         )

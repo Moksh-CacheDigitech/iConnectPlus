@@ -10,18 +10,11 @@ import {
   clearInventoryUiSnapshot,
   peekInventoryUiSnapshot,
 } from "@/components/assets/inventory/inventory-ui-state";
-import { BRANCH_ALL_VALUE } from "@/components/assets/shared";
-
 const push = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn() }),
 }));
-
-const locations = [
-  { id: "loc1", label: "New Delhi" },
-  { id: "loc2", label: "Mumbai" },
-];
 
 const defaultKpis = {
   totalAssets: 12,
@@ -52,12 +45,8 @@ const sampleTransfers = [
 ];
 
 function renderDashboard(overrides: Partial<ComponentProps<typeof AssetOperationsDashboard>> = {}) {
-  const onLocationChange = vi.fn();
   render(
     <AssetOperationsDashboard
-      locationId={BRANCH_ALL_VALUE}
-      locations={locations}
-      onLocationChange={onLocationChange}
       kpis={defaultKpis}
       transferRows={sampleTransfers}
       transferTotal={1}
@@ -65,7 +54,6 @@ function renderDashboard(overrides: Partial<ComponentProps<typeof AssetOperation
       {...overrides}
     />,
   );
-  return { onLocationChange };
 }
 
 beforeEach(() => {
@@ -99,11 +87,10 @@ describe("AssetOperationsDashboard layout", () => {
     expect(screen.queryByRole("button", { name: "Profile (placeholder)" })).not.toBeInTheDocument();
   });
 
-  it("renders location selector with All and locations", () => {
+  it("does not render location filter chips in the header", () => {
     renderDashboard();
-    const group = screen.getByRole("group", { name: "Location" });
-    expect(within(group).getByRole("button", { name: "All" })).toBeInTheDocument();
-    expect(within(group).getByRole("button", { name: "New Delhi" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Location" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New Delhi" })).not.toBeInTheDocument();
   });
 
   it("opens All Assets with ready preset when Ready to Move KPI is clicked", async () => {
@@ -128,14 +115,6 @@ describe("AssetOperationsDashboard layout", () => {
     await user.click(screen.getByRole("button", { name: "Open All Assets" }));
     expect(push).toHaveBeenCalledWith("/assets/assets");
     expect(peekInventoryUiSnapshot()?.preset).toBe("all");
-  });
-
-  it("delegates location change to parent", async () => {
-    const user = userEvent.setup();
-    const { onLocationChange } = renderDashboard();
-    const group = screen.getByRole("group", { name: "Location" });
-    await user.click(within(group).getByRole("button", { name: "Mumbai" }));
-    expect(onLocationChange).toHaveBeenCalledWith("loc2");
   });
 
   it("shows KPI loading skeletons when loading", () => {

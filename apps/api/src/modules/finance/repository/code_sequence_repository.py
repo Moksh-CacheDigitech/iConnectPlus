@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import true, func, select
 from sqlalchemy.orm import Session
 
 from modules.finance.domain.enums import CODE_PREFIXES, FinanceEntityType
@@ -15,7 +15,7 @@ class CodeSequenceRepository:
     def next_code(
         self,
         entity_type: FinanceEntityType,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         model,
         code_column: str,
@@ -23,7 +23,7 @@ class CodeSequenceRepository:
         prefix, pad_width = CODE_PREFIXES[entity_type]
         col = getattr(model, code_column)
         stmt = select(func.max(col)).where(
-            model.company_id == company_id,
+            (model.company_id == company_id if company_id is not None else true()),
             col.like(f"{prefix}%"),
         )
         if hasattr(model, "is_deleted"):

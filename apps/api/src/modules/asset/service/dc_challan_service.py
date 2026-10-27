@@ -224,7 +224,7 @@ class DcChallanService:
         offset: int = 0,
         limit: int = 25,
     ) -> tuple[list[AstDcChallan], int]:
-        resolved = self._repo.resolve_company_id(ctx, company_id)
+        resolved = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.search(
             ctx,
             DcChallanListFilters(

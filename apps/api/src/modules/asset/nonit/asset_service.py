@@ -98,7 +98,8 @@ class NonItAssetService:
             offset=offset,
             limit=page_size,
         )
-        return self._enrich(ctx, cid, rows), total
+        enrich_cid = cid if cid is not None else self._scope.resolve_company_id(ctx, None)
+        return self._enrich(ctx, enrich_cid, rows), total
 
     def dashboard_summary(
         self,

@@ -87,7 +87,7 @@ class AssignmentService:
         offset: int = 0,
         limit: int = 25,
     ) -> tuple[list[AstAssetAssignment], int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         filters = AssetAssignmentListFilters(
             company_id=cid,
             asset_id=asset_id,

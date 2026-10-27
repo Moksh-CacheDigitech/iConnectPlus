@@ -51,8 +51,8 @@ def test_crm_module_admin_without_scopes_is_tenant_wide_for_crm_only() -> None:
     assert has_module_wide_data_access(ctx, "procurement") is False
 
 
-def test_module_admin_assigned_entities_limit_data() -> None:
-    """HR Superadmin entity toggles write scoped_company_ids — those win."""
+def test_module_admin_keeps_whole_module_despite_entity_scopes() -> None:
+    """Module admin elevation is not shrunk by SecUserOrgScope entity rows."""
     c1, c2 = uuid4(), uuid4()
     ctx = TenantContext(
         tenant_id=uuid4(),
@@ -63,10 +63,12 @@ def test_module_admin_assigned_entities_limit_data() -> None:
         company_id=c1,
         tenant_wide=True,
     )
-    assert has_module_wide_data_access(ctx, "hr") is False
-    assert has_module_wide_data_access(ctx, "crm") is False
-    assert effective_company_ids(ctx, module_key="hr") == [c1, c2]
-    assert effective_company_ids(ctx, module_key="crm") == [c1, c2]
+    assert has_module_wide_data_access(ctx, "hr") is True
+    assert has_module_wide_data_access(ctx, "crm") is True
+    assert effective_company_ids(ctx, module_key="hr") is None
+    assert effective_company_ids(ctx, module_key="crm") is None
+    # Non-admin modules still honor entity scopes.
+    assert has_module_wide_data_access(ctx, "finance") is False
     assert effective_company_ids(ctx, module_key="finance") == [c1, c2]
 
 

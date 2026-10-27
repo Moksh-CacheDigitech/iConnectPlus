@@ -414,9 +414,9 @@ export const documentService = {
     const uploadFile =
       desiredName && desiredName !== file.name
         ? new File([file], desiredName, {
-            type: file.type,
-            lastModified: file.lastModified,
-          })
+          type: file.type,
+          lastModified: file.lastModified,
+        })
         : file;
     form.append("file", uploadFile);
     form.append("asset_id", assetId);
@@ -1866,12 +1866,14 @@ export const assetCategoryService = {
     page_size?: number;
     status?: string;
     q?: string;
+    company_id?: string;
   }): Promise<AssetCategoryListResult> {
     const query = new URLSearchParams();
     if (params.page) query.set("page", String(params.page));
     if (params.page_size) query.set("page_size", String(params.page_size));
     if (params.status) query.set("status", params.status);
     if (params.q) query.set("q", params.q);
+    if (params.company_id) query.set("company_id", params.company_id);
     const res = await resourceService.list<AssetCategoryListResult>(
       `${ASSET_CATEGORIES_PATH}?${query.toString()}`,
     );

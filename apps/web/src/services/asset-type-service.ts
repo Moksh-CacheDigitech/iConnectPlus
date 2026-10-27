@@ -18,10 +18,12 @@ const BASE = "/assets/asset-types";
 export async function listItAssetTypes(params?: {
   active?: boolean;
   search?: string;
+  company_id?: string;
 }): Promise<ItAssetType[]> {
   const query: Record<string, string | number | boolean> = {};
   if (params?.active != null) query.active = params.active;
   if (params?.search) query.search = params.search;
+  if (params?.company_id) query.company_id = params.company_id;
   const res = await apiClient<ItAssetType[]>(BASE, {
     query: Object.keys(query).length ? query : undefined,
   });

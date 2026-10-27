@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException
@@ -17,7 +17,7 @@ ACTIVE_STATUS = AssetLocationStatus.ACTIVE.value
 
 @dataclass(frozen=True)
 class AssetLocationListFilters:
-    company_id: UUID
+    company_id: UUID | None
     asset_id: UUID | None = None
     status: str | None = None
     is_current: bool | None = None
@@ -37,7 +37,7 @@ class AssetLocationRepository(AstScopedRepository):
         stmt = self.apply_ast_filter(stmt, AstAssetLocation, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
         items, _ = self.search(
             ctx,
             AssetLocationListFilters(company_id=company_id),
@@ -59,12 +59,12 @@ class AssetLocationRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         asset_id: UUID,
         exclude_id: UUID | None = None,
     ) -> AstAssetLocation | None:
         stmt = select(AstAssetLocation).where(
-            AstAssetLocation.company_id == company_id,
+            (AstAssetLocation.company_id == company_id if company_id is not None else true()),
             AstAssetLocation.asset_id == asset_id,
             AstAssetLocation.is_current.is_(True),
             AstAssetLocation.is_deleted.is_(False),
@@ -87,7 +87,7 @@ class AssetLocationRepository(AstScopedRepository):
             select(AstAssetLocation)
             .outerjoin(AstAsset, AstAsset.id == AstAssetLocation.asset_id)
             .where(
-                AstAssetLocation.company_id == filters.company_id,
+                (AstAssetLocation.company_id == filters.company_id if filters.company_id is not None else true()),
                 AstAssetLocation.is_deleted.is_(False),
             )
         )

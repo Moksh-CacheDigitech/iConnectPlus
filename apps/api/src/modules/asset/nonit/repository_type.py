@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import or_, select
+from sqlalchemy import true, or_, select
 from sqlalchemy.orm import Session
 
 from modules.asset.models import AstNonitAssetType
@@ -23,10 +23,10 @@ class NonItAssetTypeRepository(AstScopedRepository):
         return self.db.scalar(stmt)
 
     def get_by_name(
-        self, ctx: TenantContext, company_id: UUID, name: str
+        self, ctx: TenantContext, company_id: UUID | None, name: str
     ) -> AstNonitAssetType | None:
         stmt = select(AstNonitAssetType).where(
-            AstNonitAssetType.company_id == company_id,
+            (AstNonitAssetType.company_id == company_id if company_id is not None else true()),
             AstNonitAssetType.name.ilike(name.strip()),
             AstNonitAssetType.is_deleted.is_(False),
         )
@@ -34,10 +34,10 @@ class NonItAssetTypeRepository(AstScopedRepository):
         return self.db.scalar(stmt)
 
     def get_by_prefix(
-        self, ctx: TenantContext, company_id: UUID, prefix: str
+        self, ctx: TenantContext, company_id: UUID | None, prefix: str
     ) -> AstNonitAssetType | None:
         stmt = select(AstNonitAssetType).where(
-            AstNonitAssetType.company_id == company_id,
+            (AstNonitAssetType.company_id == company_id if company_id is not None else true()),
             AstNonitAssetType.prefix == prefix,
             AstNonitAssetType.is_deleted.is_(False),
         )
@@ -47,14 +47,14 @@ class NonItAssetTypeRepository(AstScopedRepository):
     def list_rows(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         active: bool | None = None,
         search: str | None = None,
         category: str | None = None,
     ) -> list[AstNonitAssetType]:
         stmt = select(AstNonitAssetType).where(
-            AstNonitAssetType.company_id == company_id,
+            (AstNonitAssetType.company_id == company_id if company_id is not None else true()),
             AstNonitAssetType.is_deleted.is_(False),
         )
         if active is not None:

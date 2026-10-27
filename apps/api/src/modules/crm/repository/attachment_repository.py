@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmAttachment
@@ -31,12 +31,12 @@ class AttachmentRepository(CrmScopedRepository):
     def list_by_category(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         category: str | None = None,
     ):
         stmt = select(CrmAttachment).where(
-            CrmAttachment.company_id == company_id,
+            (CrmAttachment.company_id == company_id if company_id is not None else true()),
             CrmAttachment.is_deleted.is_(False),
         )
         if category:

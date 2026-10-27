@@ -3,7 +3,7 @@
 from datetime import date
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import true, and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from modules.finance.models.ledger import FinCustomerLedger, FinVendorLedger
@@ -19,7 +19,7 @@ class SubLedgerRepository(FinanceScopedRepository):
     def list_customer_ledger(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         customer_id: UUID | None = None,
         *,
         document_type: str | None = None,
@@ -36,7 +36,7 @@ class SubLedgerRepository(FinanceScopedRepository):
         sort_by: str = "document_date",
         sort_dir: str = "desc",
     ) -> list[FinCustomerLedger]:
-        stmt = select(FinCustomerLedger).where(FinCustomerLedger.company_id == company_id)
+        stmt = select(FinCustomerLedger).where((FinCustomerLedger.company_id == company_id if company_id is not None else true()))
         stmt = self.apply_finance_filter(stmt, FinCustomerLedger, ctx, branch_scoped=True)
         if customer_id:
             stmt = stmt.where(FinCustomerLedger.customer_id == customer_id)
@@ -115,7 +115,7 @@ class SubLedgerRepository(FinanceScopedRepository):
         return {r.id: r for r in rows}
 
     def create_customer_entry(
-        self, ctx: TenantContext, *, company_id: UUID, branch_id: UUID, **fields: object
+        self, ctx: TenantContext, *, company_id: UUID | None, branch_id: UUID, **fields: object
     ) -> FinCustomerLedger:
         row = FinCustomerLedger(
             id=uuid4(),
@@ -158,7 +158,7 @@ class SubLedgerRepository(FinanceScopedRepository):
     def list_vendor_ledger(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         vendor_id: UUID | None = None,
         *,
         document_type: str | None = None,
@@ -175,7 +175,7 @@ class SubLedgerRepository(FinanceScopedRepository):
         sort_by: str = "document_date",
         sort_dir: str = "desc",
     ) -> list[FinVendorLedger]:
-        stmt = select(FinVendorLedger).where(FinVendorLedger.company_id == company_id)
+        stmt = select(FinVendorLedger).where((FinVendorLedger.company_id == company_id if company_id is not None else true()))
         stmt = self.apply_finance_filter(stmt, FinVendorLedger, ctx, branch_scoped=True)
         if vendor_id:
             stmt = stmt.where(FinVendorLedger.vendor_id == vendor_id)
@@ -254,7 +254,7 @@ class SubLedgerRepository(FinanceScopedRepository):
         return {r.id: r for r in rows}
 
     def create_vendor_entry(
-        self, ctx: TenantContext, *, company_id: UUID, branch_id: UUID, **fields: object
+        self, ctx: TenantContext, *, company_id: UUID | None, branch_id: UUID, **fields: object
     ) -> FinVendorLedger:
         row = FinVendorLedger(
             id=uuid4(),
@@ -294,9 +294,9 @@ class SubLedgerRepository(FinanceScopedRepository):
         stmt = stmt.order_by(FinVendorLedger.document_date.asc(), FinVendorLedger.created_at.asc())
         return list(self.db.scalars(stmt).all())
 
-    def list_open_ar_for_aging(self, ctx: TenantContext, company_id: UUID) -> list[FinCustomerLedger]:
+    def list_open_ar_for_aging(self, ctx: TenantContext, company_id: UUID | None) -> list[FinCustomerLedger]:
         stmt = select(FinCustomerLedger).where(
-            FinCustomerLedger.company_id == company_id,
+            (FinCustomerLedger.company_id == company_id if company_id is not None else true()),
             FinCustomerLedger.tenant_id == ctx.tenant_id,
             FinCustomerLedger.status.in_(("open", "partial")),
             FinCustomerLedger.is_deleted.is_(False),
@@ -311,9 +311,9 @@ class SubLedgerRepository(FinanceScopedRepository):
         )
         return list(self.db.scalars(stmt).all())
 
-    def list_open_ap_for_aging(self, ctx: TenantContext, company_id: UUID) -> list[FinVendorLedger]:
+    def list_open_ap_for_aging(self, ctx: TenantContext, company_id: UUID | None) -> list[FinVendorLedger]:
         stmt = select(FinVendorLedger).where(
-            FinVendorLedger.company_id == company_id,
+            (FinVendorLedger.company_id == company_id if company_id is not None else true()),
             FinVendorLedger.tenant_id == ctx.tenant_id,
             FinVendorLedger.status.in_(("open", "partial")),
             FinVendorLedger.is_deleted.is_(False),
@@ -328,12 +328,12 @@ class SubLedgerRepository(FinanceScopedRepository):
         )
         return list(self.db.scalars(stmt).all())
 
-    def ar_aggregate_stats(self, ctx: TenantContext, company_id: UUID) -> dict:
+    def ar_aggregate_stats(self, ctx: TenantContext, company_id: UUID | None) -> dict:
         today = date.today()
         month_start = today.replace(day=1)
 
         base = and_(
-            FinCustomerLedger.company_id == company_id,
+            (FinCustomerLedger.company_id == company_id if company_id is not None else true()),
             FinCustomerLedger.tenant_id == ctx.tenant_id,
             FinCustomerLedger.is_deleted.is_(False),
         )
@@ -426,12 +426,12 @@ class SubLedgerRepository(FinanceScopedRepository):
             "receipt_count": int(receipt_count),
         }
 
-    def ap_aggregate_stats(self, ctx: TenantContext, company_id: UUID) -> dict:
+    def ap_aggregate_stats(self, ctx: TenantContext, company_id: UUID | None) -> dict:
         today = date.today()
         month_start = today.replace(day=1)
 
         base = and_(
-            FinVendorLedger.company_id == company_id,
+            (FinVendorLedger.company_id == company_id if company_id is not None else true()),
             FinVendorLedger.tenant_id == ctx.tenant_id,
             FinVendorLedger.is_deleted.is_(False),
         )

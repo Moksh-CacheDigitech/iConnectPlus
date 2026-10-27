@@ -151,6 +151,8 @@ class SalesLeadUpdate(BaseModel):
     requires_sow: bool | None = None
     notes: str | None = None
     presales_owner_id: UUID | None = None
+    presales_call_aligned: bool | None = None
+    presales_call_contact_name: str | None = None
 
 
 class LeadAssignRequest(BaseModel):
@@ -240,6 +242,8 @@ class LeadResponse(OrmModel):
     customer_id: UUID | None
     converted_opportunity_id: UUID | None
     presales_owner_id: UUID | None = None
+    presales_call_aligned: bool | None = None
+    presales_call_contact_name: str | None = None
     version: int
 
 
@@ -1169,6 +1173,8 @@ class SalesLeadResponse(OrmModel):
     notes: str | None = None
     converted_opportunity_id: UUID | None
     presales_owner_id: UUID | None = None
+    presales_call_aligned: bool | None = None
+    presales_call_contact_name: str | None = None
     version: int
 
 

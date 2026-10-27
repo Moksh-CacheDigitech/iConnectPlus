@@ -492,6 +492,34 @@ def create_shared_ovf(
         notes=f"SCM demo lead #{index}",
     )
 
+    # Sales leads require BOQ + SOW on the lead before convert.
+    attachments.create(
+        sales_ctx,
+        entity_type="lead",
+        entity_id=lead.id,
+        file_name=f"Lead_BOQ_{index:02d}.pdf",
+        category="boq",
+        branch_id=branch.id,
+        company_id=org.id,
+        content_base64=TINY_PDF,
+        content_type="application/pdf",
+        replace_existing_category=True,
+    )
+    attachments.create(
+        sales_ctx,
+        entity_type="lead",
+        entity_id=lead.id,
+        file_name=f"Lead_SOW_{index:02d}.pdf",
+        category="sow",
+        branch_id=branch.id,
+        company_id=org.id,
+        content_base64=TINY_PDF,
+        content_type="application/pdf",
+        replace_existing_category=True,
+    )
+    # Clear pending attach tasks + unlock convert once docs are on the lead.
+    leads._sync_lead_doc_requests(sales_ctx, lead.id)
+
     opportunity = leads.convert(
         sales_ctx,
         lead.id,
@@ -500,33 +528,52 @@ def create_shared_ovf(
         expected_revenue=float(amount),
         remark="SCM demo convert",
     )
-
-    blueprint.perform_action(sales_ctx, opportunity.id, "attach_boq", tiny_file(f"BOQ_{index:02d}.pdf"))
-    blueprint.perform_action(
-        sales_ctx,
-        opportunity.id,
-        "send_boq_approval",
-        {
-            "team_role": "presales",
-            "assigned_user_ids": [approver_id],
-            "remarks": f"Approve BOQ for SCM demo #{index}",
-        },
-    )
-    decide_pending(db, sales_ctx, opportunity.id)
-
-    blueprint.perform_action(
-        sales_ctx,
-        opportunity.id,
-        "deal_reg",
-        {"deal_reg_number": f"CT-DR-SCM-{index:04d}"},
-    )
-    blueprint.perform_action(sales_ctx, opportunity.id, "oem_received", {})
-    blueprint.perform_action(
-        sales_ctx,
-        opportunity.id,
-        "attach_oem_quote",
-        tiny_file(f"OEM_Quote_{index:02d}.pdf"),
-    )
+    # Lead BOQ/SOW + DR auto-advance the opportunity to oem_pending (or deal_reg).
+    opportunity = blueprint.get(sales_ctx, opportunity.id)
+    state = (opportunity.blueprint_state or "").strip()
+    if state in {"open", "boq_pending", "boq_approval", "sow_approval"}:
+        blueprint.perform_action(
+            sales_ctx, opportunity.id, "attach_boq", tiny_file(f"BOQ_{index:02d}.pdf")
+        )
+        blueprint.perform_action(
+            sales_ctx,
+            opportunity.id,
+            "send_boq_approval",
+            {
+                "team_role": "presales",
+                "assigned_user_ids": [approver_id],
+                "remarks": f"Approve BOQ for SCM demo #{index}",
+            },
+        )
+        decide_pending(db, sales_ctx, opportunity.id)
+        opportunity = blueprint.get(sales_ctx, opportunity.id)
+        state = (opportunity.blueprint_state or "").strip()
+    if state == "deal_reg":
+        blueprint.perform_action(
+            sales_ctx,
+            opportunity.id,
+            "deal_reg",
+            {"deal_reg_number": f"CT-DR-SCM-{index:04d}"},
+        )
+        opportunity = blueprint.get(sales_ctx, opportunity.id)
+        state = (opportunity.blueprint_state or "").strip()
+    if state == "oem_pending":
+        blueprint.perform_action(sales_ctx, opportunity.id, "oem_received", {})
+        opportunity = blueprint.get(sales_ctx, opportunity.id)
+        state = (opportunity.blueprint_state or "").strip()
+    if state == "oem_attached":
+        blueprint.perform_action(
+            sales_ctx,
+            opportunity.id,
+            "attach_oem_quote",
+            tiny_file(f"OEM_Quote_{index:02d}.pdf"),
+        )
+        opportunity = blueprint.get(sales_ctx, opportunity.id)
+        state = (opportunity.blueprint_state or "").strip()
+    if state != "quote_ready":
+        raise RuntimeError(
+            f"Expected quote_ready after OEM attach for SCM demo #{index}, got {state}"
+        )
 
     hw = next((p for p in products if p.product_type == "hardware"), products[0])
     svc = next((p for p in products if p.product_type == "services"), products[-1])
@@ -616,6 +663,7 @@ def create_shared_ovf(
         opportunity.id,
         "send_po_approval",
         {
+            "terms_accepted": True,
             "finance_user_ids": [approver_id],
             "legal_user_ids": [approver_id],
             "management_user_ids": [approver_id],

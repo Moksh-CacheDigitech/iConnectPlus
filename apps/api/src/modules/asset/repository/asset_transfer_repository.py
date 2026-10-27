@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException
@@ -54,7 +54,7 @@ class AssetTransferRepository(AstScopedRepository):
             select(AstAssetTransfer)
             .join(AstAsset, AstAsset.id == AstAssetTransfer.asset_id)
             .where(
-                AstAssetTransfer.company_id == filters.company_id,
+                (AstAssetTransfer.company_id == filters.company_id if filters.company_id is not None else true()),
                 AstAssetTransfer.is_deleted.is_(False),
                 AstAsset.is_deleted.is_(False),
             )

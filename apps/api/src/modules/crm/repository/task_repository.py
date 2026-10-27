@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmTask
@@ -22,12 +22,12 @@ class TaskRepository(CrmScopedRepository):
     def list_tasks(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         opportunity_id: UUID | None = None,
     ):
         stmt = select(CrmTask).where(
-            CrmTask.company_id == company_id,
+            (CrmTask.company_id == company_id if company_id is not None else true()),
             CrmTask.is_deleted.is_(False),
         )
         if opportunity_id is not None:

@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models.selling_entity import CrmSellingEntity
@@ -22,9 +22,9 @@ class SellingEntityRepository(CrmScopedRepository):
         stmt = self.apply_crm_filter(stmt, CrmSellingEntity, ctx)
         return self.db.scalar(stmt)
 
-    def list_entities(self, ctx: TenantContext, company_id: UUID):
+    def list_entities(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(CrmSellingEntity).where(
-            CrmSellingEntity.company_id == company_id,
+            (CrmSellingEntity.company_id == company_id if company_id is not None else true()),
             CrmSellingEntity.is_deleted.is_(False),
             CrmSellingEntity.status == "active",
         )

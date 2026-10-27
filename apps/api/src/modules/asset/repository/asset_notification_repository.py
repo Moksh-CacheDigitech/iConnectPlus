@@ -6,7 +6,7 @@ Search joins ``ast_asset`` only when ``q`` is supplied.
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException
@@ -63,7 +63,7 @@ class AssetNotificationRepository(AstScopedRepository):
         limit: int,
     ) -> tuple[list[AstAssetNotification], int]:
         stmt = select(AstAssetNotification).where(
-            AstAssetNotification.company_id == filters.company_id,
+            (AstAssetNotification.company_id == filters.company_id if filters.company_id is not None else true()),
             AstAssetNotification.is_deleted.is_(False),
         )
         if filters.asset_id is not None:

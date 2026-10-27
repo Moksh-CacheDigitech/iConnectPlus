@@ -179,7 +179,7 @@ class IncomingAssetService:
         limit: int = 25,
         sync: bool = True,
     ) -> tuple[list[AstIncomingAssetLine], int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         if branch_id is not None:
             self._scope.validate_branch_access(ctx, branch_id)
         if sync:

@@ -11,6 +11,10 @@ export type EmployeeDirectoryEntry = {
   displayName: string;
   employeeCode: string | null;
   mobile: string | null;
+  /** Master employee company — required for cross-company Excel import. */
+  companyId: string | null;
+  /** Home branch when present. */
+  branchId: string | null;
 };
 
 const DIRECTORY_PAGE_SIZE = 200;
@@ -41,6 +45,28 @@ export function normalizeEmployeeCodeKey(value: string): string {
   return value.trim().toLowerCase().replace(/[\s\-_./]/g, "");
 }
 
+/** Index directory rows by raw + normalized employee codes for Excel/import matching. */
+export function indexEmployeesByCode(
+  employees: EmployeeDirectoryEntry[],
+): Map<string, EmployeeDirectoryEntry> {
+  const map = new Map<string, EmployeeDirectoryEntry>();
+  for (const entry of employees) {
+    if (!entry.employeeCode) continue;
+    map.set(entry.employeeCode.toLowerCase(), entry);
+    map.set(normalizeEmployeeCodeKey(entry.employeeCode), entry);
+  }
+  return map;
+}
+
+export function findEmployeeByCode(
+  byCode: Map<string, EmployeeDirectoryEntry>,
+  code: string,
+): EmployeeDirectoryEntry | undefined {
+  const trimmed = code.trim();
+  if (!trimmed) return undefined;
+  return byCode.get(trimmed.toLowerCase()) ?? byCode.get(normalizeEmployeeCodeKey(trimmed));
+}
+
 export function isMissingPermissionError(
   err: unknown,
   permissionCode?: string,
@@ -69,12 +95,17 @@ export function employeeDirectoryPermissionMessage(err?: unknown): string {
 
 async function listAllResourcePages(apiPath: string): Promise<Record<string, unknown>[]> {
   const out: Record<string, unknown>[] = [];
-  const base = apiPath.includes("?") ? `${apiPath}&` : `${apiPath}?`;
+  const seenFirstIds = new Set<string>();
   for (let page = 1; page <= DIRECTORY_MAX_PAGES; page += 1) {
-    const res = await resourceService.list(
-      `${base}page=${page}&page_size=${DIRECTORY_PAGE_SIZE}`,
-    );
+    const res = await resourceService.list(apiPath, {
+      page,
+      page_size: DIRECTORY_PAGE_SIZE,
+    });
     const batch = asArray(res.data);
+    const firstId = batch[0] ? String(batch[0].id ?? "") : "";
+    // Some org endpoints ignore page and return the full list every time.
+    if (page > 1 && firstId && seenFirstIds.has(firstId)) break;
+    if (firstId) seenFirstIds.add(firstId);
     out.push(...batch);
     if (batch.length < DIRECTORY_PAGE_SIZE) break;
   }
@@ -97,6 +128,8 @@ function mapEmployeeRows(rows: Record<string, unknown>[]): EmployeeDirectoryEntr
       label: `${displayName || id}${codeSuffix}${dept}`,
       employeeCode,
       mobile: trimOrNull(r.mobile),
+      companyId: trimOrNull(r.company_id != null ? String(r.company_id) : null),
+      branchId: trimOrNull(r.branch_id != null ? String(r.branch_id) : null),
     };
   });
 }

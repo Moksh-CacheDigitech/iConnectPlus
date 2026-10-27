@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import true, func, select
 from sqlalchemy.orm import Session
 
 from modules.asset.domain.enums import CODE_PREFIXES, AstEntityType
@@ -20,7 +20,7 @@ class CodeSequenceRepository:
     def next_code(
         self,
         entity: AstEntityType,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         model,
         code_column: str,
@@ -46,7 +46,7 @@ class CodeSequenceRepository:
         full_prefix = f"{prefix}{year}-" if include_year else prefix
         col = getattr(model, code_column)
         stmt = select(func.max(col)).where(
-            model.company_id == company_id,
+            (model.company_id == company_id if company_id is not None else true()),
             col.like(f"{full_prefix}%"),
         )
         if hasattr(model, "is_deleted"):

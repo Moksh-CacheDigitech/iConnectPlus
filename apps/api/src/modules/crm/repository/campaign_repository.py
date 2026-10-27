@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmCampaign
@@ -19,9 +19,9 @@ class CampaignRepository(CrmScopedRepository):
         stmt = self.apply_crm_filter(stmt, CrmCampaign, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_campaigns(self, ctx: TenantContext, company_id: UUID):
+    def list_campaigns(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(CrmCampaign).where(
-            CrmCampaign.company_id == company_id,
+            (CrmCampaign.company_id == company_id if company_id is not None else true()),
             CrmCampaign.is_deleted.is_(False),
         )
         stmt = self.apply_crm_filter(stmt, CrmCampaign, ctx, branch_scoped=False)

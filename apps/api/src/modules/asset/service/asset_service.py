@@ -72,7 +72,7 @@ class AssetService:
         offset: int = 0,
         limit: int = 25,
     ) -> tuple[list[AstAsset], int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         ops_filter = coerce_operational_status_filter(operational_status)
         state = (assignment_state or "").strip().lower() or None
         if state is not None and state not in {"assigned", "unassigned"}:

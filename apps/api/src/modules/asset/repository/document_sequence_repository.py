@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -31,13 +31,13 @@ class DocumentSequenceRepository:
         return full_prefix, width, sequence_key
 
     def _select_for_update(
-        self, tenant_id: UUID, company_id: UUID, sequence_key: str
+        self, tenant_id: UUID, company_id: UUID | None, sequence_key: str
     ) -> AstDocumentSequence | None:
         stmt = (
             select(AstDocumentSequence)
             .where(
                 AstDocumentSequence.tenant_id == tenant_id,
-                AstDocumentSequence.company_id == company_id,
+                (AstDocumentSequence.company_id == company_id if company_id is not None else true()),
                 AstDocumentSequence.sequence_key == sequence_key,
             )
             .with_for_update()
@@ -48,7 +48,7 @@ class DocumentSequenceRepository:
         self,
         ctx: TenantContext,
         entity: AstEntityType,
-        company_id: UUID,
+        company_id: UUID | None,
     ) -> str:
         full_prefix, width, sequence_key = self._segment_key(entity)
         row = self._lock_or_create(ctx.tenant_id, company_id, sequence_key)
@@ -61,7 +61,7 @@ class DocumentSequenceRepository:
         self,
         ctx: TenantContext,
         entity: AstEntityType,
-        company_id: UUID,
+        company_id: UUID | None,
         count: int,
     ) -> list[str]:
         if count < 1:
@@ -74,7 +74,7 @@ class DocumentSequenceRepository:
         return [f"{full_prefix}{n:0{width}d}" for n in range(start, start + count)]
 
     def _lock_or_create(
-        self, tenant_id: UUID, company_id: UUID, sequence_key: str
+        self, tenant_id: UUID, company_id: UUID | None, sequence_key: str
     ) -> AstDocumentSequence:
         for _ in range(self._MAX_CREATE_ATTEMPTS):
             row = self._select_for_update(tenant_id, company_id, sequence_key)

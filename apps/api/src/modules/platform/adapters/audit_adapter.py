@@ -50,3 +50,12 @@ class AuditAdapter:
         return self._audit.list_logs_for_entity(
             tenant_id=tenant_id, entity_name=entity_name, entity_id=entity_id
         )
+
+    def list_logs(self, tenant_id: UUID | None = None):
+        return self._audit.list_logs(tenant_id=tenant_id)
+
+    def get_log(self, log_id: UUID):
+        return self._audit.get_log(log_id)
+
+    def list_events(self, tenant_id: UUID | None = None):
+        return self._audit.list_events(tenant_id=tenant_id)

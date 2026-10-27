@@ -101,21 +101,34 @@ class LeadService:
         )
         # Convert any open sales leads that already have required BOQ/SOW attached
         # (covers cases where My Jobs finished before auto-convert was deployed).
-        converted_ids: set[UUID] = set()
+        convert_ids: list[UUID] = []
         for lead in rows:
+            if lead.company_account_id is None or lead.blueprint_state != "open":
+                continue
+            # Heal orphan opportunities first (partial convert left lead open).
+            if self._find_existing_convert_opportunity(lead) is not None:
+                convert_ids.append(lead.id)
+                continue
             if (
-                lead.company_account_id is not None
-                and lead.blueprint_state == "open"
+                self._presales_call_ready(lead)
                 and (bool(lead.requires_boq) or bool(lead.requires_sow))
                 and not self._lead_docs_pending(lead)
             ):
-                try:
-                    self.maybe_auto_convert_after_docs(ctx, lead.id)
-                    converted_ids.add(lead.id)
-                except Exception:
-                    # Leave the lead listed; convert can be retried on blueprint GET.
-                    continue
+                convert_ids.append(lead.id)
+        converted_ids: set[UUID] = set()
+        for lead_id in convert_ids:
+            try:
+                # convert() itself heals existing opps; maybe_auto_convert covers docs-ready.
+                self.convert(ctx, lead_id)
+                converted_ids.add(lead_id)
+            except Exception:
+                # Failed convert must not poison this request's session.
+                self._db.rollback()
+                continue
         if converted_ids:
+            rows = self._repo.list_leads(
+                ctx, cid, company_account_id, created_by=created_by
+            )
             rows = [lead for lead in rows if lead.id not in converted_ids]
         return rows
 
@@ -421,8 +434,8 @@ class LeadService:
             raise ConflictException("Lost leads cannot be edited")
         if lead.blueprint_state not in ("open", "converted"):
             raise ConflictException("Only open or converted sales leads can be edited")
-        # Edits stay allowed while waiting on lead BOQ/SOW; convert remains blocked.
-        if not self._lead_docs_pending(lead):
+        # Edits stay allowed while waiting on PreSales call / lead BOQ/SOW.
+        if not self._should_lock_for_docs(lead):
             sales_blueprint_engine.assert_not_locked(lead)
         if version is not None and int(lead.version or 1) != int(version):
             raise ConflictException("Lead was modified by another user; refresh and try again")
@@ -438,6 +451,22 @@ class LeadService:
             # Technical team is always looped in on hardware/services leads.
             fields.pop("requires_boq", None)
             fields.pop("requires_sow", None)
+        if "presales_call_aligned" in fields or "presales_call_contact_name" in fields:
+            aligned = fields.get("presales_call_aligned", lead.presales_call_aligned)
+            contact = fields.get(
+                "presales_call_contact_name",
+                lead.presales_call_contact_name,
+            )
+            if aligned is True and not str(contact or "").strip():
+                raise ConflictException(
+                    "PreSales call contact person name is required when Call aligned is Yes"
+                )
+            if aligned is not True:
+                fields["presales_call_contact_name"] = (
+                    str(contact).strip() if contact else None
+                )
+            else:
+                fields["presales_call_contact_name"] = str(contact).strip()
         # Clearing a requirement also clears the attached flag for that doc type.
         if fields.get("requires_boq") is False:
             fields["boq_attached"] = False
@@ -515,10 +544,25 @@ class LeadService:
         return cloud_variant_from_lead(lead) is None
 
     @staticmethod
+    def _presales_call_ready(lead: CrmLead) -> bool:
+        """BOQ/SOW My Jobs unlock only after a Yes call with contact person name."""
+        if not LeadService._boq_sow_mandatory(lead):
+            return True
+        return bool(lead.presales_call_aligned) and bool(
+            (lead.presales_call_contact_name or "").strip()
+        )
+
+    @staticmethod
     def _lead_docs_pending(lead: CrmLead) -> bool:
+        """True while required BOQ/SOW files are still missing (ignores PreSales gate)."""
         return (bool(lead.requires_boq) and not bool(lead.boq_attached)) or (
             bool(lead.requires_sow) and not bool(lead.sow_attached)
         )
+
+    @staticmethod
+    def _should_lock_for_docs(lead: CrmLead) -> bool:
+        """Lock convert only after PreSales call unlocks document routing."""
+        return LeadService._presales_call_ready(lead) and LeadService._lead_docs_pending(lead)
 
     def _pending_doc_labels(self, lead: CrmLead) -> list[str]:
         labels: list[str] = []
@@ -527,6 +571,34 @@ class LeadService:
         if lead.requires_sow and not lead.sow_attached:
             labels.append("SOW")
         return labels
+
+    def _find_existing_convert_opportunity(self, lead: CrmLead):
+        """Return an opportunity already created for this lead or its DR code."""
+        from modules.crm.models.opportunity import CrmOpportunity
+
+        by_lead = (
+            self._db.query(CrmOpportunity)
+            .filter(
+                CrmOpportunity.company_id == lead.company_id,
+                CrmOpportunity.lead_id == lead.id,
+                CrmOpportunity.is_deleted.is_(False),
+            )
+            .first()
+        )
+        if by_lead is not None:
+            return by_lead
+        dr_number = (lead.dr_number or lead.lead_code or "").strip()
+        if not dr_number.startswith("DR-"):
+            return None
+        return (
+            self._db.query(CrmOpportunity)
+            .filter(
+                CrmOpportunity.company_id == lead.company_id,
+                CrmOpportunity.opportunity_code == dr_number,
+                CrmOpportunity.is_deleted.is_(False),
+            )
+            .first()
+        )
 
     def _sync_lead_doc_requests(self, ctx: TenantContext, lead_id: UUID) -> CrmLead:
         """Route My Jobs attachment tasks for required BOQ/SOW and lock convert until done."""
@@ -591,22 +663,23 @@ class LeadService:
                 remarks="Required — lead converts to an opportunity when documents are attached",
             )
 
+        call_ready = self._presales_call_ready(lead)
         ensure_request(
-            required=bool(lead.requires_boq),
+            required=bool(lead.requires_boq) and call_ready,
             attached=bool(lead.boq_attached),
             action="provide_boq_attachment",
             step_key="boq_attachment",
             title="Attach BOQ",
         )
         ensure_request(
-            required=bool(lead.requires_sow),
+            required=bool(lead.requires_sow) and call_ready,
             attached=bool(lead.sow_attached),
             action="provide_sow_attachment",
             step_key="sow_attachment",
             title="Attach SOW",
         )
 
-        pending_docs = self._lead_docs_pending(lead)
+        pending_docs = self._should_lock_for_docs(lead)
         if lead.locked != pending_docs and lead.blueprint_state == "open":
             updated = self._repo.update(ctx, lead_id, locked=pending_docs)
             if updated is not None:
@@ -614,11 +687,12 @@ class LeadService:
         return lead
 
     def maybe_auto_convert_after_docs(self, ctx: TenantContext, lead_id: UUID) -> CrmLead:
-        """Convert open sales leads once required BOQ/SOW attachments are present."""
+        """Convert open sales leads once PreSales call + required BOQ/SOW are done."""
         lead = self.get(ctx, lead_id)
         if (
             lead.company_account_id is not None
             and lead.blueprint_state == "open"
+            and self._presales_call_ready(lead)
             and (bool(lead.requires_boq) or bool(lead.requires_sow))
             and not self._lead_docs_pending(lead)
         ):
@@ -782,6 +856,24 @@ class LeadService:
         remark: str | None = None,
     ):
         lead = self.get(ctx, lead_id)
+        # Idempotent convert first: if an opportunity already exists for this lead/DR,
+        # finish linking even when PreSales/docs gates would block a fresh convert
+        # (heals UniqueViolation orphans from earlier partial converts).
+        existing_opp = self._find_existing_convert_opportunity(lead)
+        if existing_opp is not None and lead.blueprint_state == "open":
+            now = datetime.now(timezone.utc)
+            self._repo.update(
+                ctx,
+                lead_id,
+                status=LeadStatus.CONVERTED.value,
+                blueprint_state="converted",
+                converted_opportunity_id=existing_opp.id,
+                converted_at=now,
+                convert_remark=remark,
+                locked=False,
+            )
+            return existing_opp
+
         if pipeline_id is None:
             from modules.crm.repository.pipeline_repository import PipelineRepository
 
@@ -809,6 +901,11 @@ class LeadService:
                     f"Lead is in blueprint state '{lead.blueprint_state}'; only an 'open' "
                     "sales lead can be converted"
                 )
+            if not self._presales_call_ready(lead):
+                raise ConflictException(
+                    "Confirm PreSales call alignment (Yes + contact person) before converting "
+                    "this lead to an opportunity"
+                )
             pending = self._pending_doc_labels(lead)
             if pending:
                 raise ConflictException(
@@ -828,6 +925,7 @@ class LeadService:
             customer = self._integration.convert_lead_to_customer(ctx, lead_id)
             customer_id = customer.id
             lead = self.get(ctx, lead_id)
+
         from modules.crm.service.opportunity_service import OpportunityService
 
         opp_svc = OpportunityService(self._db)
@@ -871,7 +969,16 @@ class LeadService:
                 opp_fields["distributor_discount_percent"] = DEFAULT_DISTRIBUTOR_DISCOUNT_PERCENT
                 opp_fields["distributor_discount_locked"] = True
 
-        opportunity = opp_svc.create(ctx, **opp_fields)
+        try:
+            opportunity = opp_svc.create(ctx, **opp_fields)
+        except Exception:
+            # UniqueViolation on opportunity_code leaves the session aborted;
+            # heal by linking any opportunity that already owns this lead/DR.
+            self._db.rollback()
+            existing_opp = self._find_existing_convert_opportunity(lead)
+            if existing_opp is None:
+                raise
+            opportunity = existing_opp
         if lead.company_account_id is not None:
             self._copy_lead_attachments_to_opportunity(ctx, lead, opportunity.id)
             # Ensure post-doc Transitions are ready (skip Deal Reg when DR already exists).
@@ -900,7 +1007,7 @@ class LeadService:
         lead = self.get(ctx, lead_id)
         if lead.status in {LeadStatus.CONVERTED.value, LeadStatus.LOST.value}:
             raise ConflictException("Lead is already converted or lost")
-        if not self._lead_docs_pending(lead):
+        if not self._should_lock_for_docs(lead):
             sales_blueprint_engine.assert_not_locked(lead)
         row = self._repo.update(
             ctx,

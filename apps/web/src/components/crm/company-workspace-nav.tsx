@@ -387,7 +387,11 @@ export function CompanyWorkspaceNav({
         <nav
           aria-label={isOpportunityScope ? "Opportunity workspace" : "Company workspace"}
           data-sidebar-scroll
-          className="erp-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 py-2"
+          className={cn(
+            "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-1.5 py-2",
+            "scrollbar-none [-ms-overflow-style:none] [scrollbar-width:none]",
+            "[&::-webkit-scrollbar]:hidden",
+          )}
         >
           <ul className="space-y-0.5">
             {items.map((item) => {

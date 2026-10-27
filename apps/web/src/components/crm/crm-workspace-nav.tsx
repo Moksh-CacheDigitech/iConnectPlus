@@ -4,31 +4,14 @@ import { usePathname } from "next/navigation";
 import { useMemo } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
-  Boxes,
-  BriefcaseBusiness,
+  BarChart3,
   Building2,
-  CalendarDays,
-  ClipboardList,
-  Factory,
-  FileSpreadsheet,
-  FileText,
   Handshake,
-  Landmark,
   LayoutDashboard,
   ListTodo,
-  Package,
-  BarChart3,
-  Receipt,
-  ScrollText,
-  ShieldCheck,
-  ShoppingCart,
   Target,
-  TrendingDown,
-  Truck,
   UserCog,
   UserPlus,
-  Users,
-  UserRound,
 } from "lucide-react";
 
 import { ModuleSidebar, type ModuleNavItem } from "@/components/layout/module-sidebar";
@@ -48,13 +31,20 @@ type CrmNavItem = {
   icon: LucideIcon;
 };
 
-/** CRM panes visible only to ERP / CRM module admins (not sales members). */
+/**
+ * Legacy admin-only CRM panes (kept for route helpers / search filters).
+ * These are no longer shown in the primary left nav.
+ */
 export const CRM_ADMIN_ONLY_HREFS = new Set([
   "/crm/sales-performance",
   "/crm/inventory-aging",
 ]);
 
-/** Sales CRM (Zoho-replacement) teamspace navigation. */
+/**
+ * Slim CRM left nav: Dashboard, Reports, My Jobs, Company, Leads,
+ * Opportunities — plus Users for CRM/ERP admins.
+ * Deal docs (quotes, PO, OVF, etc.) live under Company / Opportunity workspaces.
+ */
 export const CRM_NAV: readonly CrmNavItem[] = [
   { title: "Dashboard", href: "/crm", icon: LayoutDashboard },
   { title: "Reports", href: "/crm/reports", icon: BarChart3 },
@@ -62,23 +52,6 @@ export const CRM_NAV: readonly CrmNavItem[] = [
   { title: "Company", href: "/crm/companies", icon: Building2 },
   { title: "Leads", href: "/crm/leads", icon: UserPlus },
   { title: "Opportunities", href: "/crm/opportunities", icon: Target },
-  { title: "Vendor Quote", href: "/crm/oem-quotes", icon: FileSpreadsheet },
-  { title: "Quotes", href: "/crm/quotes", icon: FileText },
-  { title: "Purchase Order", href: "/crm/purchase-orders", icon: ShoppingCart },
-  { title: "OVF", href: "/crm/ovf", icon: Receipt },
-  { title: "Sales Performance", href: "/crm/sales-performance", icon: TrendingDown },
-  { title: "Stock & Aging", href: "/crm/inventory-aging", icon: Boxes },
-  { title: "Contacts", href: "/crm/contacts", icon: Users },
-  { title: "Products", href: "/crm/products", icon: Package },
-  { title: "Meetings", href: "/crm/meetings", icon: CalendarDays },
-  { title: "Customer Follow Ups", href: "/crm/customer-followups", icon: BriefcaseBusiness },
-  { title: "KYC - Account Mapping", href: "/crm/kyc-account-mapping", icon: ShieldCheck },
-  { title: "OEM", href: "/crm/oem", icon: Factory },
-  { title: "Distributor", href: "/crm/distributors", icon: Truck },
-  { title: "BOQ", href: "/crm/boq", icon: ClipboardList },
-  { title: "SOW", href: "/crm/sow", icon: ScrollText },
-  { title: "Entity", href: "/crm/entities", icon: Landmark },
-  { title: "End Customer", href: "/crm/end-customers", icon: UserRound },
 ];
 
 export function isCrmAdminOnlyHref(href: string): boolean {
@@ -125,12 +98,7 @@ function isCrmNavActive(pathname: string, href: string): boolean {
     return false;
   }
 
-  if (pathname === href || pathname.startsWith(`${href}/`)) {
-    return true;
-  }
-  if (href === "/crm/quotes" && pathname.includes("/quotes")) return true;
-  if (href === "/crm/ovf" && pathname.includes("/ovf")) return true;
-  return false;
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 function onCrmNavigate(item: ModuleNavItem) {
@@ -147,9 +115,7 @@ export function CrmSidebar() {
   const isCrmAdmin = canManageModuleUsers("crm", adminModuleKeys, user?.userType);
 
   const navItems = useMemo(() => {
-    const items: CrmNavItem[] = CRM_NAV.filter(
-      (item) => isCrmAdmin || !CRM_ADMIN_ONLY_HREFS.has(item.href),
-    );
+    const items: CrmNavItem[] = [...CRM_NAV];
     if (isCrmAdmin) {
       items.push({ title: "Users", href: "/crm/users", icon: UserCog });
     }

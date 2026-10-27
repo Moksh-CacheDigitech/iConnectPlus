@@ -1625,7 +1625,8 @@ class ExitAgreementResponse(OrmModel):
 
 
 class ReportSummaryResponse(BaseModel):
-    company_id: UUID
+    # None when the caller has module/tenant-wide list scope (all companies).
+    company_id: UUID | None = None
     attendance_count: int
     leave_request_count: int
     approved_leave_count: int

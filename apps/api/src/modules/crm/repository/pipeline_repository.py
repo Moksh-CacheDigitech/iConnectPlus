@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmPipeline
@@ -19,9 +19,9 @@ class PipelineRepository(CrmScopedRepository):
         stmt = self.apply_crm_filter(stmt, CrmPipeline, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_pipelines(self, ctx: TenantContext, company_id: UUID):
+    def list_pipelines(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(CrmPipeline).where(
-            CrmPipeline.company_id == company_id,
+            (CrmPipeline.company_id == company_id if company_id is not None else true()),
             CrmPipeline.is_deleted.is_(False),
         )
         stmt = self.apply_crm_filter(stmt, CrmPipeline, ctx, branch_scoped=False)

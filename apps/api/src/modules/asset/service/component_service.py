@@ -64,7 +64,7 @@ class AssetComponentService:
         limit: int = 25,
         include_availability: bool = False,
     ) -> tuple[list[AstAssetComponent] | list[dict], int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         if sort not in {"created_at", "component_code", "component_name"}:
             sort = "created_at"
         if asset_ids:
@@ -142,11 +142,11 @@ class AssetComponentService:
         return row
 
     def tree(self, ctx: TenantContext, asset_id: UUID, company_id: UUID | None = None) -> dict:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         asset = self._repo.get_parent_asset(ctx, asset_id)
         if asset is None:
             raise NotFoundException("Asset not found")
-        if asset.company_id != cid:
+        if cid is not None and asset.company_id != cid:
             raise NotFoundException("Asset not found")
         children = self._repo.list_by_asset(ctx, asset_id, include_inactive=True)
         return {

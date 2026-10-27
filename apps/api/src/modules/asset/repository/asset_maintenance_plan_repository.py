@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException
@@ -18,7 +18,7 @@ ACTIVE_STATUS = AssetMaintenancePlanStatus.ACTIVE.value
 
 @dataclass(frozen=True)
 class AssetMaintenancePlanListFilters:
-    company_id: UUID
+    company_id: UUID | None
     asset_id: UUID | None = None
     maintenance_type: str | None = None
     status: str | None = None
@@ -39,7 +39,7 @@ class AssetMaintenancePlanRepository(AstScopedRepository):
         stmt = self.apply_ast_filter(stmt, AstAssetMaintenancePlan, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
         items, _ = self.search(
             ctx,
             AssetMaintenancePlanListFilters(company_id=company_id),
@@ -52,12 +52,12 @@ class AssetMaintenancePlanRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         asset_id: UUID,
         exclude_id: UUID | None = None,
     ) -> AstAssetMaintenancePlan | None:
         stmt = select(AstAssetMaintenancePlan).where(
-            AstAssetMaintenancePlan.company_id == company_id,
+            (AstAssetMaintenancePlan.company_id == company_id if company_id is not None else true()),
             AstAssetMaintenancePlan.asset_id == asset_id,
             AstAssetMaintenancePlan.is_deleted.is_(False),
             AstAssetMaintenancePlan.status == ACTIVE_STATUS,
@@ -79,7 +79,7 @@ class AssetMaintenancePlanRepository(AstScopedRepository):
             select(AstAssetMaintenancePlan)
             .outerjoin(AstAsset, AstAsset.id == AstAssetMaintenancePlan.asset_id)
             .where(
-                AstAssetMaintenancePlan.company_id == filters.company_id,
+                (AstAssetMaintenancePlan.company_id == filters.company_id if filters.company_id is not None else true()),
                 AstAssetMaintenancePlan.is_deleted.is_(False),
             )
         )

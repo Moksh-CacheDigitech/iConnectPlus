@@ -140,7 +140,8 @@ export const FinanceSelect = forwardRef<HTMLSelectElement, React.ComponentProps<
     const placeholder = empty?.label || "Select…";
 
     return (
-      <div className="min-w-0">
+      // Contain sr-only absolute select so it cannot extend document scrollHeight.
+      <div className="relative min-w-0 overflow-hidden">
         <select
           ref={ref}
           id={id}

@@ -83,7 +83,7 @@ class DocumentService:
         offset: int = 0,
         limit: int = 25,
     ) -> tuple[list[AstAssetDocument], int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         filters = AssetDocumentListFilters(
             company_id=cid,
             asset_id=asset_id,

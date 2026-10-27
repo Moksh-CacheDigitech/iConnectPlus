@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmCustomerSatisfaction
@@ -19,9 +19,9 @@ class CustomerSatisfactionRepository(CrmScopedRepository):
         stmt = self.apply_crm_filter(stmt, CrmCustomerSatisfaction, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_scores(self, ctx: TenantContext, company_id: UUID):
+    def list_scores(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(CrmCustomerSatisfaction).where(
-            CrmCustomerSatisfaction.company_id == company_id,
+            (CrmCustomerSatisfaction.company_id == company_id if company_id is not None else true()),
             CrmCustomerSatisfaction.is_deleted.is_(False),
         )
         stmt = self.apply_crm_filter(stmt, CrmCustomerSatisfaction, ctx, branch_scoped=False)

@@ -3,13 +3,32 @@
 from datetime import date
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from modules.foundation.domain.org_data_scope import (
+    apply_org_scope_filter,
+    has_module_wide_data_access,
+)
 from modules.foundation.domain.value_objects import TenantContext
 from modules.master_data.domain.entities import EmployeeEntity
 from modules.master_data.models.employee import MasterEmployee
-from modules.master_data.repository.base import MasterScopedRepository, utcnow
+from modules.master_data.repository.base import MASTER_DATA_MODULE_KEY, MasterScopedRepository, utcnow
+
+# Modules that need a cross-company employee directory (assign / import / HR).
+_EMPLOYEE_DIRECTORY_MODULE_KEYS = (MASTER_DATA_MODULE_KEY, "hr", "assets")
+
+
+def _employee_directory_module_key(ctx: TenantContext) -> str:
+    """Widen list scope when Assets/HR admins need the shared employee directory."""
+    for key in _EMPLOYEE_DIRECTORY_MODULE_KEYS:
+        if has_module_wide_data_access(ctx, key):
+            return key
+    return MASTER_DATA_MODULE_KEY
+
+
+def _normalize_employee_code(value: str) -> str:
+    return "".join(ch for ch in value.strip().lower() if ch.isalnum())
 
 
 class EmployeeRepository(MasterScopedRepository):
@@ -24,7 +43,14 @@ class EmployeeRepository(MasterScopedRepository):
         branch_id: UUID | None = None,
     ) -> list[EmployeeEntity]:
         stmt = select(MasterEmployee)
-        stmt = self.apply_master_filter(stmt, MasterEmployee, ctx, branch_scoped=True)
+        stmt = self.apply_tenant_filter(stmt, MasterEmployee, ctx)
+        stmt = apply_org_scope_filter(
+            stmt,
+            MasterEmployee,
+            ctx,
+            module_key=_employee_directory_module_key(ctx),
+            branch_scoped=True,
+        )
         if company_id:
             stmt = stmt.where(MasterEmployee.company_id == company_id)
         if branch_id:
@@ -52,13 +78,34 @@ class EmployeeRepository(MasterScopedRepository):
     def get_by_code(
         self, ctx: TenantContext, company_id: UUID, employee_code: str
     ) -> MasterEmployee | None:
+        code = employee_code.strip()
         stmt = select(MasterEmployee).where(
             MasterEmployee.tenant_id == ctx.tenant_id,
             MasterEmployee.company_id == company_id,
-            MasterEmployee.employee_code == employee_code,
             MasterEmployee.is_deleted.is_(False),
+            func.lower(func.btrim(MasterEmployee.employee_code)) == code.lower(),
         )
-        return self.db.scalar(stmt)
+        row = self.db.scalar(stmt)
+        if row is not None:
+            return row
+        # Fallback: CT-5352 / CT 5352 / CT5352
+        normalized = _normalize_employee_code(code)
+        if not normalized:
+            return None
+        normalized_col = func.regexp_replace(
+            func.lower(func.btrim(MasterEmployee.employee_code)),
+            r"[^a-z0-9]",
+            "",
+            "g",
+        )
+        return self.db.scalar(
+            select(MasterEmployee).where(
+                MasterEmployee.tenant_id == ctx.tenant_id,
+                MasterEmployee.company_id == company_id,
+                MasterEmployee.is_deleted.is_(False),
+                normalized_col == normalized,
+            )
+        )
 
     def create(
         self,

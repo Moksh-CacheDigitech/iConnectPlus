@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from core.config import get_settings
 from core.exceptions import AppException, ConflictException, ForbiddenException, NotFoundException
+from modules.asset.models.asset import AstAsset
 from modules.ess.employee_document_storage import (
     DocumentDownload,
     load_document_download,
