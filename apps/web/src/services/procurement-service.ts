@@ -237,6 +237,8 @@ export type ScmLinkedPurchaseOrder = {
   document_number?: string | null;
   company_po_number?: string | null;
   status?: string | null;
+  /** Sum of active PO line quantities. */
+  total_qty?: number | null;
 };
 
 export type ScmPoGroup = {
@@ -247,6 +249,8 @@ export type ScmPoGroup = {
   document_number?: string | null;
   company_po_number?: string | null;
   status?: string | null;
+  required_qty?: number | null;
+  ordered_qty?: number | null;
 };
 
 export type ScmQueueItem = {
@@ -292,6 +296,8 @@ export type ScmQueueItem = {
   /** One group per distributor that needs a PO (excludes in-stock lines). */
   po_groups?: ScmPoGroup[];
   purchase_orders?: ScmLinkedPurchaseOrder[];
+  /** Non-stock vendor demand qty that needs Create PO coverage. */
+  required_po_qty?: number;
   item_plan?: ScmItemPlan;
 };
 
@@ -446,6 +452,7 @@ export type ScmOvfPreview = {
   open_distributor_names?: string[];
   po_groups?: ScmPoGroup[];
   purchase_orders?: ScmLinkedPurchaseOrder[];
+  required_po_qty?: number;
   scm_on_hold?: boolean;
   scm_on_hold_at?: string | null;
   scm_hold_blocked?: boolean;
@@ -528,6 +535,7 @@ export type ProcOrder = {
   branch_id?: string;
   status: string;
   workflow_status?: string | null;
+  scm_approval_stage?: ScmApprovalStage | null;
   currency_code: string;
   payment_terms: string | null;
   total_amount: number;
@@ -780,6 +788,7 @@ export async function createPoFromOvf(
     finalize?: boolean;
     hold?: boolean;
     distributor_name?: string | null;
+    force_new?: boolean;
     lines?: Array<{
       product_name: string;
       qty: number;
@@ -882,6 +891,42 @@ export async function updateScmExpectedDeliveryDate(
   return unwrapData(res);
 }
 
+export type ScmDeliveryContact = {
+  order_id: string;
+  email: string | null;
+  crm_email: string | null;
+  customer_name: string | null;
+  customer_ack_sent_at: string | null;
+};
+
+export async function getScmDeliveryContact(orderId: string): Promise<ScmDeliveryContact> {
+  const res = await apiClient<ScmDeliveryContact>(
+    `${SCM_API}/orders/${orderId}/delivery-contact`,
+  );
+  return unwrapData(res);
+}
+
+export type ScmDummyDeliverySend = {
+  order_id: string;
+  email: string;
+  customer_ack_sent_at: string;
+  dummy: boolean;
+  message: string;
+};
+
+/** Placeholder acknowledgement send until SMTP is wired - unlocks Record GRN. */
+export async function dummySendScmDeliveryAcknowledgement(
+  orderId: string,
+  body?: { email?: string | null },
+): Promise<ScmDummyDeliverySend> {
+  const res = await apiClient<ScmDummyDeliverySend>(
+    `${SCM_API}/orders/${orderId}/delivery-acknowledgement/dummy-send`,
+    { method: "POST", body: { email: body?.email ?? null } },
+  );
+  invalidateProcurementListCache();
+  return unwrapData(res);
+}
+
 export type ScmDeliveryNotificationRun = {
   acknowledged: number;
   etd_chased: number;
@@ -978,6 +1023,8 @@ export async function upsertCorrespondenceTemplate(body: {
   );
 }
 
+export type ScmApprovalStage = "accept_po" | "management";
+
 export type ScmFinalizeApproval = {
   id: string;
   kind: "finalize";
@@ -994,6 +1041,29 @@ export type ScmFinalizeApproval = {
   decided_at: string | null;
   order_status: string;
   workflow_status: string | null;
+  scm_approval_stage?: ScmApprovalStage | null;
+  stage_label?: string | null;
+  requested_by_id?: string | null;
+  requested_by_name?: string | null;
+};
+
+export type ProcApprovalStepOwnerUser = {
+  user_id: string;
+  display_name: string;
+  email: string;
+};
+
+export type ProcApprovalStepOwnersGroup = {
+  step_key: string;
+  label: string;
+  team_role: string;
+  owners: ProcApprovalStepOwnerUser[];
+};
+
+export type ProcApprovalCapabilities = {
+  is_module_admin: boolean;
+  steps: string[];
+  can_decide_approvals: boolean;
 };
 
 export async function listScmFinalizeApprovals(): Promise<ScmFinalizeApproval[]> {
@@ -1001,9 +1071,136 @@ export async function listScmFinalizeApprovals(): Promise<ScmFinalizeApproval[]>
   return unwrapData(res);
 }
 
+export async function listProcApprovalStepOwners(): Promise<ProcApprovalStepOwnersGroup[]> {
+  const res = await apiClient<ProcApprovalStepOwnersGroup[]>(
+    `${SCM_API}/approval-step-owners`,
+  );
+  return unwrapData(res);
+}
+
+export async function replaceProcApprovalStepOwners(
+  stepKey: string,
+  userIds: string[],
+): Promise<ProcApprovalStepOwnersGroup> {
+  const res = await apiClient<ProcApprovalStepOwnersGroup>(
+    `${SCM_API}/approval-step-owners/${encodeURIComponent(stepKey)}`,
+    { method: "PUT", body: { user_ids: userIds } },
+  );
+  return unwrapData(res);
+}
+
+export async function getProcApprovalCapabilities(): Promise<ProcApprovalCapabilities> {
+  const res = await apiClient<ProcApprovalCapabilities>(
+    `${SCM_API}/approval-capabilities`,
+  );
+  return unwrapData(res);
+}
+
+export type ProcInvoiceGenerationTask = {
+  id: string;
+  task_code: string;
+  title: string;
+  status: string;
+  order_header_id: string;
+  receipt_batch_id: string;
+  grn_number: string;
+  purchase_order_number: string;
+  vendor_name: string;
+  customer_name: string;
+  items_summary: string;
+  assigned_user_id: string;
+  company_id?: string | null;
+  branch_id?: string | null;
+  requested_by_id?: string | null;
+  requested_by_name?: string | null;
+  invoice_number?: string | null;
+  invoice_date?: string | null;
+  invoice_quantity?: number | null;
+  invoice_amount?: number | null;
+  /** SCM Billing GRN qty (auto-fetched). */
+  suggested_quantity?: number | null;
+  /** SCM Billing GRN amount from PO rates (auto-fetched). */
+  suggested_amount?: number | null;
+  completed_at?: string | null;
+  created_at?: string | null;
+};
+
+export async function createInvoiceGenerationTasks(input: {
+  order_id: string;
+  receipt_batch_id: string;
+  items_summary?: string;
+  vendor_name?: string;
+  customer_name?: string;
+}): Promise<ProcInvoiceGenerationTask[]> {
+  const res = await apiClient<ProcInvoiceGenerationTask[]>(
+    `${SCM_API}/invoice-generation-tasks`,
+    {
+      method: "POST",
+      body: {
+        order_id: input.order_id,
+        receipt_batch_id: input.receipt_batch_id,
+        items_summary: input.items_summary ?? "",
+        vendor_name: input.vendor_name ?? "",
+        customer_name: input.customer_name ?? "",
+      },
+    },
+  );
+  return unwrapData(res);
+}
+
+export async function listMyInvoiceGenerationTasks(
+  status: string | null = "pending",
+): Promise<ProcInvoiceGenerationTask[]> {
+  const qs =
+    status === null || status === ""
+      ? ""
+      : `?status=${encodeURIComponent(status)}`;
+  const res = await apiClient<ProcInvoiceGenerationTask[]>(
+    `${SCM_API}/invoice-generation-tasks/mine${qs}`,
+  );
+  return unwrapData(res);
+}
+
+export async function getInvoiceGenerationTaskForBatch(
+  receiptBatchId: string,
+): Promise<ProcInvoiceGenerationTask | null> {
+  const res = await apiClient<ProcInvoiceGenerationTask | null>(
+    `${SCM_API}/invoice-generation-tasks/by-batch/${encodeURIComponent(receiptBatchId)}`,
+  );
+  return res.data ?? null;
+}
+
+export async function submitInvoiceGenerationTask(
+  taskId: string,
+  body: {
+    invoice_number: string;
+    invoice_date: string;
+    invoice_quantity?: number | null;
+    invoice_amount?: number | null;
+    file_name?: string | null;
+    content_base64?: string | null;
+    content_type?: string | null;
+  },
+): Promise<ProcInvoiceGenerationTask> {
+  const res = await apiClient<ProcInvoiceGenerationTask>(
+    `${SCM_API}/invoice-generation-tasks/${encodeURIComponent(taskId)}/submit`,
+    { method: "POST", body },
+  );
+  return unwrapData(res);
+}
+
 export async function requestScmFinalizeApproval(orderId: string): Promise<ProcOrder> {
   const res = await apiClient<ProcOrder>(
     `${SCM_API}/orders/${orderId}/request-finalize-approval`,
+    { method: "POST", body: {} },
+  );
+  invalidateProcurementListCache();
+  return unwrapData(res);
+}
+
+export async function acceptScmPoApproval(orderId: string): Promise<ProcOrder> {
+  const res = await apiClient<ProcOrder>(
+    `${SCM_API}/orders/${orderId}/accept-po-approval`,
     { method: "POST", body: {} },
   );
   invalidateProcurementListCache();
@@ -1100,10 +1297,19 @@ export async function createPoFromInventory(payload: {
 }
 
 export async function listProcurementInventory(): Promise<ProcurementInventoryRow[]> {
-  return cachedFetch(PROCUREMENT_INVENTORY_CACHE_KEY, PROCUREMENT_LIST_TTL_MS, async () => {
-    const res = await apiClient<ProcurementInventoryRow[]>(`${SCM_API}/inventory`);
-    return unwrapData(res);
-  });
+  const rows = await cachedFetch(
+    PROCUREMENT_INVENTORY_CACHE_KEY,
+    PROCUREMENT_LIST_TTL_MS,
+    async () => {
+      const res = await apiClient<ProcurementInventoryRow[]>(`${SCM_API}/inventory`);
+      return unwrapData(res);
+    },
+  );
+  // Do not keep an empty snapshot warm — stale [] hid real stock after API/scope fixes.
+  if (rows.length === 0) {
+    invalidateClientCache(PROCUREMENT_INVENTORY_CACHE_KEY);
+  }
+  return rows;
 }
 
 export async function updateInventoryStockSerial(

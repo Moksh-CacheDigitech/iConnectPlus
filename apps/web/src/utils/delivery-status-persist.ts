@@ -22,7 +22,8 @@ export async function persistDeliveryStatusFromForm(
   challan: DeliveryChallanRecord,
   form: DeliveryStatusFormValue,
 ): Promise<PersistDeliveryStatusResult> {
-  const errors = validateDeliveryStatusForm(form);
+  const requireDispatch = challan.grnKind !== "billing";
+  const errors = validateDeliveryStatusForm(form, { requireDispatch });
   const message = firstDeliveryStatusFormError(errors);
   if (message) {
     return { ok: false, message, fieldErrors: errors };

@@ -329,6 +329,7 @@ class OrderResponse(BaseModel):
     received_amount: float = 0
     status: str
     workflow_status: str | None = None
+    scm_approval_stage: Literal["accept_po", "management"] | None = None
     source_module: str | None = None
     source_document_type: str | None = None
     source_document_id: UUID | None = None
@@ -402,6 +403,8 @@ class ScmLinkedPurchaseOrder(BaseModel):
     document_number: str | None = None
     company_po_number: str | None = None
     status: str | None = None
+    # Sum of active PO line quantities (partial Create PO coverage).
+    total_qty: float = 0
 
 
 class ScmPoGroup(BaseModel):
@@ -412,6 +415,8 @@ class ScmPoGroup(BaseModel):
     document_number: str | None = None
     company_po_number: str | None = None
     status: str | None = None
+    required_qty: float = 0
+    ordered_qty: float = 0
 
 
 class ScmQueueItemResponse(BaseModel):
@@ -448,7 +453,10 @@ class ScmQueueItemResponse(BaseModel):
     scm_on_hold_at: datetime | None = None
     can_create_po: bool = True
     open_distributor_names: list[str] = Field(default_factory=list)
+    po_groups: list[ScmPoGroup] = Field(default_factory=list)
     purchase_orders: list[ScmLinkedPurchaseOrder] = Field(default_factory=list)
+    # Non-stock vendor demand qty that needs Create PO coverage.
+    required_po_qty: float = 0
     stock_fulfillment_status: str = "none"
     remaining_demand_qty: float = 0
     stock_availability: list[ScmStockAvailability] = Field(default_factory=list)
@@ -598,6 +606,7 @@ class ScmOvfPreviewResponse(BaseModel):
     open_distributor_names: list[str] = Field(default_factory=list)
     po_groups: list[ScmPoGroup] = Field(default_factory=list)
     purchase_orders: list[ScmLinkedPurchaseOrder] = Field(default_factory=list)
+    required_po_qty: float = 0
     scm_on_hold: bool = False
     scm_on_hold_at: datetime | None = None
     scm_hold_blocked: bool = False
@@ -638,6 +647,8 @@ class ScmCreatePoFromOvfRequest(BaseModel):
     distributor_name: str | None = Field(default=None, max_length=255)
     # When set, these lines are purchased instead of raw OVF vendor_lines (qty/rate edits, removals).
     lines: list[ScmCreatePoFromOvfLineRequest] | None = None
+    # Partial qty / remainder PO from item plan: always create a new draft (do not reuse).
+    force_new: bool = False
 
 
 class ScmInventoryPoLineRequest(BaseModel):
@@ -697,7 +708,7 @@ class ScmNegotiationResponse(BaseModel):
 
 
 class ScmFinalizeApprovalResponse(BaseModel):
-    """Shared admin Approval inbox row for SCM finalize requests."""
+    """Shared Approval inbox row for SCM Accept PO / Management finalize requests."""
 
     id: UUID
     kind: Literal["finalize"] = "finalize"
@@ -714,6 +725,82 @@ class ScmFinalizeApprovalResponse(BaseModel):
     decided_at: datetime | None = None
     order_status: str
     workflow_status: str | None = None
+    scm_approval_stage: Literal["accept_po", "management"] | None = None
+    stage_label: str | None = None
+    requested_by_id: UUID | None = None
+    requested_by_name: str | None = None
+
+
+class ProcApprovalStepOwnerUser(BaseModel):
+    user_id: UUID
+    display_name: str
+    email: str
+
+
+class ProcApprovalStepOwnersGroup(BaseModel):
+    step_key: str
+    label: str
+    team_role: str
+    owners: list[ProcApprovalStepOwnerUser]
+
+
+class ProcApprovalStepOwnersReplaceRequest(BaseModel):
+    user_ids: list[UUID] = Field(default_factory=list)
+
+
+class ProcApprovalCapabilitiesResponse(BaseModel):
+    is_module_admin: bool
+    steps: list[str] = Field(default_factory=list)
+    can_decide_approvals: bool
+
+
+class ProcInvoiceGenerationTaskCreateRequest(BaseModel):
+    order_id: UUID
+    receipt_batch_id: UUID
+    items_summary: str = ""
+    vendor_name: str = ""
+    customer_name: str = ""
+
+
+class ProcInvoiceGenerationTaskSubmitRequest(BaseModel):
+    invoice_number: str = Field(min_length=1, max_length=80)
+    invoice_date: date
+    # Optional — server prefers SCM billing totals when present.
+    invoice_quantity: float | None = Field(default=None, ge=0)
+    invoice_amount: float | None = Field(default=None, ge=0)
+    file_name: str | None = Field(default=None, max_length=255)
+    content_base64: str | None = None
+    content_type: str | None = Field(default=None, max_length=120)
+
+
+class ProcInvoiceGenerationTaskResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    task_code: str
+    title: str
+    status: str
+    order_header_id: UUID
+    receipt_batch_id: UUID
+    grn_number: str = ""
+    purchase_order_number: str = ""
+    vendor_name: str = ""
+    customer_name: str = ""
+    items_summary: str = ""
+    assigned_user_id: UUID
+    company_id: UUID | None = None
+    branch_id: UUID | None = None
+    requested_by_id: UUID | None = None
+    requested_by_name: str | None = None
+    invoice_number: str | None = None
+    invoice_date: date | None = None
+    invoice_quantity: float | None = None
+    invoice_amount: float | None = None
+    # SCM billing GRN totals (auto-fetched for the Accounts form).
+    suggested_quantity: float | None = None
+    suggested_amount: float | None = None
+    completed_at: datetime | None = None
+    created_at: datetime | None = None
 
 
 class OrderTrackingRequest(BaseModel):
@@ -747,6 +834,30 @@ class ScmEtdUpdateRequest(BaseModel):
 
     expected_delivery_date: date | None = None
     notify_customer: bool = True
+
+
+class ScmDeliveryContactResponse(BaseModel):
+    """Customer email for Delivery Tracking (CRM default, editable on send)."""
+
+    order_id: UUID
+    email: str | None = None
+    crm_email: str | None = None
+    customer_name: str | None = None
+    customer_ack_sent_at: datetime | None = None
+
+
+class ScmDummyDeliverySendRequest(BaseModel):
+    """Mark order acknowledgement as sent without SMTP (placeholder until mail is wired)."""
+
+    email: str | None = Field(default=None, max_length=255)
+
+
+class ScmDummyDeliverySendResponse(BaseModel):
+    order_id: UUID
+    email: str
+    customer_ack_sent_at: datetime
+    dummy: bool = True
+    message: str
 
 
 class ScmDeliveryMilestoneRequest(BaseModel):

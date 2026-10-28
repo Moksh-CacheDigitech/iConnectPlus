@@ -490,6 +490,8 @@ def create_shared_ovf(
         entity_gst=deal["gst"],
         entity_contact=phone,
         notes=f"SCM demo lead #{index}",
+        presales_call_aligned=True,
+        presales_call_contact_name=f"{first} {last}",
     )
 
     # Sales leads require BOQ + SOW on the lead before convert.

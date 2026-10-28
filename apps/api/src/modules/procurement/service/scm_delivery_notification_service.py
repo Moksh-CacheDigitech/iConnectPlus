@@ -518,6 +518,65 @@ class ScmDeliveryNotificationService:
         self._db.flush()
         return counts
 
+    # -- delivery contact / dummy send (SMTP later) ------------------------
+    def get_delivery_contact(self, ctx: TenantContext, order_id: UUID) -> dict[str, Any]:
+        """CRM customer email for the Delivery Tracking send field."""
+        order = self._require_order(ctx, order_id)
+        customer: dict[str, Any] = {}
+        if order.source_document_id is not None:
+            customer = self._customer_contact(ctx, order.source_document_id)
+        email = (customer.get("email") or "").strip() or None
+        return {
+            "order_id": order.id,
+            "email": email,
+            "crm_email": email,
+            "customer_name": customer.get("customer_name")
+            or customer.get("account_name"),
+            "customer_ack_sent_at": order.customer_ack_sent_at,
+        }
+
+    def dummy_send_acknowledgement(
+        self,
+        ctx: TenantContext,
+        order_id: UUID,
+        *,
+        email: str | None = None,
+    ) -> dict[str, Any]:
+        """Mark customer acknowledgement as sent without SMTP.
+
+        Unlocks GRN on CRM-sourced POs. Real mail delivery will replace this
+        stub once SMTP is configured.
+        """
+        order = self._require_order(ctx, order_id)
+        if order.status not in _LIVE_STATUSES:
+            raise ValidationException(
+                "Issue the purchase order before sending delivery acknowledgement"
+            )
+        customer: dict[str, Any] = {}
+        if order.source_document_id is not None:
+            customer = self._customer_contact(ctx, order.source_document_id)
+        to_address = (email or "").strip() or (customer.get("email") or "").strip()
+        if not to_address:
+            raise ValidationException(
+                "Enter a customer email (none found on the CRM company account)"
+            )
+        if "@" not in to_address or "." not in to_address.split("@")[-1]:
+            raise ValidationException("Enter a valid email address")
+
+        order.customer_ack_sent_at = utcnow()
+        order.updated_by = ctx.user_id
+        self._db.flush()
+        return {
+            "order_id": order.id,
+            "email": to_address,
+            "customer_ack_sent_at": order.customer_ack_sent_at,
+            "dummy": True,
+            "message": (
+                f"Acknowledgement marked as sent to {to_address} "
+                "(SMTP not configured yet). Record GRN is now available."
+            ),
+        }
+
     # -- ETD maintenance ---------------------------------------------------
     def set_expected_delivery_date(
         self,

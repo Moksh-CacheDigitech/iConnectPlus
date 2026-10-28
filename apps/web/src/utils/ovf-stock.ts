@@ -191,12 +191,9 @@ export function setOvfPoRemainderProducts(ovfId: string, productNames: string[])
   }
 }
 
-export function takeOvfPoRemainderProducts(ovfId: string): string[] | null {
-  if (typeof window === "undefined") return null;
+function readOvfPoRemainderProducts(raw: string | null): string[] | null {
+  if (!raw) return null;
   try {
-    const raw = window.sessionStorage.getItem(PO_REMAINDER_PRODUCTS_KEY(ovfId));
-    window.sessionStorage.removeItem(PO_REMAINDER_PRODUCTS_KEY(ovfId));
-    if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return null;
     const names = parsed.map((row) => String(row || "").trim()).filter(Boolean);
@@ -204,6 +201,348 @@ export function takeOvfPoRemainderProducts(ovfId: string): string[] | null {
   } catch {
     return null;
   }
+}
+
+export function peekOvfPoRemainderProducts(ovfId: string): string[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return readOvfPoRemainderProducts(
+      window.sessionStorage.getItem(PO_REMAINDER_PRODUCTS_KEY(ovfId)),
+    );
+  } catch {
+    return null;
+  }
+}
+
+export function takeOvfPoRemainderProducts(ovfId: string): string[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const key = PO_REMAINDER_PRODUCTS_KEY(ovfId);
+    const names = readOvfPoRemainderProducts(window.sessionStorage.getItem(key));
+    window.sessionStorage.removeItem(key);
+    return names;
+  } catch {
+    return null;
+  }
+}
+
+export function clearOvfPoRemainderProducts(ovfId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(PO_REMAINDER_PRODUCTS_KEY(ovfId));
+  } catch {
+    /* ignore */
+  }
+}
+
+const PO_LINE_QTY_OVERRIDES_KEY = (ovfId: string) =>
+  `erp.scm.ovf-po-line-qtys:${ovfId}`;
+
+/** Per-product qty for the next Create PO (from item-plan qty selection). */
+export function setOvfPoLineQtyOverrides(
+  ovfId: string,
+  qtys: Record<string, number>,
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    const cleaned: Record<string, number> = {};
+    for (const [key, value] of Object.entries(qtys)) {
+      const productKey = ovfProductKey(key) || key.trim().toLowerCase();
+      const qty = Number(value);
+      if (!productKey || !Number.isFinite(qty) || qty <= 0) continue;
+      cleaned[productKey] = qty;
+    }
+    if (Object.keys(cleaned).length === 0) {
+      window.sessionStorage.removeItem(PO_LINE_QTY_OVERRIDES_KEY(ovfId));
+      return;
+    }
+    window.sessionStorage.setItem(PO_LINE_QTY_OVERRIDES_KEY(ovfId), JSON.stringify(cleaned));
+  } catch {
+    /* ignore quota */
+  }
+}
+
+function readOvfPoLineQtyOverrides(raw: string | null): Record<string, number> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const out: Record<string, number> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const qty = Number(value);
+      if (!key || !Number.isFinite(qty) || qty <= 0) continue;
+      out[key] = qty;
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+export function peekOvfPoLineQtyOverrides(ovfId: string): Record<string, number> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return readOvfPoLineQtyOverrides(window.sessionStorage.getItem(PO_LINE_QTY_OVERRIDES_KEY(ovfId)));
+  } catch {
+    return null;
+  }
+}
+
+export function takeOvfPoLineQtyOverrides(ovfId: string): Record<string, number> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const key = PO_LINE_QTY_OVERRIDES_KEY(ovfId);
+    const overrides = readOvfPoLineQtyOverrides(window.sessionStorage.getItem(key));
+    window.sessionStorage.removeItem(key);
+    return overrides;
+  } catch {
+    return null;
+  }
+}
+
+export function clearOvfPoLineQtyOverrides(ovfId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(PO_LINE_QTY_OVERRIDES_KEY(ovfId));
+  } catch {
+    /* ignore */
+  }
+}
+
+export type OvfItemPlanSplitRow = {
+  id: string;
+  product_name: string;
+  distributor_name: string;
+  source: string;
+  action: string;
+  /** Index in API item_plan.lines (for vendor PATCH). Copied onto remainder rows. */
+  api_line_index: number;
+  /** Qty still available on this row for Create PO / booking. */
+  qty: number;
+  /** Qty selected for the next Create PO (1..qty). */
+  create_qty: number;
+  po_qty: number;
+  book_qty: number;
+  on_hand_qty: number;
+  allocated_qty: number;
+  in_stock: boolean;
+  /** True after Create PO was opened for this row's create_qty. */
+  po_started: boolean;
+  /** PO created specifically for this split row (unique even when distributor matches). */
+  linked_po_id?: string | null;
+  linked_po_label?: string | null;
+};
+
+const ITEM_PLAN_SPLITS_KEY = (ovfId: string) => `erp.scm.ovf-item-plan-splits:${ovfId}`;
+
+export function saveOvfItemPlanSplits(ovfId: string, rows: OvfItemPlanSplitRow[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(ITEM_PLAN_SPLITS_KEY(ovfId), JSON.stringify(rows));
+  } catch {
+    /* ignore quota */
+  }
+}
+
+export function loadOvfItemPlanSplits(ovfId: string): OvfItemPlanSplitRow[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(ITEM_PLAN_SPLITS_KEY(ovfId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    return parsed as OvfItemPlanSplitRow[];
+  } catch {
+    return null;
+  }
+}
+
+export function clearOvfItemPlanSplits(ovfId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(ITEM_PLAN_SPLITS_KEY(ovfId));
+  } catch {
+    /* ignore */
+  }
+}
+
+const PENDING_ITEM_PLAN_PO_ROW_KEY = (ovfId: string) =>
+  `erp.scm.ovf-pending-item-plan-po-row:${ovfId}`;
+
+function readPendingItemPlanPoRowIds(raw: string | null): string[] {
+  const text = (raw || "").trim();
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed.map((id) => String(id || "").trim()).filter(Boolean);
+    }
+  } catch {
+    /* legacy single-id string */
+  }
+  return [text];
+}
+
+/** Remember which item-plan split row(s) the next Create PO belongs to. */
+export function setOvfPendingItemPlanPoRows(ovfId: string, rowIds: string[]): void {
+  if (typeof window === "undefined") return;
+  const ids = [...new Set(rowIds.map((id) => (id || "").trim()).filter(Boolean))];
+  try {
+    if (ids.length === 0) {
+      window.sessionStorage.removeItem(PENDING_ITEM_PLAN_PO_ROW_KEY(ovfId));
+      return;
+    }
+    window.sessionStorage.setItem(PENDING_ITEM_PLAN_PO_ROW_KEY(ovfId), JSON.stringify(ids));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** @deprecated Prefer setOvfPendingItemPlanPoRows */
+export function setOvfPendingItemPlanPoRow(ovfId: string, rowId: string): void {
+  setOvfPendingItemPlanPoRows(ovfId, [rowId]);
+}
+
+export function peekOvfPendingItemPlanPoRows(ovfId: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return readPendingItemPlanPoRowIds(
+      window.sessionStorage.getItem(PENDING_ITEM_PLAN_PO_ROW_KEY(ovfId)),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function peekOvfPendingItemPlanPoRow(ovfId: string): string | null {
+  return peekOvfPendingItemPlanPoRows(ovfId)[0] || null;
+}
+
+export function takeOvfPendingItemPlanPoRows(ovfId: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const key = PENDING_ITEM_PLAN_PO_ROW_KEY(ovfId);
+    const ids = readPendingItemPlanPoRowIds(window.sessionStorage.getItem(key));
+    window.sessionStorage.removeItem(key);
+    return ids;
+  } catch {
+    return [];
+  }
+}
+
+export function takeOvfPendingItemPlanPoRow(ovfId: string): string | null {
+  return takeOvfPendingItemPlanPoRows(ovfId)[0] || null;
+}
+
+/** Persist the created PO onto one or more pending item-plan split rows. */
+export function bindOvfItemPlanRowsToPo(
+  ovfId: string,
+  rowIds: string[] | string | null | undefined,
+  po: { id: string; label: string },
+): void {
+  const targets = new Set(
+    (Array.isArray(rowIds) ? rowIds : rowIds ? [rowIds] : [])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean),
+  );
+  const poId = String(po.id || "").trim();
+  const label = (po.label || "").trim();
+  if (targets.size === 0 || !poId) return;
+  const rows = loadOvfItemPlanSplits(ovfId);
+  if (!rows) return;
+  const next = rows.map((row) =>
+    targets.has(row.id)
+      ? {
+          ...row,
+          po_started: true,
+          linked_po_id: poId,
+          linked_po_label: label || poId,
+        }
+      : row,
+  );
+  saveOvfItemPlanSplits(ovfId, next);
+}
+
+/** @deprecated Prefer bindOvfItemPlanRowsToPo */
+export function bindOvfItemPlanRowToPo(
+  ovfId: string,
+  rowId: string | null | undefined,
+  po: { id: string; label: string },
+): void {
+  bindOvfItemPlanRowsToPo(ovfId, rowId, po);
+}
+
+type OvfPoLinkCandidate = {
+  id: string;
+  vendor_name?: string | null;
+  company_po_number?: string | null;
+  document_number?: string | null;
+};
+
+/**
+ * Attach PO refs to started rows. Rows that share a distributor share one PO.
+ */
+export function assignUniquePosToItemPlanRows(
+  rows: OvfItemPlanSplitRow[],
+  purchaseOrders: OvfPoLinkCandidate[] | null | undefined,
+): OvfItemPlanSplitRow[] {
+  const unused = [...(purchaseOrders || [])].filter((row) => Boolean(row?.id));
+  const claimed = new Set<string>();
+  const poByDistributor = new Map<string, { id: string; label: string }>();
+
+  for (const row of rows) {
+    if (!row.linked_po_id) continue;
+    const id = String(row.linked_po_id);
+    claimed.add(id);
+    const still = unused.findIndex((po) => String(po.id) === id);
+    if (still >= 0) unused.splice(still, 1);
+    const distKey = ovfDistributorKey(row.distributor_name);
+    if (distKey && !poByDistributor.has(distKey)) {
+      poByDistributor.set(distKey, {
+        id,
+        label: (row.linked_po_label || "").trim() || id,
+      });
+    }
+  }
+
+  const takeMatch = (distributorName: string): { id: string; label: string } | null => {
+    const needle = ovfDistributorKey(distributorName);
+    if (needle && poByDistributor.has(needle)) {
+      return poByDistributor.get(needle) || null;
+    }
+    const matchIdx = unused.findIndex((po) => {
+      const id = String(po.id);
+      if (claimed.has(id)) return false;
+      if (!needle) return true;
+      const vendorName = ovfDistributorKey(po.vendor_name || "");
+      return (
+        Boolean(vendorName) &&
+        (vendorName === needle || vendorName.includes(needle) || needle.includes(vendorName))
+      );
+    });
+    if (matchIdx < 0) return null;
+    const [po] = unused.splice(matchIdx, 1);
+    const linked = {
+      id: String(po.id),
+      label:
+        (po.company_po_number || po.document_number || "").trim() || String(po.id),
+    };
+    claimed.add(linked.id);
+    if (needle) poByDistributor.set(needle, linked);
+    return linked;
+  };
+
+  return rows.map((row) => {
+    if (!row.po_started) return row;
+    if (row.linked_po_id) return row;
+    const matched = takeMatch(row.distributor_name);
+    if (!matched) return row;
+    return {
+      ...row,
+      linked_po_id: matched.id,
+      linked_po_label: matched.label,
+    };
+  });
 }
 
 export function ovfPoSeedVendorLines(
@@ -230,14 +569,33 @@ export function ovfCreatePoSeedVendorLines(
   },
 ): ScmVendorLine[] {
   const all = preview.vendor_lines || [];
+  let seed: ScmVendorLine[];
   if (options.remainderFromStock) {
-    const limited = takeOvfPoRemainderProducts(options.ovfId);
-    if (!limited || limited.length === 0) return all;
-    const keys = new Set(limited.map((name) => ovfProductKey(name)));
-    const matched = all.filter((ln) => keys.has(ovfProductKey(ln.product_name)));
-    return matched.length > 0 ? matched : all;
+    // Peek (not take) so React remounts / dual seed calls still see the same selection.
+    const limited = peekOvfPoRemainderProducts(options.ovfId);
+    if (!limited || limited.length === 0) {
+      seed = all;
+    } else {
+      const keys = new Set(limited.map((name) => ovfProductKey(name)));
+      const matched = all.filter((ln) => keys.has(ovfProductKey(ln.product_name)));
+      seed = matched.length > 0 ? matched : all;
+    }
+  } else {
+    seed = ovfPoSeedVendorLines(all, options.distributorParam);
   }
-  return ovfPoSeedVendorLines(all, options.distributorParam);
+
+  const qtyOverrides = peekOvfPoLineQtyOverrides(options.ovfId);
+  if (!qtyOverrides) return seed;
+
+  const filtered = seed
+    .map((ln) => {
+      const key = ovfProductKey(ln.product_name);
+      if (!key || !(key in qtyOverrides)) return null;
+      const qty = qtyOverrides[key];
+      return { ...ln, qty };
+    })
+    .filter((ln): ln is ScmVendorLine => ln != null);
+  return filtered.length > 0 ? filtered : seed;
 }
 
 /** Item description per product - same source as OVF VendorPurchaseTable (`ScmVendorLine.description`). */

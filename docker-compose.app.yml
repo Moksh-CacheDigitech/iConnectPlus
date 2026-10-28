@@ -4,8 +4,7 @@
 # Object storage: MinIO via S3_ENDPOINT_URL (AWS S3 disabled).
 # Shares Docker network `erp-net` with infra (REDIS_URL=redis://redis:6379/0, etc.).
 # Does NOT bind 80/443/5432/6379/5672/9200/9000.
-# Host ports: Nginx TLS :8443 (web+api via reverse proxy)  |  Employee :3001
-# Web/API are internal on erp-net only — do not publish :3000 / :8010.
+# Host ports: Nginx TLS :8443 | Web :3000 | API :8000 | Employee :3001
 
 networks:
   erp-net:
@@ -52,6 +51,8 @@ services:
       ACCESS_GATE_TOKEN_HOURS: ${ACCESS_GATE_TOKEN_HOURS:-12}
     expose:
       - "8000"
+    ports:
+      - "8000:8000"
     volumes:
       - erp_crm_uploads:/app/var/crm-attachments
       - erp_asset_storage:/app/var/asset-storage
@@ -127,6 +128,8 @@ services:
       API_INTERNAL_URL: http://api:8000
     expose:
       - "3000"
+    ports:
+      - "3000:3000"
     depends_on:
       api:
         condition: service_healthy

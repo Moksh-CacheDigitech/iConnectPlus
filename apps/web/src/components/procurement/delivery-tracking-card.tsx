@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { CalendarClock, MailCheck, Send, TriangleAlert } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CalendarClock, Mail, MailCheck, Send, TriangleAlert } from "lucide-react";
 
 import { DeliveryCorrespondencePanel } from "@/components/procurement/delivery-correspondence-panel";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiClientError } from "@/services/api-client";
 import {
+  dummySendScmDeliveryAcknowledgement,
+  getScmDeliveryContact,
   runScmDeliveryNotifications,
   updateScmExpectedDeliveryDate,
   type ProcOrder,
@@ -22,21 +24,55 @@ type Props = {
   order: ProcOrder;
   /** Admins can trigger the scheduled correspondence pass by hand. */
   isAdmin: boolean;
+  /** True once any receipt/GRN qty has been recorded on this PO. */
+  grnStarted?: boolean;
+  /** When true, Record GRN stays locked until acknowledgement is sent. */
+  lockGrnUntilAck?: boolean;
   onSaved: () => void;
 };
 
 /**
- * Expected delivery date and the automated correspondence around it: the
- * customer is acknowledged once, the distributor is chased every 10 days until
- * an ETD exists, and the customer is updated whenever that date changes.
+ * Expected delivery date and customer acknowledgement.
+ * SMTP will replace the dummy send later; until then Send marks acknowledgement
+ * and unlocks Record GRN (once, before the first GRN).
  */
-export function DeliveryTrackingCard({ order, isAdmin, onSaved }: Props) {
+export function DeliveryTrackingCard({
+  order,
+  isAdmin,
+  grnStarted = false,
+  lockGrnUntilAck = false,
+  onSaved,
+}: Props) {
   const [etd, setEtd] = useState(dateOnly(order.expected_delivery_date));
   const [notifyCustomer, setNotifyCustomer] = useState(true);
+  const [email, setEmail] = useState("");
+  const [crmEmail, setCrmEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [correspondenceKey, setCorrespondenceKey] = useState(0);
+
+  const ackSent = Boolean(order.customer_ack_sent_at);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const contact = await getScmDeliveryContact(order.id);
+        if (cancelled) return;
+        const fromCrm = (contact.crm_email || contact.email || "").trim();
+        setCrmEmail(fromCrm || null);
+        setEmail(fromCrm);
+      } catch {
+        if (!cancelled) {
+          setCrmEmail(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [order.id]);
 
   async function saveEtd() {
     setBusy(true);
@@ -56,6 +92,28 @@ export function DeliveryTrackingCard({ order, isAdmin, onSaved }: Props) {
       onSaved();
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Failed to save delivery date");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendDummyAck() {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const row = await dummySendScmDeliveryAcknowledgement(order.id, {
+        email: email.trim() || null,
+      });
+      setNotice(row.message);
+      setCorrespondenceKey((k) => k + 1);
+      onSaved();
+    } catch (err) {
+      setError(
+        err instanceof ApiClientError
+          ? err.message
+          : "Failed to send acknowledgement",
+      );
     } finally {
       setBusy(false);
     }
@@ -92,12 +150,23 @@ export function DeliveryTrackingCard({ order, isAdmin, onSaved }: Props) {
           <div>
             <h2 className="text-base font-extrabold tracking-tight">Delivery Tracking</h2>
             <p className="text-xs text-muted-foreground">
-              Order acknowledgement, distributor ETD chase, and customer updates run
-              automatically.
+              {lockGrnUntilAck
+                ? "Send acknowledgement once to unlock Record GRN. SMTP will be wired later — Send is a dummy for now."
+                : ackSent || grnStarted
+                  ? "Acknowledgement is only required once before the first GRN. Further receipts stay unlocked."
+                  : "Expected delivery date and customer correspondence."}
             </p>
           </div>
         </div>
-        {awaitingEtd ? (
+        {ackSent ? (
+          <Badge className="rounded-full border-transparent bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200">
+            Acknowledgement sent
+          </Badge>
+        ) : grnStarted ? (
+          <Badge className="rounded-full border-transparent bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200">
+            GRN started — ack not required again
+          </Badge>
+        ) : awaitingEtd ? (
           <Badge className="rounded-full border-transparent bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold text-amber-900 dark:bg-amber-900/50 dark:text-amber-100">
             Awaiting ETD from distributor
           </Badge>
@@ -141,6 +210,46 @@ export function DeliveryTrackingCard({ order, isAdmin, onSaved }: Props) {
           <dd className="mt-0.5 font-semibold">{dateOnly(order.etd_confirmed_at) || "-"}</dd>
         </div>
       </dl>
+
+      <div className="mt-4 space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="min-w-[220px] flex-1 space-y-1.5">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              <Mail className="size-3.5" aria-hidden />
+              Customer email
+            </span>
+            <Input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="customer@company.com"
+              disabled={busy || ackSent}
+              className="h-9 cursor-text text-[13px] transition-colors duration-200"
+              aria-label="Customer email for acknowledgement"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {crmEmail
+                ? `CRM company email: ${crmEmail}. You can change it before sending.`
+                : "No email on the CRM company — enter one to send."}
+            </p>
+          </label>
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy || ackSent || !email.trim()}
+            className="mb-1 cursor-pointer transition-colors duration-200"
+            onClick={() => void sendDummyAck()}
+          >
+            <Send className="mr-1.5 size-3.5" />
+            {ackSent ? "Sent" : "Send acknowledgement"}
+          </Button>
+        </div>
+        {lockGrnUntilAck ? (
+          <p className="text-[11px] text-amber-800">
+            Record GRN stays locked until acknowledgement is sent once (dummy send for now).
+          </p>
+        ) : null}
+      </div>
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <label className="space-y-1.5">

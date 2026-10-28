@@ -42,6 +42,10 @@ class ProcOrderHeader(Base, *ProcTransactionMixin):
             "'received_at_warehouse','dispatched_to_site','reached_site','installed')",
             name="ck_proc_oh_delivery_milestone",
         ),
+        CheckConstraint(
+            "scm_approval_stage IS NULL OR scm_approval_stage IN ('accept_po', 'management')",
+            name="ck_proc_oh_scm_approval_stage",
+        ),
         {"schema": "procurement"},
     )
 
@@ -88,6 +92,8 @@ class ProcOrderHeader(Base, *ProcTransactionMixin):
     invoiced_amount: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="draft", index=True)
     workflow_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # Two-stage SCM issue path: accept_po → management → issued (null).
+    scm_approval_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
     workflow_instance_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("foundation.wf_instance.id", ondelete="RESTRICT"),

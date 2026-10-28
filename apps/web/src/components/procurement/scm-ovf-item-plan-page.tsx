@@ -3,38 +3,42 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ClipboardList, Package, RefreshCw, ShoppingCart, Truck } from "lucide-react";
+import { Package, RefreshCw, ShoppingCart, Truck } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { ScmOvfBookFromStockDialog } from "@/components/procurement/scm-ovf-book-from-stock-dialog";
 import { VendorSearchSelect } from "@/components/procurement/vendor-search-select";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { formatApiError } from "@/services/api-client";
 import {
   getScmOvfPreview,
   listVendorOptions,
   updateScmItemPlanVendor,
+  type ScmItemPlanLine,
   type ScmOvfPreview,
   type VendorOption,
 } from "@/services/procurement-service";
 import {
+  assignUniquePosToItemPlanRows,
+  clearOvfItemPlanSplits,
+  IN_STOCK_DISTRIBUTOR_LABEL,
+  isInStockDistributor,
+  loadOvfItemPlanSplits,
   ovfChallanHref,
   ovfCreatePoRemainderHref,
-  isInStockDistributor,
-  IN_STOCK_DISTRIBUTOR_LABEL,
-  ovfDistributorKey,
   ovfProductKey,
-  resolvePoForDistributor,
+  saveOvfItemPlanSplits,
+  ovfDistributorKey,
+  setOvfPendingItemPlanPoRows,
+  setOvfPoLineQtyOverrides,
   setOvfPoRemainderProducts,
   type OvfChallanShipSource,
+  type OvfItemPlanSplitRow,
   type OvfShipDocumentKind,
 } from "@/utils/ovf-stock";
 import { matchVendorByDistributor } from "@/utils/vendor-oem-match";
-
-function lineDistributorKey(productName: string, index: number): string {
-  return `${ovfProductKey(productName)}:${index}`;
-}
 
 function formatPlanQty(value: number | null | undefined): string {
   const n = Number(value) || 0;
@@ -46,10 +50,88 @@ function deliveryStorageKey(ovfId: string): string {
   return `ovf-item-plan-delivery:${ovfId}`;
 }
 
+function resolveDistributorLabel(
+  line: ScmItemPlanLine,
+  vendors: VendorOption[],
+): string {
+  const fetched = (line.distributor_name || "").trim();
+  if (line.source === "inventory" || isInStockDistributor(fetched)) {
+    return IN_STOCK_DISTRIBUTOR_LABEL;
+  }
+  const matched = matchVendorByDistributor(vendors, fetched);
+  return matched?.label || fetched;
+}
+
+function newRowId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `row-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function planQtyForLine(line: ScmItemPlanLine): number {
+  if (line.source === "purchase_order") return Number(line.qty) || 0;
+  return Math.max(0, Number(line.po_qty ?? line.qty) || 0);
+}
+
+function rowsFromApiLines(
+  lines: ScmItemPlanLine[],
+  vendors: VendorOption[],
+): OvfItemPlanSplitRow[] {
+  return lines.map((line, index) => {
+    const qty = planQtyForLine(line);
+    return {
+      id: newRowId(),
+      product_name: line.product_name,
+      distributor_name: resolveDistributorLabel(line, vendors),
+      source: line.source,
+      action: line.action,
+      api_line_index: index,
+      qty,
+      create_qty: qty > 0 ? qty : 0,
+      po_qty: Number(line.po_qty) || 0,
+      book_qty: Number(line.book_qty) || 0,
+      on_hand_qty: Number(line.on_hand_qty) || 0,
+      allocated_qty: Number(line.allocated_qty) || 0,
+      in_stock: Boolean(line.in_stock),
+      po_started: false,
+    };
+  });
+}
+
+function normalizeSavedRows(rows: OvfItemPlanSplitRow[]): OvfItemPlanSplitRow[] {
+  return rows.map((row, index) => {
+    const linkedPoId = (row.linked_po_id || "").trim() || null;
+    const linkedPoLabel = (row.linked_po_label || "").trim() || null;
+    // Only lock a row after a real PO was created. Opening Create PO alone must not stick.
+    const poStarted = Boolean(linkedPoId);
+    return {
+      ...row,
+      api_line_index:
+        typeof row.api_line_index === "number" && Number.isFinite(row.api_line_index)
+          ? row.api_line_index
+          : index,
+      linked_po_id: linkedPoId,
+      linked_po_label: linkedPoLabel,
+      po_started: poStarted,
+    };
+  });
+}
+
+function rowHasCreatedPo(row: OvfItemPlanSplitRow): boolean {
+  return Boolean((row.linked_po_id || "").trim());
+}
+
+function clampCreateQty(value: number, max: number): number {
+  if (!Number.isFinite(value) || value <= 0) return max > 0 ? Math.min(1, max) : 0;
+  return Math.min(max, Math.max(0, value));
+}
+
 export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
   const router = useRouter();
   const [createPoPending, startCreatePoNav] = useTransition();
   const [preview, setPreview] = useState<ScmOvfPreview | null>(null);
+  const [planRows, setPlanRows] = useState<OvfItemPlanSplitRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [vendorSaveError, setVendorSaveError] = useState<string | null>(null);
@@ -58,10 +140,16 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
   const [bookProductName, setBookProductName] = useState<string | null>(null);
   const [bookOpen, setBookOpen] = useState(false);
   const [vendors, setVendors] = useState<VendorOption[]>([]);
-  /** Per-line distributor override keyed by product+index (defaults to fetched CRM name). */
-  const [distributorByLine, setDistributorByLine] = useState<Record<string, string>>({});
-  const [savingLineKey, setSavingLineKey] = useState<string | null>(null);
+  const [savingRowId, setSavingRowId] = useState<string | null>(null);
   const saveSeqRef = useRef(0);
+
+  const persistRows = useCallback(
+    (rows: OvfItemPlanSplitRow[]) => {
+      setPlanRows(rows);
+      saveOvfItemPlanSplits(ovfId, rows);
+    },
+    [ovfId],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -77,28 +165,10 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
     };
   }, []);
 
-  const seedDistributorSelections = useCallback(
-    (ovf: ScmOvfPreview, vendorRows: VendorOption[]) => {
-      const next: Record<string, string> = {};
-      const planLines = ovf.item_plan?.lines || [];
-      planLines.forEach((line, index) => {
-        const key = lineDistributorKey(line.product_name, index);
-        const fetched = (line.distributor_name || "").trim();
-        if (line.source === "inventory" || isInStockDistributor(fetched)) {
-          next[key] = IN_STOCK_DISTRIBUTOR_LABEL;
-          return;
-        }
-        const matched = matchVendorByDistributor(vendorRows, fetched);
-        next[key] = matched?.label || fetched;
-      });
-      setDistributorByLine(next);
-    },
-    [],
-  );
-
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setVendorSaveError(null);
     try {
       const [ovf, vendorRows] = await Promise.all([
         getScmOvfPreview(ovfId),
@@ -106,7 +176,20 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
       ]);
       setPreview(ovf);
       setVendors(vendorRows);
-      seedDistributorSelections(ovf, vendorRows);
+      const apiLines = ovf.item_plan?.lines || [];
+      const saved = loadOvfItemPlanSplits(ovfId);
+      if (saved && saved.length > 0) {
+        const normalized = assignUniquePosToItemPlanRows(
+          normalizeSavedRows(saved),
+          ovf.purchase_orders,
+        );
+        setPlanRows(normalized);
+        saveOvfItemPlanSplits(ovfId, normalized);
+      } else {
+        const next = rowsFromApiLines(apiLines, vendorRows);
+        setPlanRows(next);
+        saveOvfItemPlanSplits(ovfId, next);
+      }
       const recommended = ovf.item_plan?.delivery === "separate" ? "separate" : "together";
       const stored =
         typeof window !== "undefined"
@@ -118,13 +201,12 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [ovfId, seedDistributorSelections]);
+  }, [ovfId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const lines = preview?.item_plan?.lines || [];
   const bookedProducts = (preview?.stock_availability || []).filter(
     (row) => Number(row.allocated_qty) > 0,
   ).length;
@@ -165,103 +247,120 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
     setBookOpen(true);
   }
 
-  /** Selected distributor for a plan line (dropdown override or CRM default). */
-  function lineVendorName(
-    line: { product_name: string; distributor_name?: string | null },
-    index: number,
-  ): string {
-    const key = lineDistributorKey(line.product_name, index);
-    return (distributorByLine[key] || line.distributor_name || "").trim();
+  function updateCreateQty(rowId: string, raw: string) {
+    persistRows(
+      planRows.map((row) => {
+        if (row.id !== rowId) return row;
+        const parsed = Number(raw);
+        return {
+          ...row,
+          create_qty: clampCreateQty(parsed, row.qty),
+        };
+      }),
+    );
   }
 
-  async function persistDistributor(
-    line: { product_name: string },
-    index: number,
-    label: string,
-  ) {
-    const lineKey = lineDistributorKey(line.product_name, index);
+  async function persistDistributor(row: OvfItemPlanSplitRow, label: string) {
     const distributorName = isInStockDistributor(label)
       ? IN_STOCK_DISTRIBUTOR_LABEL
       : label.trim();
     if (!distributorName) return;
 
-    setDistributorByLine((current) => ({
-      ...current,
-      [lineKey]: distributorName,
-    }));
+    const nextRows = planRows.map((current) =>
+      current.id === row.id ? { ...current, distributor_name: distributorName } : current,
+    );
+    persistRows(nextRows);
     setVendorSaveError(null);
-    setSavingLineKey(lineKey);
+    setSavingRowId(row.id);
     const seq = ++saveSeqRef.current;
     try {
       const updated = await updateScmItemPlanVendor(ovfId, {
-        product_name: line.product_name,
-        line_index: index,
+        product_name: row.product_name,
+        line_index: row.api_line_index,
         distributor_name: distributorName,
       });
       if (seq !== saveSeqRef.current) return;
       setPreview(updated);
-      seedDistributorSelections(updated, vendors);
     } catch (err) {
       if (seq !== saveSeqRef.current) return;
       setVendorSaveError(formatApiError(err, "Failed to save vendor selection"));
       void load();
     } finally {
-      if (seq === saveSeqRef.current) setSavingLineKey(null);
+      if (seq === saveSeqRef.current) setSavingRowId(null);
     }
   }
 
-  /**
-   * All products on this OVF that share the same selected distributor and still need a PO.
-   * Create PO opens one combined draft for the whole group - not a single line.
-   */
-  function productsNeedingPoForDistributor(distributorName: string): string[] {
-    const needle = ovfDistributorKey(distributorName);
-    if (!needle || isInStockDistributor(distributorName) || !preview) return [];
-    if (resolvePoForDistributor(preview, distributorName)) return [];
-
-    const names: string[] = [];
-    const seen = new Set<string>();
-    lines.forEach((line, index) => {
-      const vendorName = lineVendorName(line, index);
-      if (ovfDistributorKey(vendorName) !== needle) return;
-      if (isInStockDistributor(vendorName)) return;
-
-      const needsPo =
-        line.source === "purchase_order" ||
-        (line.source === "inventory" &&
-          (line.action === "stock_short" || Number(line.po_qty) > 0));
-      if (!needsPo) return;
-
-      const productKey = ovfProductKey(line.product_name);
-      if (!productKey || seen.has(productKey)) return;
-      seen.add(productKey);
-      names.push(line.product_name);
-    });
-    return names;
-  }
-
-  function openCreatePoForDistributor(distributorName: string) {
-    const vendor = distributorName.trim();
+  function openCreatePoForRow(row: OvfItemPlanSplitRow) {
+    const vendor = row.distributor_name.trim();
     if (!vendor || isInStockDistributor(vendor)) return;
-    const products = productsNeedingPoForDistributor(vendor);
-    if (products.length === 0) return;
-    setOvfPoRemainderProducts(ovfId, products);
+
+    const vendorKey = ovfDistributorKey(vendor);
+    // One Create PO for every open row that shares this distributor.
+    const groupRows = planRows.filter((current) => {
+      if (rowHasCreatedPo(current)) return false;
+      if (isInStockDistributor(current.distributor_name)) return false;
+      if (ovfDistributorKey(current.distributor_name) !== vendorKey) return false;
+      return clampCreateQty(current.create_qty, current.qty) > 0;
+    });
+    if (groupRows.length === 0) return;
+
+    const groupIds = new Set(groupRows.map((current) => current.id));
+    const qtyOverrides: Record<string, number> = {};
+    const productNames: string[] = [];
+    const pendingRowIds: string[] = [];
+    const nextRows: OvfItemPlanSplitRow[] = [];
+
+    for (const current of planRows) {
+      if (!groupIds.has(current.id)) {
+        nextRows.push(current);
+        continue;
+      }
+      const createQty = clampCreateQty(current.create_qty, current.qty);
+      const remainderQty = Math.max(0, Number((current.qty - createQty).toFixed(4)));
+      pendingRowIds.push(current.id);
+      productNames.push(current.product_name);
+      qtyOverrides[current.product_name] =
+        (Number(qtyOverrides[current.product_name]) || 0) + createQty;
+      nextRows.push({
+        ...current,
+        qty: createQty,
+        create_qty: createQty,
+        // Stay unlocked until the PO is actually saved.
+        po_started: rowHasCreatedPo(current),
+        linked_po_id: current.linked_po_id ?? null,
+        linked_po_label: current.linked_po_label ?? null,
+      });
+      if (remainderQty > 0) {
+        nextRows.push({
+          ...current,
+          id: newRowId(),
+          qty: remainderQty,
+          create_qty: remainderQty,
+          po_started: false,
+          linked_po_id: null,
+          linked_po_label: null,
+        });
+      }
+    }
+
+    persistRows(nextRows);
+    setOvfPendingItemPlanPoRows(ovfId, pendingRowIds);
+    setOvfPoRemainderProducts(ovfId, productNames);
+    setOvfPoLineQtyOverrides(ovfId, qtyOverrides);
     startCreatePoNav(() => {
       router.push(ovfCreatePoRemainderHref(ovfId, vendor));
     });
   }
 
-  /** Products whose distributor is currently IN STOCK (eligible for book-from-inventory). */
-  const inStockBookProductNames = lines
-    .map((line, index) => {
-      const vendorName = lineVendorName(line, index);
-      if (!isInStockDistributor(vendorName)) return null;
+  const inStockBookProductNames = planRows
+    .map((row) => {
+      if (!isInStockDistributor(row.distributor_name)) return null;
       const avail = (preview?.stock_availability || []).find(
-        (row) => ovfProductKey(row.product_name) === ovfProductKey(line.product_name),
+        (item) => ovfProductKey(item.product_name) === ovfProductKey(row.product_name),
       );
       const remaining = Number(avail?.remaining_qty) || 0;
       if (remaining <= 0) return null;
-      return line.product_name;
+      return row.product_name;
     })
     .filter((name): name is string => Boolean(name));
 
@@ -269,8 +368,8 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
     <div className="space-y-4">
       <PageHeader
         title={preview ? `Item plan · ${preview.ovf_no}` : "Item plan"}
-        backHref="/procurement/scm"
-        backLabel="SCM Queue"
+        backHref={`/procurement/scm/ovf/${ovfId}`}
+        backText="View OVF"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -279,23 +378,14 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
               size="sm"
               className="cursor-pointer transition-colors duration-200"
               disabled={loading}
-              onClick={() => void load()}
+              onClick={() => {
+                clearOvfItemPlanSplits(ovfId);
+                void load();
+              }}
             >
               <RefreshCw className={cn("mr-1.5 size-3.5", loading && "animate-spin")} />
               Refresh
             </Button>
-            {preview ? (
-              <Link
-                href={`/procurement/scm/ovf/${ovfId}`}
-                className={cn(
-                  buttonVariants({ size: "sm", variant: "outline" }),
-                  "cursor-pointer transition-colors duration-200",
-                )}
-              >
-                <ClipboardList className="mr-1.5 size-3.5" />
-                View OVF
-              </Link>
-            ) : null}
           </div>
         }
       />
@@ -320,7 +410,13 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
       {preview ? (
         <>
           <section className="space-y-3 rounded-lg border-2 border-foreground/20 bg-card p-4 shadow-sm">
-            <h2 className="text-base font-semibold tracking-tight">Items</h2>
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold tracking-tight">Items</h2>
+              <p className="text-xs text-muted-foreground">
+                Set Qty to the amount for the next PO. Any remainder stays as a new row below so you
+                can create another PO later.
+              </p>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="border-b border-border bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
@@ -332,67 +428,113 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {lines.length === 0 ? (
+                  {planRows.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-3 py-8 text-center text-muted-foreground">
                         No vendor charge lines on this OVF.
                       </td>
                     </tr>
                   ) : (
-                    lines.map((line, index) => {
+                    planRows.map((row) => {
                       const avail = (preview.stock_availability || []).find(
-                        (row) => ovfProductKey(row.product_name) === ovfProductKey(line.product_name),
+                        (item) =>
+                          ovfProductKey(item.product_name) === ovfProductKey(row.product_name),
                       );
                       const allocated = Number(avail?.allocated_qty) || 0;
                       const remaining = Number(avail?.remaining_qty) || 0;
-                      const fetchedVendorName = (line.distributor_name || "").trim();
-                      const lineKey = lineDistributorKey(line.product_name, index);
-                      const vendorName =
-                        (distributorByLine[lineKey] || fetchedVendorName).trim();
+                      const vendorName = row.distributor_name;
                       const canBookInventory =
                         isInStockDistributor(vendorName) && remaining > 0 && !onHold;
-                      const canCreatePoForShortfall =
-                        line.source === "inventory" &&
-                        line.action === "stock_short" &&
-                        Number(line.po_qty) > 0 &&
+                      const poEligible =
+                        row.qty > 0 &&
                         !onHold &&
-                        !isInStockDistributor(vendorName);
-                      const linkedPo =
-                        line.source === "purchase_order" && vendorName && preview
-                          ? resolvePoForDistributor(preview, vendorName) ||
-                            (fetchedVendorName
-                              ? resolvePoForDistributor(preview, fetchedVendorName)
-                              : null)
-                          : null;
-                      const canCreatePo =
-                        line.source === "purchase_order" &&
-                        Boolean(vendorName) &&
+                        (row.source === "purchase_order" ||
+                          (row.source === "inventory" &&
+                            (row.action === "stock_short" || row.po_qty > 0)));
+                      const needsPo =
+                        poEligible &&
                         !isInStockDistributor(vendorName) &&
-                        !linkedPo &&
-                        !onHold;
-                      const canChangeDistributor = !linkedPo && !onHold;
-                      const selectedVendorForPo =
-                        vendorName && !isInStockDistributor(vendorName) ? vendorName : "";
+                        Boolean(vendorName);
+                      const hasCreatedPo = rowHasCreatedPo(row);
+                      const linkedPo = hasCreatedPo
+                        ? {
+                            id: String(row.linked_po_id),
+                            label:
+                              (row.linked_po_label || "").trim() ||
+                              String(row.linked_po_id),
+                            status: null as string | null,
+                          }
+                        : null;
+                      const canCreatePo =
+                        needsPo && !hasCreatedPo && row.create_qty > 0;
+                      const qtyEditable =
+                        poEligible &&
+                        !hasCreatedPo &&
+                        !isInStockDistributor(vendorName);
+                      const canChangeDistributor = !hasCreatedPo && !onHold;
                       return (
-                        <tr key={`${line.product_name}-${index}`} className="border-b border-border/70">
-                          <td className="px-3 py-2 font-medium">{line.product_name}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{formatPlanQty(line.qty)}</td>
+                        <tr key={row.id} className="border-b border-border/70">
+                          <td className="px-3 py-2 font-medium">
+                            <span className="inline-flex flex-col gap-0.5">
+                              <span>{row.product_name}</span>
+                              {hasCreatedPo ? (
+                                <span className="text-[11px] font-medium text-sky-800">
+                                  PO qty locked
+                                </span>
+                              ) : null}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {qtyEditable ? (
+                              <div className="inline-flex flex-col items-end gap-0.5">
+                                <Input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={
+                                    Number.isFinite(row.create_qty)
+                                      ? String(row.create_qty)
+                                      : ""
+                                  }
+                                  aria-label={`PO quantity for ${row.product_name}`}
+                                  className="h-8 w-[5.5rem] cursor-pointer text-right tabular-nums transition-colors duration-200"
+                                  onChange={(event) => {
+                                    const raw = event.target.value.replace(/[^\d.]/g, "");
+                                    updateCreateQty(row.id, raw);
+                                  }}
+                                />
+                                {row.create_qty < row.qty ? (
+                                  <span className="text-[11px] text-muted-foreground">
+                                    of {formatPlanQty(row.qty)} · remainder{" "}
+                                    {formatPlanQty(row.qty - row.create_qty)}
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-muted-foreground">
+                                    available {formatPlanQty(row.qty)}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              formatPlanQty(row.qty)
+                            )}
+                          </td>
                           <td className="px-3 py-2">
                             <VendorSearchSelect
                               value={vendorName}
                               vendors={vendors}
                               includeInStock
-                              disabled={!canChangeDistributor || savingLineKey === lineKey}
+                              disabled={!canChangeDistributor || savingRowId === row.id}
                               placeholder="Select vendor…"
                               onChange={(label) => {
-                                void persistDistributor(line, index, label);
+                                void persistDistributor(row, label);
                               }}
                             />
                           </td>
                           <td className="px-3 py-2">
                             <div className="flex flex-wrap items-center gap-2">
                               {allocated > 0 && isInStockDistributor(vendorName) ? (
-                                <span className="text-xs font-medium text-emerald-800">Stock booked</span>
+                                <span className="text-xs font-medium text-emerald-800">
+                                  Stock booked
+                                </span>
                               ) : null}
                               {canBookInventory ? (
                                 <Button
@@ -400,7 +542,7 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
                                   size="sm"
                                   variant="outline"
                                   className="cursor-pointer transition-colors duration-200"
-                                  onClick={() => openBookDialog(line.product_name)}
+                                  onClick={() => openBookDialog(row.product_name)}
                                 >
                                   <Package className="mr-1.5 size-3.5" />
                                   Book from inventory
@@ -416,46 +558,33 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
                                 >
                                   {linkedPo.label}
                                 </Link>
-                              ) : canCreatePo ? (
+                              ) : null}
+                              {canCreatePo ? (
                                 <Button
                                   type="button"
                                   size="sm"
                                   className="cursor-pointer transition-colors duration-200"
-                                  disabled={createPoPending}
-                                  onClick={() =>
-                                    openCreatePoForDistributor(selectedVendorForPo || vendorName)
-                                  }
-                                >
-                                  <ShoppingCart className="mr-1.5 size-3.5" />
-                                  {createPoPending ? "Opening…" : "Create PO"}
-                                </Button>
-                              ) : canCreatePoForShortfall ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  className="cursor-pointer transition-colors duration-200"
-                                  disabled={createPoPending || !selectedVendorForPo}
+                                  disabled={createPoPending || row.create_qty <= 0}
                                   title={
-                                    selectedVendorForPo
-                                      ? undefined
-                                      : "Select a vendor before creating a PO"
+                                    vendorName ? undefined : "Select a vendor before creating a PO"
                                   }
-                                  onClick={() => openCreatePoForDistributor(selectedVendorForPo)}
+                                  onClick={() => openCreatePoForRow(row)}
                                 >
                                   <ShoppingCart className="mr-1.5 size-3.5" />
-                                  {createPoPending ? "Opening…" : "Create PO"}
+                                  {createPoPending
+                                    ? "Opening…"
+                                    : row.create_qty < row.qty
+                                      ? `Create PO (${formatPlanQty(row.create_qty)})`
+                                      : "Create PO"}
                                 </Button>
-                              ) : onHold && line.source === "purchase_order" ? (
+                              ) : onHold && (row.source === "purchase_order" || row.po_qty > 0) ? (
                                 <span className="text-xs text-muted-foreground">On hold</span>
                               ) : !canBookInventory &&
                                 !linkedPo &&
                                 !canCreatePo &&
-                                !canCreatePoForShortfall &&
                                 !(allocated > 0 && isInStockDistributor(vendorName)) ? (
                                 <span className="text-xs text-muted-foreground">
-                                  {line.action === "no_vendor" && !selectedVendorForPo
-                                    ? "Select vendor"
-                                    : "-"}
+                                  {!vendorName ? "Select vendor" : "-"}
                                 </span>
                               ) : null}
                             </div>
@@ -470,48 +599,51 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
           </section>
 
           {showDelivery ? (
-          <section className="space-y-3 rounded-lg border border-border bg-card p-4 shadow-sm">
-            <h2 className="text-sm font-semibold tracking-tight">
-              {showTogetherSeparate ? "Deliver booked items" : "Deliver booked stock"}
-            </h2>
-            {showTogetherSeparate ? (
-              <div className="space-y-2">
-                {(
-                  [
-                    {
-                      value: "together" as const,
-                      title: "Together",
-                      detail: "Send all booked items on one billing / delivery challan.",
-                    },
-                    {
-                      value: "separate" as const,
-                      title: "Separately",
-                      detail: "Ship booked stock now. Vendor PO items can go on a later document.",
-                    },
-                  ] as const
-                ).map((option) => (
-                  <label
-                    key={option.value}
-                    className={cn(
-                      "flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 transition-colors duration-200",
-                      "border-border hover:bg-muted/40 has-[:checked]:border-sky-400 has-[:checked]:bg-sky-50/70",
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      name="ovf-item-plan-delivery"
-                      className="mt-0.5 cursor-pointer accent-sky-700"
-                      checked={delivery === option.value}
-                      onChange={() => chooseDelivery(option.value)}
-                    />
-                    <span className="min-w-0 space-y-0.5">
-                      <span className="block text-sm font-medium text-foreground">{option.title}</span>
-                      <span className="block text-xs text-muted-foreground">{option.detail}</span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            ) : null}
+            <section className="space-y-3 rounded-lg border border-border bg-card p-4 shadow-sm">
+              <h2 className="text-sm font-semibold tracking-tight">
+                {showTogetherSeparate ? "Deliver booked items" : "Deliver booked stock"}
+              </h2>
+              {showTogetherSeparate ? (
+                <div className="space-y-2">
+                  {(
+                    [
+                      {
+                        value: "together" as const,
+                        title: "Together",
+                        detail: "Send all booked items on one billing / delivery challan.",
+                      },
+                      {
+                        value: "separate" as const,
+                        title: "Separately",
+                        detail:
+                          "Ship booked stock now. Vendor PO items can go on a later document.",
+                      },
+                    ] as const
+                  ).map((option) => (
+                    <label
+                      key={option.value}
+                      className={cn(
+                        "flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 transition-colors duration-200",
+                        "border-border hover:bg-muted/40 has-[:checked]:border-sky-400 has-[:checked]:bg-sky-50/70",
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name="ovf-item-plan-delivery"
+                        className="mt-0.5 cursor-pointer accent-sky-700"
+                        checked={delivery === option.value}
+                        onChange={() => chooseDelivery(option.value)}
+                      />
+                      <span className="min-w-0 space-y-0.5">
+                        <span className="block text-sm font-medium text-foreground">
+                          {option.title}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">{option.detail}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
 
               <p className="text-xs font-medium text-foreground">Document type</p>
               <div className="flex flex-wrap gap-2">
@@ -585,7 +717,7 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
                   </>
                 ) : null}
               </div>
-          </section>
+            </section>
           ) : null}
         </>
       ) : null}

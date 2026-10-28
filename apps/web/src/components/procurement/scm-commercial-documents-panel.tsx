@@ -39,6 +39,7 @@ function categoryLabel(category: string): string {
     customer_po: "Customer PO",
     vendor_quote: "Vendor Quote",
     vendor_invoice: "Vendor invoice",
+    ovf_pdf: "OVF PDF",
     other: "Other",
   };
   return labels[category] || category.replaceAll("_", " ");
@@ -66,6 +67,7 @@ export function ScmCommercialDocumentsPanel({
   onChanged,
   draftOnly = false,
   onDraftDocumentsChange,
+  refreshKey = 0,
 }: {
   ovfId?: string | null;
   orderId?: string | null;
@@ -81,6 +83,8 @@ export function ScmCommercialDocumentsPanel({
   /** Queue files before a PO exists; the parent uploads them after PO creation. */
   draftOnly?: boolean;
   onDraftDocumentsChange?: (documents: PendingScmCommercialDocument[]) => void;
+  /** Bump to force a reload (e.g. after auto-attaching OVF PDF). */
+  refreshKey?: number;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
@@ -128,7 +132,7 @@ export function ScmCommercialDocumentsPanel({
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftOnly, orderId, ovfId]);
+  }, [draftOnly, orderId, ovfId, refreshKey]);
 
   useEffect(() => {
     void load();
@@ -428,9 +432,9 @@ export function ScmCommercialDocumentsPanel({
       ) : !draftOnly && rows.length === 0 ? (
         <p className="text-xs text-muted-foreground">No documents attached yet.</p>
       ) : !draftOnly && compact ? (
-        <div className="max-h-52 overflow-auto rounded-md border border-border">
+        <div className="rounded-md border border-border">
           <table className="w-full min-w-[520px] text-left text-xs">
-            <thead className="sticky top-0 z-[1] border-b border-border bg-muted/60 text-[10px] uppercase tracking-wide text-muted-foreground">
+            <thead className="border-b border-border bg-muted/60 text-[10px] uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="px-2 py-1.5 font-medium">File</th>
                 <th className="px-2 py-1.5 font-medium">Source</th>

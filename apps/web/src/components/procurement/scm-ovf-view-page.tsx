@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -33,6 +41,7 @@ import {
   scmHoldSinceDisplay,
 } from "@/utils/scm-ovf-hold";
 import { downloadScmOvfPdf } from "@/utils/scm-ovf-pdf";
+import { ensureScmOvfPdfAttached } from "@/utils/scm-ovf-pdf-attach";
 import { ApiClientError } from "@/services/api-client";
 import {
   getScmOvfPreview,
@@ -154,26 +163,38 @@ function normalizeChargeOnBlur(value: string): string {
   return value;
 }
 
+function scmOvfStatusLabel(status: ScmOvfQueueStatus): string {
+  switch (status) {
+    case "open":
+      return "Open";
+    case "partial":
+      return "Partial";
+    case "close":
+      return "Close";
+    case "draft":
+      return "Draft";
+    case "hold":
+      return "Hold";
+    default: {
+      const _exhaustive: never = status;
+      return _exhaustive;
+    }
+  }
+}
+
 function ScmOvfStatusBadge({ status }: { status: ScmOvfQueueStatus }) {
-  const label =
-    status === "open"
-      ? "Open"
-      : status === "close"
-        ? "Close"
-        : status === "draft"
-          ? "Draft"
-          : "Hold";
   return (
     <span
       className={cn(
         "inline-flex rounded-md border px-2 py-0.5 text-xs font-medium",
         status === "open" && "border-amber-300 bg-amber-50 text-amber-900",
+        status === "partial" && "border-orange-300 bg-orange-50 text-orange-900",
         status === "close" && "border-emerald-300 bg-emerald-50 text-emerald-900",
         status === "draft" && "border-sky-300 bg-sky-50 text-sky-900",
         status === "hold" && "border-red-300 bg-red-50 text-red-800",
       )}
     >
-      {label}
+      {scmOvfStatusLabel(status)}
     </span>
   );
 }
@@ -625,6 +646,8 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
   const [holdBusy, setHoldBusy] = useState(false);
   const [holdRemark, setHoldRemark] = useState("");
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [ovfDocsRefreshKey, setOvfDocsRefreshKey] = useState(0);
+  const ovfPdfAttachKeyRef = useRef<string | null>(null);
   const [freight, setFreight] = useState("0");
   const [financeCostPct, setFinanceCostPct] = useState("0");
 
@@ -665,6 +688,29 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** Persist Download PDF into OVF documents (approval pack uses the same file). */
+  useEffect(() => {
+    if (!preview?.ovf_id || !preview.branch_id) return;
+    const attachKey = String(preview.ovf_id);
+    if (ovfPdfAttachKeyRef.current === attachKey) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        await ensureScmOvfPdfAttached(preview.ovf_id);
+        if (cancelled) return;
+        ovfPdfAttachKeyRef.current = attachKey;
+        setOvfDocsRefreshKey((key) => key + 1);
+      } catch {
+        // Allow retry on remount / next preview load.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [preview]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -949,6 +995,12 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
     setPdfBusy(true);
     setError(null);
     try {
+      await ensureScmOvfPdfAttached(preview.ovf_id)
+        .then(() => {
+          ovfPdfAttachKeyRef.current = String(preview.ovf_id);
+          setOvfDocsRefreshKey((key) => key + 1);
+        })
+        .catch(() => null);
       await downloadScmOvfPdf(preview);
     } catch {
       setError("Could not generate OVF PDF. Try again.");
@@ -1443,6 +1495,7 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
             description="Sales attachments on this OVF - included when the PO is sent for approval."
             allowUpload={false}
             compact
+            refreshKey={ovfDocsRefreshKey}
           />
         </>
       ) : null}
