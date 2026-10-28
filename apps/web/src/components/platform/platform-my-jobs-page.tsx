@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Briefcase,
+  FileDown,
   FolderKanban,
   Handshake,
+  Package,
   RefreshCw,
   Users,
   type LucideIcon,
@@ -13,6 +15,7 @@ import {
 
 import { FinanceStatusBadge } from "@/components/finance/finance-status-badge";
 import { PageHeader } from "@/components/layout/page-header";
+import { InvoiceGenerationTaskDialog } from "@/components/procurement/invoice-generation-task-dialog";
 import { Button } from "@/components/ui/button";
 import { useAuthUser } from "@/hooks/use-auth-user";
 import { isErpAdmin } from "@/lib/module-access";
@@ -21,12 +24,18 @@ import {
   loadPlatformMyJobs,
   totalPlatformMyJobCount,
   type PlatformMyJobModuleSection,
+  type PlatformMyJobRow,
 } from "@/services/platform-my-jobs-service";
+import {
+  downloadInvoiceJobGrnPdf,
+  downloadInvoiceJobPoPdf,
+} from "@/utils/invoice-job-pdf";
 
 const MODULE_ICONS: Record<string, LucideIcon> = {
   crm: Handshake,
   projects: FolderKanban,
   hr: Users,
+  procurement: Package,
 };
 
 export function PlatformMyJobsPage() {
@@ -34,6 +43,9 @@ export function PlatformMyJobsPage() {
   const [sections, setSections] = useState<PlatformMyJobModuleSection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [invoiceTaskId, setInvoiceTaskId] = useState<string | null>(null);
+  const [pdfBusyKey, setPdfBusyKey] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,6 +73,42 @@ export function PlatformMyJobsPage() {
   const total = totalPlatformMyJobCount(sections);
   const withJobs = sections.filter((s) => s.jobs.length > 0);
   const withErrors = sections.filter((s) => s.error && s.jobs.length === 0);
+
+  async function onDownloadPo(job: PlatformMyJobRow) {
+    if (!job.orderId) return;
+    const key = `po-${job.id}`;
+    setPdfBusyKey(key);
+    setPdfError(null);
+    try {
+      await downloadInvoiceJobPoPdf(job.orderId);
+    } catch (err) {
+      setPdfError(
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : "Failed to download PO PDF",
+      );
+    } finally {
+      setPdfBusyKey(null);
+    }
+  }
+
+  async function onDownloadGrn(job: PlatformMyJobRow) {
+    if (!job.orderId || !job.receiptBatchId) return;
+    const key = `grn-${job.id}`;
+    setPdfBusyKey(key);
+    setPdfError(null);
+    try {
+      await downloadInvoiceJobGrnPdf(job.orderId, job.receiptBatchId);
+    } catch (err) {
+      setPdfError(
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : "Failed to download GRN PDF",
+      );
+    } finally {
+      setPdfBusyKey(null);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -94,6 +142,15 @@ export function PlatformMyJobsPage() {
         </div>
       ) : null}
 
+      {pdfError ? (
+        <div
+          role="alert"
+          className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+        >
+          {pdfError}
+        </div>
+      ) : null}
+
       {loading || authLoading ? (
         <div className="space-y-4" aria-busy="true" aria-live="polite">
           {[0, 1].map((i) => (
@@ -111,8 +168,8 @@ export function PlatformMyJobsPage() {
           <div className="space-y-1">
             <p className="text-sm font-semibold text-foreground">No jobs assigned</p>
             <p className="max-w-md text-sm text-muted-foreground">
-              When CRM approvals, project delivery steps, or HR requests are assigned to you,
-              they appear here grouped by module.
+              When CRM approvals, project delivery steps, HR requests, or procurement invoice
+              jobs are assigned to you, they appear here grouped by module.
             </p>
           </div>
         </div>
@@ -182,33 +239,88 @@ export function PlatformMyJobsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {section.jobs.map((job) => (
-                        <tr
-                          key={job.id}
-                          className="border-b border-border/50 last:border-0 transition-colors duration-150 hover:bg-muted/30"
-                        >
-                          <td className="px-4 py-3 font-medium text-foreground sm:px-5">
-                            {job.title}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground sm:px-5">
-                            {job.reference || "—"}
-                          </td>
-                          <td className="max-w-[280px] truncate px-4 py-3 text-muted-foreground sm:px-5">
-                            {job.detail || "—"}
-                          </td>
-                          <td className="px-4 py-3 sm:px-5">
-                            <FinanceStatusBadge status={job.status} />
-                          </td>
-                          <td className="px-4 py-3 text-right sm:px-5">
-                            <Link
-                              href={job.href}
-                              className="inline-flex cursor-pointer items-center rounded-md border border-border/80 bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-colors duration-200 hover:bg-muted"
-                            >
-                              Open
-                            </Link>
-                          </td>
-                        </tr>
-                      ))}
+                      {section.jobs.map((job) => {
+                        const showPdf =
+                          job.openMode === "invoice_generation_dialog" &&
+                          Boolean(job.orderId);
+                        const poBusy = pdfBusyKey === `po-${job.id}`;
+                        const grnBusy = pdfBusyKey === `grn-${job.id}`;
+                        return (
+                          <tr
+                            key={job.id}
+                            className="border-b border-border/50 last:border-0 transition-colors duration-150 hover:bg-muted/30"
+                          >
+                            <td className="px-4 py-3 font-medium text-foreground sm:px-5">
+                              {job.title}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground sm:px-5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span>{job.reference || "—"}</span>
+                                {showPdf ? (
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 cursor-pointer gap-1 px-2 text-xs transition-colors duration-200"
+                                      disabled={Boolean(pdfBusyKey)}
+                                      title="Download PO print PDF"
+                                      aria-label="Download PO print PDF"
+                                      onClick={() => void onDownloadPo(job)}
+                                    >
+                                      <FileDown className="size-3.5" aria-hidden />
+                                      {poBusy ? "PO…" : "PO PDF"}
+                                    </Button>
+                                    {job.receiptBatchId ? (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 cursor-pointer gap-1 px-2 text-xs transition-colors duration-200"
+                                        disabled={Boolean(pdfBusyKey)}
+                                        title="Download GRN copy PDF"
+                                        aria-label="Download GRN copy PDF"
+                                        onClick={() => void onDownloadGrn(job)}
+                                      >
+                                        <FileDown className="size-3.5" aria-hidden />
+                                        {grnBusy ? "GRN…" : "GRN PDF"}
+                                      </Button>
+                                    ) : null}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </td>
+                            <td className="max-w-[280px] truncate px-4 py-3 text-muted-foreground sm:px-5">
+                              {job.detail || "—"}
+                            </td>
+                            <td className="px-4 py-3 sm:px-5">
+                              <FinanceStatusBadge status={job.status} />
+                            </td>
+                            <td className="px-4 py-3 text-right sm:px-5">
+                              {job.openMode === "invoice_generation_dialog" &&
+                              job.invoiceTaskId ? (
+                                <button
+                                  type="button"
+                                  className="inline-flex cursor-pointer items-center rounded-md border border-border/80 bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-colors duration-200 hover:bg-muted"
+                                  onClick={() => {
+                                    const id = job.invoiceTaskId;
+                                    if (id) setInvoiceTaskId(id);
+                                  }}
+                                >
+                                  Open
+                                </button>
+                              ) : (
+                                <Link
+                                  href={job.href}
+                                  className="inline-flex cursor-pointer items-center rounded-md border border-border/80 bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-colors duration-200 hover:bg-muted"
+                                >
+                                  Open
+                                </Link>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -217,6 +329,13 @@ export function PlatformMyJobsPage() {
           );
         })}
       </div>
+
+      <InvoiceGenerationTaskDialog
+        open={Boolean(invoiceTaskId)}
+        taskId={invoiceTaskId}
+        onClose={() => setInvoiceTaskId(null)}
+        onCompleted={() => void load()}
+      />
     </div>
   );
 }

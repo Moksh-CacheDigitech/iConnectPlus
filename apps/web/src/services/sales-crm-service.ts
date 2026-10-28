@@ -694,6 +694,9 @@ export type Opportunity = {
   customer_po_approved?: boolean;
   cloud_blueprint_variant?: string | null;
   product_type?: string | null;
+  has_hardware?: boolean;
+  has_software?: boolean;
+  has_services?: boolean;
   cloud_sub_product?: string | null;
   customer_mrr?: number | null;
   customer_arr?: number | null;
@@ -1062,6 +1065,41 @@ export async function getQuoteMargin(quoteId: string): Promise<QuoteMarginSummar
   return unwrap(await apiClient<QuoteMarginSummary>(`${CRM_QUOTES_API}/${quoteId}/margin`));
 }
 
+export type QuoteRevisionRow = {
+  revision_no: number;
+  avg_margin_pct: number;
+  grand_total: number;
+  total_margin_amount: number;
+  negotiation_pct: number;
+  is_current: boolean;
+  snapshotted_at?: string | null;
+  remark?: string | null;
+  has_print_payload?: boolean;
+};
+
+export type QuoteRevisionPrintPayload = {
+  revision_no: number;
+  is_current: boolean;
+  quote: Quote;
+  lines: QuoteLine[];
+};
+
+export async function listQuoteRevisions(quoteId: string): Promise<QuoteRevisionRow[]> {
+  const res = await apiClient<QuoteRevisionRow[]>(`${CRM_QUOTES_API}/${quoteId}/revisions`);
+  return asArray(res.data);
+}
+
+export async function getQuoteRevisionPrintPayload(
+  quoteId: string,
+  revisionNo: number,
+): Promise<QuoteRevisionPrintPayload> {
+  return unwrap(
+    await apiClient<QuoteRevisionPrintPayload>(
+      `${CRM_QUOTES_API}/${quoteId}/revisions/${revisionNo}/print-payload`,
+    ),
+  );
+}
+
 export async function getQuoteBlueprint(quoteId: string): Promise<BlueprintState> {
   return unwrap(await apiClient<BlueprintState>(`${CRM_QUOTES_API}/${quoteId}/blueprint`));
 }
@@ -1073,6 +1111,8 @@ export async function sendQuoteForApproval(
     assigned_user_id: string;
     assigned_user_ids?: string[];
     remarks?: string | null;
+    quotation_pdf_base64?: string | null;
+    quotation_pdf_filename?: string | null;
   },
 ): Promise<Quote> {
   return unwrap(
@@ -1392,6 +1432,8 @@ export async function sendOvfForApproval(
     remarks?: string | null;
     assigned_user_id?: string;
     assigned_user_ids?: string[];
+    ovf_pdf_base64?: string | null;
+    ovf_pdf_filename?: string | null;
   },
 ): Promise<Ovf> {
   return unwrap(
@@ -1490,7 +1532,10 @@ export async function listMyJobs(params?: {
   entity_type?: string;
   entity_id?: string;
 }): Promise<ApprovalTask[]> {
-  const res = await resourceService.list<ApprovalTask>(CRM_MY_JOBS_API, params);
+  const res = await resourceService.list<ApprovalTask>(CRM_MY_JOBS_API, {
+    page_size: 200,
+    ...params,
+  });
   return asArray(res.data);
 }
 
@@ -1504,6 +1549,7 @@ export async function decideMyJob(
     freight_weight_kg?: number;
     freight_insurance?: boolean;
     supporting_items?: Array<{
+      line_id?: string;
       product_name: string;
       qty: number;
       unit_price: number;
@@ -1585,6 +1631,18 @@ export async function requestOvfSupportingItems(
 ): Promise<Ovf> {
   return unwrap(
     await apiClient<Ovf>(`${CRM_OVF_API}/${ovfId}/request-supporting-items`, {
+      method: "POST",
+      body,
+    }),
+  );
+}
+
+export async function requestOvfSupportingItemPrices(
+  ovfId: string,
+  body: OvfSupportingItemsRequestInput = {},
+): Promise<Ovf> {
+  return unwrap(
+    await apiClient<Ovf>(`${CRM_OVF_API}/${ovfId}/request-supporting-item-prices`, {
       method: "POST",
       body,
     }),

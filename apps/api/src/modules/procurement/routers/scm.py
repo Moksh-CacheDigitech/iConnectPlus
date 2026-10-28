@@ -14,6 +14,12 @@ from modules.foundation.dependencies import require_permission
 from modules.foundation.domain.value_objects import TenantContext
 from modules.procurement.schemas import (
     OrderResponse,
+    ProcApprovalCapabilitiesResponse,
+    ProcApprovalStepOwnersGroup,
+    ProcApprovalStepOwnersReplaceRequest,
+    ProcInvoiceGenerationTaskCreateRequest,
+    ProcInvoiceGenerationTaskResponse,
+    ProcInvoiceGenerationTaskSubmitRequest,
     ScmCommercialAttachmentCreate,
     ScmCommercialAttachmentSummary,
     ScmCreateInventoryPoRequest,
@@ -21,7 +27,10 @@ from modules.procurement.schemas import (
     ScmCorrespondenceDeliveryResponse,
     ScmCorrespondenceTemplateResponse,
     ScmCorrespondenceTemplateUpsertRequest,
+    ScmDeliveryContactResponse,
     ScmDeliveryNotificationRunResponse,
+    ScmDummyDeliverySendRequest,
+    ScmDummyDeliverySendResponse,
     ScmEtdUpdateRequest,
     ScmEtdUpdateResponse,
     ScmFinalizeApprovalResponse,
@@ -52,6 +61,10 @@ from modules.procurement.schemas import (
     OvfTimelineListItemResponse,
     OvfTimelineEventRecordRequest,
     OvfTimelineResponse,
+)
+from modules.procurement.service.approval_step_owner_service import ProcApprovalStepOwnerService
+from modules.procurement.service.invoice_generation_task_service import (
+    ProcInvoiceGenerationTaskService,
 )
 from modules.procurement.service.order_service import OrderService
 from modules.procurement.service.ovf_timeline_service import OvfTimelineService
@@ -179,7 +192,8 @@ def list_scm_ovf_attachments(
 def create_scm_ovf_attachment(
     ovf_id: UUID,
     body: ScmCommercialAttachmentCreate,
-    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:create"))],
+    # Read is enough so View OVF / Approval can persist the auto OVF PDF pack.
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> APIResponse[AttachmentResponse]:
     row = ScmHandoffService(db).attach_ovf_document(
@@ -484,6 +498,45 @@ def update_scm_expected_delivery_date(
     )
 
 
+@scm_router.get(
+    "/orders/{order_id}/delivery-contact",
+    response_model=APIResponse[ScmDeliveryContactResponse],
+)
+def get_scm_delivery_contact(
+    order_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmDeliveryContactResponse]:
+    row = ScmDeliveryNotificationService(db).get_delivery_contact(ctx, order_id)
+    return APIResponse(
+        message="Delivery contact retrieved",
+        data=ScmDeliveryContactResponse.model_validate(row),
+    )
+
+
+@scm_router.post(
+    "/orders/{order_id}/delivery-acknowledgement/dummy-send",
+    response_model=APIResponse[ScmDummyDeliverySendResponse],
+)
+def dummy_send_scm_delivery_acknowledgement(
+    order_id: UUID,
+    body: ScmDummyDeliverySendRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmDummyDeliverySendResponse]:
+    """Placeholder send until SMTP is wired - unlocks Record GRN."""
+    row = ScmDeliveryNotificationService(db).dummy_send_acknowledgement(
+        ctx,
+        order_id,
+        email=body.email,
+    )
+    db.commit()
+    return APIResponse(
+        message=row["message"],
+        data=ScmDummyDeliverySendResponse.model_validate(row),
+    )
+
+
 @scm_router.post(
     "/delivery-notifications/run",
     response_model=APIResponse[ScmDeliveryNotificationRunResponse],
@@ -579,6 +632,155 @@ def upsert_correspondence_template(
 
 
 @scm_router.get(
+    "/approval-step-owners",
+    response_model=APIResponse[list[ProcApprovalStepOwnersGroup]],
+)
+def list_proc_approval_step_owners(
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[list[ProcApprovalStepOwnersGroup]]:
+    rows = ProcApprovalStepOwnerService(db).list_grouped(ctx)
+    return APIResponse(
+        message="PO approval step owners retrieved",
+        data=[ProcApprovalStepOwnersGroup.model_validate(row) for row in rows],
+    )
+
+
+@scm_router.put(
+    "/approval-step-owners/{step_key}",
+    response_model=APIResponse[ProcApprovalStepOwnersGroup],
+)
+def replace_proc_approval_step_owners(
+    step_key: str,
+    body: ProcApprovalStepOwnersReplaceRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ProcApprovalStepOwnersGroup]:
+    service = ProcApprovalStepOwnerService(db)
+    service.replace(ctx, step_key, body.user_ids)
+    db.commit()
+    grouped = service.list_grouped(ctx)
+    row = next(item for item in grouped if item["step_key"] == step_key)
+    return APIResponse(
+        message="PO approval step owners saved",
+        data=ProcApprovalStepOwnersGroup.model_validate(row),
+    )
+
+
+@scm_router.get(
+    "/approval-capabilities",
+    response_model=APIResponse[ProcApprovalCapabilitiesResponse],
+)
+def get_proc_approval_capabilities(
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ProcApprovalCapabilitiesResponse]:
+    caps = ProcApprovalStepOwnerService(db).capabilities(ctx)
+    return APIResponse(
+        message="PO approval capabilities retrieved",
+        data=ProcApprovalCapabilitiesResponse.model_validate(caps),
+    )
+
+
+@scm_router.post(
+    "/invoice-generation-tasks",
+    response_model=APIResponse[list[ProcInvoiceGenerationTaskResponse]],
+)
+def create_invoice_generation_tasks(
+    body: ProcInvoiceGenerationTaskCreateRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.grn:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[list[ProcInvoiceGenerationTaskResponse]]:
+    service = ProcInvoiceGenerationTaskService(db)
+    rows = service.create_for_billing_receipt(
+        ctx,
+        order_id=body.order_id,
+        receipt_batch_id=body.receipt_batch_id,
+        items_summary=body.items_summary,
+        vendor_name=body.vendor_name,
+        customer_name=body.customer_name,
+    )
+    db.commit()
+    return APIResponse(
+        message="Accounts notified for invoice generation",
+        data=[
+            ProcInvoiceGenerationTaskResponse.model_validate(payload)
+            for payload in service.serialize_many(ctx, rows)
+        ],
+    )
+
+
+@scm_router.get(
+    "/invoice-generation-tasks/mine",
+    response_model=APIResponse[list[ProcInvoiceGenerationTaskResponse]],
+)
+def list_my_invoice_generation_tasks(
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
+    db: Annotated[Session, Depends(get_db)],
+    status: str | None = Query(default="pending"),
+) -> APIResponse[list[ProcInvoiceGenerationTaskResponse]]:
+    service = ProcInvoiceGenerationTaskService(db)
+    rows = service.list_my_tasks(ctx, status=status)
+    return APIResponse(
+        message="Invoice generation tasks retrieved",
+        data=[
+            ProcInvoiceGenerationTaskResponse.model_validate(payload)
+            for payload in service.serialize_many(ctx, rows)
+        ],
+    )
+
+
+@scm_router.get(
+    "/invoice-generation-tasks/by-batch/{receipt_batch_id}",
+    response_model=APIResponse[ProcInvoiceGenerationTaskResponse | None],
+)
+def get_invoice_generation_task_for_batch(
+    receipt_batch_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ProcInvoiceGenerationTaskResponse | None]:
+    service = ProcInvoiceGenerationTaskService(db)
+    row = service.get_for_batch_prefill(ctx, receipt_batch_id=receipt_batch_id)
+    return APIResponse(
+        message="Invoice generation prefill retrieved",
+        data=(
+            ProcInvoiceGenerationTaskResponse.model_validate(service.serialize(ctx, row))
+            if row
+            else None
+        ),
+    )
+
+
+@scm_router.post(
+    "/invoice-generation-tasks/{task_id}/submit",
+    response_model=APIResponse[ProcInvoiceGenerationTaskResponse],
+)
+def submit_invoice_generation_task(
+    task_id: UUID,
+    body: ProcInvoiceGenerationTaskSubmitRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ProcInvoiceGenerationTaskResponse]:
+    service = ProcInvoiceGenerationTaskService(db)
+    row = service.submit(
+        ctx,
+        task_id,
+        invoice_number=body.invoice_number,
+        invoice_date=body.invoice_date,
+        invoice_quantity=body.invoice_quantity,
+        invoice_amount=body.invoice_amount,
+        file_name=body.file_name,
+        content_base64=body.content_base64,
+        content_type=body.content_type,
+    )
+    db.commit()
+    return APIResponse(
+        message="Invoice details saved",
+        data=ProcInvoiceGenerationTaskResponse.model_validate(service.serialize(ctx, row)),
+    )
+
+
+@scm_router.get(
     "/finalize-approvals",
     response_model=APIResponse[list[ScmFinalizeApprovalResponse]],
 )
@@ -606,7 +808,24 @@ def request_scm_finalize_approval(
     row = ScmHandoffService(db).request_finalize_approval(ctx, order_id)
     db.commit()
     return APIResponse(
-        message="SCM purchase order sent for admin approval",
+        message="SCM purchase order sent for Accept PO approval",
+        data=OrderResponse.model_validate(row),
+    )
+
+
+@scm_router.post(
+    "/orders/{order_id}/accept-po-approval",
+    response_model=APIResponse[OrderResponse],
+)
+def accept_scm_po_approval(
+    order_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:approve"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[OrderResponse]:
+    row = ScmHandoffService(db).accept_po_approval(ctx, order_id)
+    db.commit()
+    return APIResponse(
+        message="PO accepted — sent to Management for approval",
         data=OrderResponse.model_validate(row),
     )
 

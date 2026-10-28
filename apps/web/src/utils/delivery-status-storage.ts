@@ -460,41 +460,45 @@ export type DeliveryStatusFormErrors = Partial<
 
 export function validateDeliveryStatusForm(
   value: Omit<DeliveryStatusRecord, "challanId" | "updatedAt">,
+  options?: { requireDispatch?: boolean },
 ): DeliveryStatusFormErrors {
   const errors: DeliveryStatusFormErrors = {};
+  const requireDispatch = options?.requireDispatch !== false;
   // Cache invoice is optional at delivery - bill DC material later after payment.
-  if (value.deliveryMode !== "hand" && value.deliveryMode !== "courier") {
-    errors.deliveryMode = "Select By hand or Courier.";
-  }
+  if (requireDispatch) {
+    if (value.deliveryMode !== "hand" && value.deliveryMode !== "courier") {
+      errors.deliveryMode = "Select By hand or Courier.";
+    }
 
-  if (value.deliveryMode === "hand") {
-    if (!asText(value.deliveryBoyName).trim()) {
-      errors.deliveryBoyName = "Delivery person is required.";
+    if (value.deliveryMode === "hand") {
+      if (!asText(value.deliveryBoyName).trim()) {
+        errors.deliveryBoyName = "Delivery person is required.";
+      }
+      if (!asText(value.dispatchDate).trim()) {
+        errors.dispatchDate = "Dispatch date is required.";
+      }
+      if (value.itemType !== "hardware" && value.itemType !== "software") {
+        errors.itemType = "Select hardware or software.";
+      }
+      const markingDelivered =
+        asText(value.shipmentStatus).trim() === "Delivered" ||
+        Boolean(asText(value.actualDeliveryDate).trim());
+      if (
+        markingDelivered &&
+        (value.itemType === "hardware" || value.itemType === "software") &&
+        !value.podDocument?.fileName
+      ) {
+        errors.podDocument = "POD attachment is required when marking delivered.";
+      }
     }
-    if (!asText(value.dispatchDate).trim()) {
-      errors.dispatchDate = "Dispatch date is required.";
-    }
-    if (value.itemType !== "hardware" && value.itemType !== "software") {
-      errors.itemType = "Select hardware or software.";
-    }
-    const markingDelivered =
-      asText(value.shipmentStatus).trim() === "Delivered" ||
-      Boolean(asText(value.actualDeliveryDate).trim());
-    if (
-      markingDelivered &&
-      (value.itemType === "hardware" || value.itemType === "software") &&
-      !value.podDocument?.fileName
-    ) {
-      errors.podDocument = "POD attachment is required when marking delivered.";
-    }
-  }
 
-  if (value.deliveryMode === "courier") {
-    if (!asText(value.docketNumber).trim()) {
-      errors.docketNumber = "Docket number is required for courier.";
-    }
-    if (!asText(value.courierProvider).trim()) {
-      errors.courierProvider = "Select a courier.";
+    if (value.deliveryMode === "courier") {
+      if (!asText(value.docketNumber).trim()) {
+        errors.docketNumber = "Docket number is required for courier.";
+      }
+      if (!asText(value.courierProvider).trim()) {
+        errors.courierProvider = "Select a courier.";
+      }
     }
   }
 

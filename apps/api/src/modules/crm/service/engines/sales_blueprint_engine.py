@@ -6,17 +6,17 @@ legacy CRM lead & opportunity flows:
 
     LEAD:        open -> converted | lost
     OPPORTUNITY: open -> boq_pending -> boq_approval -> deal_reg ->
-                 oem_pending -> oem_attached -> quote_ready ->
+                 oem_pending -> quote_ready ->
                  quote_in_progress -> po_pending -> po_approval
                  (finance -> legal terms -> management) ->
-                 ovf_ready -> won | lost
+                 ovf_ready -> won
     QUOTE:       draft -> internal_approval -> approved_internal ->
                  sent_to_customer -> negotiation | follow_up | accepted | lost
-    OVF:         draft -> approval -> approved -> shared_scm -> deal_won
+    OVF:         draft -> approval -> approved -> shared_scm (CRM terminal; deal_won kept for legacy rows)
 
-Every entity also supports a universal "lost" action from any non-terminal
-state (per product rule: "Lost available until Deal Won"), except OVF which
-has no lost state (it only exists after the deal is effectively secured).
+Deal won is set when the customer accepts the quote; PO/OVF continue as
+fulfilment. Lost is available until quote acceptance (not after). OVF has no
+lost state.
 
 This module is intentionally free of DB/session concerns: it operates on
 plain (entity_type, state, action) values so it can be unit tested in
@@ -121,14 +121,18 @@ _TRANSITIONS: dict[str, dict[str, dict[str, str]]] = {
             "send_boq_for_attachment": "boq_attachment_pending",
             "send_sow_for_attachment": "sow_attachment_pending",
         },
-        "oem_pending": {"oem_received": "oem_attached", "lost": "lost"},
+        # After BOQ/SOW (and Deal Reg when needed), attach the vendor quotation
+        # directly — no separate "Vendor Quotation Received" acknowledgement.
+        "oem_pending": {"attach_oem_quote": "quote_ready", "lost": "lost"},
+        # Legacy: opportunities already marked received before the attach-only flow.
         "oem_attached": {"attach_oem_quote": "quote_ready", "lost": "lost"},
         "quote_ready": {"create_quote": "quote_in_progress", "lost": "lost"},
+        # Quote acceptance wins the deal commercially; PO/OVF continue as
+        # fulfilment. Deal Lost is not offered after the quote is accepted.
         "quote_in_progress": {"quote_accepted": "po_pending", "lost": "lost"},
         "po_pending": {
-            "attach_po": "po_pending",
-            "send_po_approval": "po_approval",
-            "lost": "lost",
+            # Attach Customer PO also starts the Finance → Legal → Management chain.
+            "attach_po": "po_approval",
         },
         # Customer PO validation runs Finance (tax/GST) → Legal (terms &
         # conditions) → Management. The first two stages stay in ``po_approval``
@@ -140,9 +144,8 @@ _TRANSITIONS: dict[str, dict[str, dict[str, str]]] = {
             "reject_po_terms": "po_pending",
             "approve_po": "ovf_ready",
             "reject_po": "po_pending",
-            "lost": "lost",
         },
-        "ovf_ready": {"create_ovf": "ovf_ready", "deal_won": "won", "lost": "lost"},
+        "ovf_ready": {"create_ovf": "ovf_ready", "deal_won": "won"},
         "won": {},
         "lost": {},
     },
@@ -161,19 +164,23 @@ _TRANSITIONS: dict[str, dict[str, dict[str, str]]] = {
         },
         "approved_internal": {"send_to_customer": "sent_to_customer", "lost": "lost"},
         "sent_to_customer": {
-            "negotiate": "negotiation",
+            # Negotiation opens a new quote revision back in draft for re-approval.
+            "negotiate": "draft",
             "follow_up": "follow_up",
             "accept": "accepted",
             "lost": "lost",
         },
         "negotiation": {
+            # Legacy rows stuck in negotiation restart via negotiate → draft (next
+            # revision). Do not offer send_for_approval here: V1 was already
+            # approved/sent before entering negotiation.
+            "negotiate": "draft",
             "follow_up": "follow_up",
             "accept": "accepted",
-            "negotiate": "negotiation",
             "lost": "lost",
         },
         "follow_up": {
-            "negotiate": "negotiation",
+            "negotiate": "draft",
             "accept": "accepted",
             "follow_up": "follow_up",
             "lost": "lost",
@@ -185,7 +192,8 @@ _TRANSITIONS: dict[str, dict[str, dict[str, str]]] = {
         "draft": {"send_for_approval": "approval"},
         "approval": {"approve": "approved", "reject": "draft"},
         "approved": {"share_to_scm": "shared_scm"},
-        "shared_scm": {"deal_won": "deal_won"},
+        # Shared to SCM is the last CRM step — no further blueprint transitions.
+        "shared_scm": {},
         "deal_won": {},
     },
 }
@@ -194,7 +202,7 @@ TERMINAL_STATES: dict[str, set[str]] = {
     LEAD: {"converted", "lost"},
     OPPORTUNITY: {"won", "lost"},
     QUOTE: {"accepted", "lost"},
-    OVF: {"deal_won"},
+    OVF: {"shared_scm", "deal_won"},
 }
 
 

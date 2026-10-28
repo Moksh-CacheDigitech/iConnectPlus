@@ -276,15 +276,25 @@ class OpportunityBlueprintService:
             allowed = [action for action in allowed if action not in {"quote_accepted", "deal_won"}]
         allowed = filter_opportunity_actions(opp, allowed)
         allowed = self._filter_document_step_actions(allowed, opp)
-        if opp.customer_po_attached:
+        # Attach PO auto-sends for approval; never offer a separate send step.
+        allowed = [action for action in allowed if action != "send_po_approval"]
+        if opp.customer_po_attached and current != "po_pending":
             allowed = [action for action in allowed if action != "attach_po"]
-        if opp.customer_po_approved or not opp.customer_po_attached:
-            allowed = [action for action in allowed if action != "send_po_approval"]
+        if opp.customer_po_approved:
+            allowed = [action for action in allowed if action != "attach_po"]
         if current in {"boq_approval", "sow_approval", "po_approval"} and not opp.locked:
             # Approve/reject run via My Jobs while locked; hide stale actions if unlocked.
             allowed = [action for action in allowed if action not in _UNLOCKING_ACTIONS]
         allowed = self._ensure_peer_document_actions(allowed, opp, current)
         allowed = self._filter_create_actions_when_children_exist(ctx, opp, allowed)
+        # Deal Lost ends once the quote is accepted / opportunity is won.
+        if str(opp.status or "").lower() == "won" or current in {
+            "po_pending",
+            "po_approval",
+            "ovf_ready",
+            "won",
+        }:
+            allowed = [action for action in allowed if action != "lost"]
         return {
             "entity_type": "opportunity",
             "entity_id": opp.id,
@@ -300,34 +310,47 @@ class OpportunityBlueprintService:
     ) -> CrmOpportunity:
         """Advance opportunities after lead BOQ/SOW — skip Deal Reg when DR already exists.
 
-        DR is issued on lead create, so sales leads land on Vendor Quotation Received
-        instead of a redundant Deal Registration click.
+        Attached lead docs are sent to Default task owners for BOQ/SOW approval
+        (not auto-approved). DR is issued on lead create, so once both docs are
+        approved the opportunity lands on Attach Vendor Quotation.
         """
         current = opp.blueprint_state or "open"
         has_dr = (opp.deal_reg_number or opp.opportunity_code or "").strip().startswith("DR-")
 
         # Already past docs but still sitting on Deal Registration with a DR → OEM next.
-        if current == "deal_reg" and has_dr:
+        if current == "deal_reg" and has_dr and (opp.boq_approved or opp.sow_approved):
             row = self._repo.update(ctx, opp.id, blueprint_state="oem_pending")
             return row or opp
 
-        if current != "open":
+        if current not in {"open", "boq_pending", "deal_reg"}:
             return opp
         if not opp.boq_attached and not opp.sow_attached:
             return opp
 
-        updates: dict[str, Any] = {}
-        if opp.boq_attached and not opp.boq_approved:
-            updates["boq_approved"] = True
-        if opp.sow_attached and not opp.sow_approved:
-            updates["sow_approved"] = True
-        if opp.boq_approved or updates.get("boq_approved") or opp.sow_approved or updates.get(
-            "sow_approved"
-        ):
-            updates["blueprint_state"] = "oem_pending" if has_dr else "deal_reg"
-        if not updates:
+        boq_needs = bool(opp.boq_attached) and not bool(opp.boq_approved)
+        sow_needs = bool(opp.sow_attached) and not bool(opp.sow_approved) and not bool(opp.sow_skipped)
+        if not boq_needs and not sow_needs:
+            if current == "open" and (opp.boq_approved or opp.sow_approved):
+                row = self._repo.update(
+                    ctx,
+                    opp.id,
+                    blueprint_state="oem_pending" if has_dr else "deal_reg",
+                    locked=False,
+                )
+                return row or opp
             return opp
-        row = self._repo.update(ctx, opp.id, **updates)
+
+        # Prefer BOQ study first, then SOW — both use Default task owners.
+        if boq_needs:
+            self._auto_raise_doc_approval(ctx, opp, doc="boq")
+            row = self._repo.update(
+                ctx, opp.id, blueprint_state="boq_approval", locked=True
+            )
+            return row or opp
+        self._auto_raise_doc_approval(ctx, opp, doc="sow")
+        row = self._repo.update(
+            ctx, opp.id, blueprint_state="sow_approval", locked=True
+        )
         return row or opp
 
     @staticmethod
@@ -512,6 +535,10 @@ class OpportunityBlueprintService:
         elif action == "attach_boq":
             self._attach(ctx, opp, payload, category="boq")
             updates["boq_attached"] = True
+            updates["boq_approved"] = False
+            self._auto_raise_doc_approval(ctx, opp, doc="boq")
+            updates["locked"] = True
+            next_state = "boq_approval"
         elif action == "send_boq_for_attachment":
             if is_cloud_opportunity(opp):
                 raise ConflictException(
@@ -545,15 +572,19 @@ class OpportunityBlueprintService:
         elif action == "provide_boq_attachment":
             self._attach(ctx, opp, payload, category="boq")
             updates["boq_attached"] = True
-            updates["boq_approved"] = True
-            updates["locked"] = False
+            updates["boq_approved"] = False
+            self._auto_raise_doc_approval(ctx, opp, doc="boq")
+            updates["locked"] = True
+            next_state = "boq_approval"
         elif action == "reject_boq_attachment":
             updates["locked"] = False
         elif action == "provide_sow_attachment":
             self._attach(ctx, opp, payload, category="sow")
             updates["sow_attached"] = True
-            updates["sow_approved"] = True
-            updates["locked"] = False
+            updates["sow_approved"] = False
+            self._auto_raise_doc_approval(ctx, opp, doc="sow")
+            updates["locked"] = True
+            next_state = "sow_approval"
         elif action == "reject_sow_attachment":
             updates["locked"] = False
         elif action == "send_boq_approval":
@@ -561,10 +592,15 @@ class OpportunityBlueprintService:
                 raise ConflictException(
                     "Use Send Cloud Discount for Approval on cloud opportunities"
                 )
-            if not opp.boq_attached and not opp.sow_attached:
-                raise ConflictException("Attach a BOQ or SOW before requesting approval")
+            if not opp.boq_attached:
+                raise ConflictException("Attach a BOQ before requesting approval")
             if opp.boq_approved:
                 raise ConflictException("BOQ is already approved")
+            assigned = (
+                _require_assigned_users(payload)
+                if payload.get("assigned_user_ids") or payload.get("assigned_user_id")
+                else self._default_doc_approver_ids(ctx, "boq")
+            )
             self._raise_approval(
                 ctx,
                 opp,
@@ -572,7 +608,7 @@ class OpportunityBlueprintService:
                 team_role=payload.get("team_role", "presales"),
                 title=f"Approve BOQ - {opp.opportunity_name}",
                 remarks=payload.get("remarks"),
-                assigned_user_ids=_require_assigned_users(payload),
+                assigned_user_ids=assigned,
             )
             updates["locked"] = True
         elif action == "send_sow_approval":
@@ -580,6 +616,11 @@ class OpportunityBlueprintService:
                 raise ConflictException("Attach a SOW before requesting approval")
             if opp.sow_approved:
                 raise ConflictException("SOW is already approved")
+            assigned = (
+                _require_assigned_users(payload)
+                if payload.get("assigned_user_ids") or payload.get("assigned_user_id")
+                else self._default_doc_approver_ids(ctx, "sow")
+            )
             self._raise_approval(
                 ctx,
                 opp,
@@ -587,12 +628,15 @@ class OpportunityBlueprintService:
                 team_role=payload.get("team_role", "presales"),
                 title=f"Approve SOW - {opp.opportunity_name}",
                 remarks=payload.get("remarks"),
-                assigned_user_ids=_require_assigned_users(payload),
+                assigned_user_ids=assigned,
             )
             updates["locked"] = True
         elif action == "approve_boq":
             updates["boq_approved"] = True
-            updates["locked"] = False
+            next_state, lock = self._advance_after_doc_approval(
+                ctx, opp, approved_doc="boq", updates=updates
+            )
+            updates["locked"] = lock
         elif action == "reject_boq":
             self._clear_approval_attachment(ctx, opp.id, "boq")
             updates["boq_approved"] = False
@@ -600,7 +644,10 @@ class OpportunityBlueprintService:
             updates["locked"] = False
         elif action == "approve_sow":
             updates["sow_approved"] = True
-            updates["locked"] = False
+            next_state, lock = self._advance_after_doc_approval(
+                ctx, opp, approved_doc="sow", updates=updates
+            )
+            updates["locked"] = lock
         elif action == "reject_sow":
             self._clear_approval_attachment(ctx, opp.id, "sow")
             updates["sow_approved"] = False
@@ -609,6 +656,10 @@ class OpportunityBlueprintService:
         elif action == "attach_sow":
             self._attach(ctx, opp, payload, category="sow")
             updates["sow_attached"] = True
+            updates["sow_approved"] = False
+            self._auto_raise_doc_approval(ctx, opp, doc="sow")
+            updates["locked"] = True
+            next_state = "sow_approval"
         elif action == "skip_sow":
             updates["sow_skipped"] = True
         elif action == "deal_reg":
@@ -632,10 +683,12 @@ class OpportunityBlueprintService:
             if not (opp.opportunity_code or "").startswith("DR-"):
                 updates["opportunity_code"] = reg_no
         elif action == "oem_received":
+            # Legacy acknowledgement step — kept for history replay only.
             updates["oem_quotation_received"] = True
         elif action == "attach_oem_quote":
             self._attach(ctx, opp, payload, category="oem_quote")
             updates["oem_quote_attached"] = True
+            updates["oem_quotation_received"] = True
             if current == "map_oem_pending":
                 next_state = "cloud_onboarding"
         elif action == "skip_map_oem_quote":
@@ -655,55 +708,25 @@ class OpportunityBlueprintService:
             updates["forecast_amount"] = opp.expected_revenue
             updates["won_at"] = utcnow()
         elif action == "attach_po":
-            self._attach(ctx, opp, payload, category="customer_po")
-            updates["customer_po_attached"] = True
-            # A new PO file must be read and accepted again before it goes to Finance.
-            updates["sales_terms_accepted"] = False
+            has_file = bool(payload.get("file_name")) and bool(
+                payload.get("content_base64") or payload.get("file_path")
+            )
+            if has_file:
+                self._attach(ctx, opp, payload, category="customer_po")
+                updates["customer_po_attached"] = True
+            elif not opp.customer_po_attached:
+                raise ConflictException("A file is required to attach customer PO")
+            # Attach + send for approval is one step (Finance → Legal → Management).
+            po_updates = self._build_po_approval_updates(ctx, opp, payload)
+            updates.update(po_updates)
+            next_state = "po_approval"
         elif action == "send_po_approval":
+            # Legacy path kept for in-flight clients; prefer attach_po which auto-sends.
             if not opp.customer_po_attached:
                 raise ConflictException("Attach the customer PO before requesting approval")
-            if payload.get("terms_accepted") is not True:
-                raise ConflictException(
-                    "Confirm \"I have checked and verified all terms & conditions of the customer PO\" "
-                    "before sending it to Finance"
-                )
-            updates["sales_terms_accepted"] = True
-            updates["sales_terms_accepted_at"] = utcnow()
-            updates["sales_terms_accepted_by"] = ctx.user_id
-            from modules.crm.service.approval_step_owner_service import ApprovalStepOwnerService
-
-            owners = ApprovalStepOwnerService(self._db)
-            from modules.crm.service.approval_task_service import ApprovalTaskService
-
-            admin_fallback = ApprovalTaskService(self._db)._admin_recipient_ids(ctx)
-            chain: dict[str, list[str]] = {}
-            for stage, _team, _stage_action in PO_VALIDATION_STAGES:
-                ids = _po_stage_user_ids(payload, stage)
-                if not ids:
-                    ids = owners.list_user_ids(ctx, PO_STAGE_TO_STEP_KEY[stage])
-                if not ids and stage == "management":
-                    # Reuse quote / OVF management owners when PO management is unset.
-                    ids = owners.list_user_ids(ctx, "quote_send_for_approval") or owners.list_user_ids(
-                        ctx, "ovf_send_for_approval"
-                    )
-                if not ids:
-                    ids = list(admin_fallback)
-                if not ids:
-                    raise ConflictException(
-                        f"No {stage} owners configured. Set them under CRM Users → Default task owners."
-                    )
-                chain[stage] = [str(uid) for uid in ids]
-            ops_ids = _po_stage_user_ids(payload, OPERATIONS_STAGE)
-            if not ops_ids:
-                ops_ids = owners.list_user_ids(ctx, PO_STAGE_TO_STEP_KEY[OPERATIONS_STAGE])
-            chain[OPERATIONS_STAGE] = [str(uid) for uid in ops_ids]
-            updates["po_approval_chain"] = chain
-            updates["po_finance_status"] = "pending"
-            updates["po_terms_status"] = "not_required"
-            updates["po_finance_remark"] = None
-            updates["po_terms_remark"] = None
-            self._raise_po_stage(ctx, opp, stage="finance", chain=chain, remarks=payload.get("remarks"))
-            updates["locked"] = True
+            po_updates = self._build_po_approval_updates(ctx, opp, payload)
+            updates.update(po_updates)
+            next_state = "po_approval"
         elif action == "approve_po_finance":
             updates["po_finance_status"] = "approved"
             updates["po_finance_by"] = ctx.user_id
@@ -813,6 +836,80 @@ class OpportunityBlueprintService:
             content_type=payload.get("content_type"),
         )
 
+    def _default_doc_approver_ids(self, ctx: TenantContext, doc: str) -> list[UUID]:
+        """Resolve Default task owners for BOQ/SOW approval steps."""
+        from modules.crm.domain.approval_step_owners import APPROVAL_STEP_CATALOG
+        from modules.crm.service.approval_step_owner_service import ApprovalStepOwnerService
+        from modules.crm.service.approval_task_service import ApprovalTaskService
+
+        step_key = "boq_approval" if doc == "boq" else "sow_approval"
+        label = APPROVAL_STEP_CATALOG[step_key][0]
+        owners = ApprovalStepOwnerService(self._db).list_user_ids(ctx, step_key)
+        if not owners:
+            owners = ApprovalTaskService(self._db)._admin_recipient_ids(ctx)
+        if not owners:
+            raise ConflictException(
+                f"No {label} owners configured. "
+                "Set them under CRM → Users → Default task owners, then attach again."
+            )
+        return owners
+
+    def _auto_raise_doc_approval(
+        self, ctx: TenantContext, opp: CrmOpportunity, *, doc: str
+    ) -> None:
+        """After BOQ/SOW attach, route study approval to Default task owners."""
+        from modules.crm.domain.approval_step_owners import APPROVAL_STEP_CATALOG
+        from modules.crm.service.approval_task_service import ApprovalTaskService
+
+        action = "approve_boq" if doc == "boq" else "approve_sow"
+        step_key = "boq_approval" if doc == "boq" else "sow_approval"
+        team_role = APPROVAL_STEP_CATALOG[step_key][1]
+        pending = ApprovalTaskService(self._db).list(
+            ctx,
+            company_id=opp.company_id,
+            entity_type="opportunity",
+            entity_id=opp.id,
+            status="pending",
+        )
+        if any(task.action == action for task in pending):
+            return
+        self._raise_approval(
+            ctx,
+            opp,
+            action=action,
+            team_role=team_role,
+            title=f"Approve {doc.upper()} - {opp.opportunity_name}",
+            remarks="Auto-routed after document attachment",
+            assigned_user_ids=self._default_doc_approver_ids(ctx, doc),
+        )
+
+    def _advance_after_doc_approval(
+        self,
+        ctx: TenantContext,
+        opp: CrmOpportunity,
+        *,
+        approved_doc: str,
+        updates: dict[str, Any],
+    ) -> tuple[str, bool]:
+        """After one doc is approved, either raise the peer or advance past Deal Reg."""
+        boq_ok = bool(updates.get("boq_approved", opp.boq_approved))
+        sow_ok = bool(updates.get("sow_approved", opp.sow_approved)) or bool(
+            updates.get("sow_skipped", opp.sow_skipped)
+        )
+        sow_attached = bool(updates.get("sow_attached", opp.sow_attached))
+        boq_attached = bool(updates.get("boq_attached", opp.boq_attached))
+        has_dr = (opp.deal_reg_number or opp.opportunity_code or "").strip().startswith("DR-")
+
+        if approved_doc == "boq" and sow_attached and not sow_ok:
+            self._auto_raise_doc_approval(ctx, opp, doc="sow")
+            return "sow_approval", True
+        if approved_doc == "sow" and boq_attached and not boq_ok:
+            self._auto_raise_doc_approval(ctx, opp, doc="boq")
+            return "boq_approval", True
+        if boq_ok or sow_ok:
+            return ("oem_pending" if has_dr else "deal_reg"), False
+        return ("oem_pending" if has_dr else "deal_reg"), False
+
     def _raise_approval(
         self,
         ctx: TenantContext,
@@ -823,6 +920,7 @@ class OpportunityBlueprintService:
         title: str,
         remarks: str | None,
         assigned_user_ids: list[UUID],
+        email_attachments: list[dict] | None = None,
     ) -> None:
         from modules.crm.service.approval_task_service import ApprovalTaskService
 
@@ -837,7 +935,181 @@ class OpportunityBlueprintService:
             company_id=opp.company_id,
             branch_id=opp.branch_id,
             remarks=remarks,
+            email_attachments=email_attachments or None,
         )
+
+    # Stored under allowed category ``other`` (ck_crm_attachment_category).
+    _ACCEPTED_QUOTE_PRINT_FILENAME = "Accepted_Quote_Print.pdf"
+
+    def _store_accepted_quote_print(
+        self,
+        ctx: TenantContext,
+        opp: CrmOpportunity,
+        payload: dict[str, Any],
+    ) -> None:
+        """Persist accepted-quote PDF so later PO stages can re-attach it to email."""
+        content = str(payload.get("quotation_pdf_base64") or "").strip()
+        if not content:
+            return
+        for row in self._attachments.list_for_entity(ctx, "opportunity", opp.id):
+            if row.category == "other" and (row.file_name or "") == self._ACCEPTED_QUOTE_PRINT_FILENAME:
+                self._attachments.delete(ctx, row.id)
+        self._attachments.create(
+            ctx,
+            entity_type="opportunity",
+            entity_id=opp.id,
+            file_name=self._ACCEPTED_QUOTE_PRINT_FILENAME,
+            category="other",
+            branch_id=opp.branch_id,
+            company_id=opp.company_id,
+            content_base64=content,
+            content_type="application/pdf",
+        )
+
+    def _attachment_email_dict(
+        self,
+        ctx: TenantContext,
+        *,
+        entity_type: str,
+        entity_id: UUID,
+        category: str,
+        file_name: str | None = None,
+    ) -> dict[str, str] | None:
+        import base64
+
+        rows = [
+            row
+            for row in self._attachments.list_for_entity(ctx, entity_type, entity_id)
+            if row.category == category and (file_name is None or (row.file_name or "") == file_name)
+        ]
+        if not rows:
+            return None
+        row = rows[-1]
+        try:
+            download = self._attachments.resolve_download(ctx, row.id)
+        except Exception:  # noqa: BLE001
+            return None
+        raw = download.content
+        if raw is None and download.path is not None:
+            raw = download.path.read_bytes()
+        if not raw:
+            return None
+        return {
+            "filename": row.file_name or f"{category}.bin",
+            "content_base64": base64.b64encode(raw).decode("ascii"),
+            "content_type": row.content_type or "application/octet-stream",
+        }
+
+    def _po_approval_email_attachments(
+        self,
+        ctx: TenantContext,
+        opp: CrmOpportunity,
+        payload: dict[str, Any] | None = None,
+    ) -> list[dict[str, str]]:
+        """Accepted quote print PDF + customer PO for PO approval emails."""
+        payload = payload or {}
+        attachments: list[dict[str, str]] = []
+
+        quote_b64 = str(payload.get("quotation_pdf_base64") or "").strip()
+        if quote_b64:
+            filename = str(payload.get("quotation_pdf_filename") or "").strip() or "Accepted_Quote.pdf"
+            if not filename.lower().endswith(".pdf"):
+                filename = f"{filename}.pdf"
+            attachments.append(
+                {
+                    "filename": filename,
+                    "content_base64": quote_b64,
+                    "content_type": "application/pdf",
+                }
+            )
+        else:
+            stored_quote = self._attachment_email_dict(
+                ctx,
+                entity_type="opportunity",
+                entity_id=opp.id,
+                category="other",
+                file_name=self._ACCEPTED_QUOTE_PRINT_FILENAME,
+            )
+            if stored_quote:
+                attachments.append(stored_quote)
+
+        po_b64 = str(payload.get("content_base64") or "").strip()
+        po_name = str(payload.get("file_name") or "").strip()
+        if po_b64 and po_name:
+            attachments.append(
+                {
+                    "filename": po_name,
+                    "content_base64": po_b64,
+                    "content_type": str(payload.get("content_type") or "application/octet-stream"),
+                }
+            )
+        else:
+            stored_po = self._attachment_email_dict(
+                ctx, entity_type="opportunity", entity_id=opp.id, category="customer_po"
+            )
+            if stored_po:
+                attachments.append(stored_po)
+
+        return attachments
+
+    def _build_po_approval_updates(
+        self,
+        ctx: TenantContext,
+        opp: CrmOpportunity,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Confirm PO terms and start Finance → Legal → Management My Jobs chain."""
+        if payload.get("terms_accepted") is not True:
+            raise ConflictException(
+                "Confirm \"I have checked and verified all terms & conditions of the customer PO\" "
+                "before sending it to Finance"
+            )
+        from modules.crm.service.approval_step_owner_service import ApprovalStepOwnerService
+        from modules.crm.service.approval_task_service import ApprovalTaskService
+
+        owners = ApprovalStepOwnerService(self._db)
+        admin_fallback = ApprovalTaskService(self._db)._admin_recipient_ids(ctx)
+        chain: dict[str, list[str]] = {}
+        for stage, _team, _stage_action in PO_VALIDATION_STAGES:
+            ids = _po_stage_user_ids(payload, stage)
+            if not ids:
+                ids = owners.list_user_ids(ctx, PO_STAGE_TO_STEP_KEY[stage])
+            if not ids and stage == "management":
+                ids = owners.list_user_ids(ctx, "quote_send_for_approval") or owners.list_user_ids(
+                    ctx, "ovf_send_for_approval"
+                )
+            if not ids:
+                ids = list(admin_fallback)
+            if not ids:
+                raise ConflictException(
+                    f"No {stage} owners configured. Set them under CRM Users → Default task owners."
+                )
+            chain[stage] = [str(uid) for uid in ids]
+        ops_ids = _po_stage_user_ids(payload, OPERATIONS_STAGE)
+        if not ops_ids:
+            ops_ids = owners.list_user_ids(ctx, PO_STAGE_TO_STEP_KEY[OPERATIONS_STAGE])
+        chain[OPERATIONS_STAGE] = [str(uid) for uid in ops_ids]
+        self._store_accepted_quote_print(ctx, opp, payload)
+        email_attachments = self._po_approval_email_attachments(ctx, opp, payload)
+        self._raise_po_stage(
+            ctx,
+            opp,
+            stage="finance",
+            chain=chain,
+            remarks=payload.get("remarks"),
+            email_attachments=email_attachments,
+        )
+        return {
+            "sales_terms_accepted": True,
+            "sales_terms_accepted_at": utcnow(),
+            "sales_terms_accepted_by": ctx.user_id,
+            "po_approval_chain": chain,
+            "po_finance_status": "pending",
+            "po_terms_status": "not_required",
+            "po_finance_remark": None,
+            "po_terms_remark": None,
+            "locked": True,
+        }
 
     def _raise_po_stage(
         self,
@@ -847,6 +1119,7 @@ class OpportunityBlueprintService:
         stage: str,
         chain: dict[str, Any] | None,
         remarks: str | None,
+        email_attachments: list[dict] | None = None,
     ) -> None:
         """Raise the My Jobs task for one stage of the customer PO chain."""
         team_role, stage_action = next(
@@ -868,6 +1141,9 @@ class OpportunityBlueprintService:
                 f"No {stage} owners configured for this customer PO. "
                 "Set them under CRM Users → Default task owners, then send the PO again."
             )
+        attachments = email_attachments
+        if attachments is None:
+            attachments = self._po_approval_email_attachments(ctx, opp)
         self._raise_approval(
             ctx,
             opp,
@@ -876,6 +1152,7 @@ class OpportunityBlueprintService:
             title=f"{_PO_STAGE_TITLES[stage]} - {opp.opportunity_name}",
             remarks=remarks,
             assigned_user_ids=assigned_user_ids,
+            email_attachments=attachments or None,
         )
 
     def _service_scope_summary(

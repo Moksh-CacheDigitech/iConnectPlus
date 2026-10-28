@@ -16,6 +16,8 @@ export type PoApprovalDocument = {
   externalUrl?: string | null;
 };
 
+export type PoApprovalStage = "accept_po" | "management";
+
 export type PoApprovalRequest = {
   id: string;
   kind: PoApprovalKind;
@@ -31,9 +33,14 @@ export type PoApprovalRequest = {
   reason: "stock_short" | "user_choice" | null;
   documents: PoApprovalDocument[];
   requestedByRole: "user";
+  /** Display name of the user who sent the request. */
+  requestedByName: string | null;
   status: PoApprovalStatus;
   createdAt: string;
   decidedAt: string | null;
+  /** Finalize chain: Accept PO → Management. */
+  scmApprovalStage?: PoApprovalStage | null;
+  stageLabel?: string | null;
 };
 
 const STORAGE_KEY = "erp.procurement.po-approvals";
@@ -103,6 +110,7 @@ function normalizeApprovalRow(
     reason,
     documents,
     requestedByRole: "user",
+    requestedByName: (row.requestedByName || "").trim() || null,
     status: row.status === "accepted" || row.status === "rejected" ? row.status : "pending",
     createdAt: row.createdAt || new Date().toISOString(),
     decidedAt: row.decidedAt ?? null,
@@ -239,6 +247,7 @@ export function submitPoFinalizeApproval(input: {
     reason: null,
     documents,
     requestedByRole: "user",
+    requestedByName: null,
     status: "pending",
     createdAt: new Date().toISOString(),
     decidedAt: null,
@@ -254,6 +263,7 @@ export function submitCreatePoInStockApproval(input: {
   customerName?: string | null;
   vendorName?: string | null;
   reason: "stock_short" | "user_choice";
+  requestedByName?: string | null;
 }): PoApprovalRequest {
   const orderId = ovfCreatePoApprovalOrderKey(input.ovfId);
   const existing = findPendingCreatePoInStockApprovalForOvf(input.ovfId);
@@ -290,6 +300,7 @@ export function submitCreatePoInStockApproval(input: {
     reason: input.reason,
     documents: [],
     requestedByRole: "user",
+    requestedByName: (input.requestedByName || "").trim() || null,
     status: "pending",
     createdAt: new Date().toISOString(),
     decidedAt: null,

@@ -23,8 +23,10 @@ from modules.crm.models import CrmOpportunity, CrmQuote, CrmQuoteLine
 from modules.crm.repository.company_repository import CompanyRepository
 from modules.crm.repository.contact_repository import ContactRepository
 from modules.crm.repository.lead_repository import LeadRepository
+from modules.crm.repository.base import utcnow
 from modules.crm.repository.opportunity_repository import OpportunityRepository
 from modules.crm.repository.quote_repository import QuoteLineRepository, QuoteRepository
+from modules.crm.repository.quote_revision_repository import QuoteRevisionRepository
 from modules.crm.service.blueprint_service import log_state_history
 from modules.crm.service.crm_module_admin import CrmModuleAdminService
 from modules.crm.service.crm_record_visibility import CrmRecordVisibility
@@ -51,6 +53,7 @@ class QuoteService:
         self._db = db
         self._repo = QuoteRepository(db)
         self._lines = QuoteLineRepository(db)
+        self._revisions = QuoteRevisionRepository(db)
         self._opportunities = OpportunityRepository(db)
         self._leads = LeadRepository(db)
         self._companies = CompanyRepository(db)
@@ -155,10 +158,34 @@ class QuoteService:
         name = f"{employee.first_name} {employee.last_name}".strip()
         return name or None
 
-    def _default_contact_id(self, ctx: TenantContext, *, company_id: UUID, company_account_id: UUID | None) -> UUID | None:
+    def _default_contact_id(
+        self,
+        ctx: TenantContext,
+        *,
+        company_id: UUID,
+        company_account_id: UUID | None,
+        lead: Any | None = None,
+        account: Any | None = None,
+    ) -> UUID | None:
         if company_account_id is None:
             return None
         contacts = self._contacts.list_contacts(ctx, company_id, company_account_id)
+        preferred_first = _first(
+            getattr(lead, "first_name", None) if lead is not None else None,
+            getattr(account, "first_name", None) if account is not None else None,
+        )
+        preferred_last = _first(
+            getattr(lead, "last_name", None) if lead is not None else None,
+            getattr(account, "last_name", None) if account is not None else None,
+        )
+        preferred_name = " ".join(
+            str(part).strip() for part in (preferred_first, preferred_last) if part
+        ).strip().lower()
+        if preferred_name and contacts:
+            for row in contacts:
+                row_name = f"{(row.first_name or '').strip()} {(row.last_name or '').strip()}".strip().lower()
+                if row_name == preferred_name:
+                    return row.id
         if not contacts:
             return None
         primary = next((row for row in contacts if row.is_primary), None)
@@ -223,6 +250,8 @@ class QuoteService:
                     ctx,
                     company_id=opp.company_id,
                     company_account_id=opp.company_account_id,
+                    lead=lead,
+                    account=account,
                 ),
             ),
             "entity_name": _first(
@@ -357,6 +386,10 @@ class QuoteService:
                 setattr(quote, key, value)
                 patched = True
         if patched:
+            # VersionMixin uses version_id_generator=False — must bump before flush.
+            quote.version = int(quote.version or 1) + 1
+            quote.updated_at = utcnow()
+            quote.updated_by = ctx.user_id
             self._db.flush()
 
     # -- create ------------------------------------------------------------
@@ -423,10 +456,19 @@ class QuoteService:
             )
         return row
 
+    def _lock_quote_for_lines(self, ctx: TenantContext, quote_id: UUID) -> CrmQuote:
+        """Serialize line mutations that recompute quote totals (avoids version 409 races)."""
+        row = self._repo.get_for_update(ctx, quote_id)
+        if row is None:
+            raise NotFoundException("Quote not found")
+        self._visibility.ensure_quote_access(ctx, row)
+        self._ensure_display_snapshot(ctx, row)
+        sales_blueprint_engine.assert_not_locked(row)
+        return row
+
     # -- lines ---------------------------------------------------------
     def add_line(self, ctx: TenantContext, quote_id: UUID, **fields) -> CrmQuoteLine:
-        quote = self.get(ctx, quote_id)
-        sales_blueprint_engine.assert_not_locked(quote)
+        quote = self._lock_quote_for_lines(ctx, quote_id)
         existing = self._lines.list_for_quote(ctx, quote_id)
         fields.setdefault("line_no", len(existing) + 1)
         line = self._lines.create(ctx, company_id=quote.company_id, branch_id=quote.branch_id, quote_id=quote_id, **fields)
@@ -437,8 +479,7 @@ class QuoteService:
         line = self._lines.get(ctx, line_id)
         if line is None:
             raise NotFoundException("Quote line not found")
-        quote = self.get(ctx, line.quote_id)
-        sales_blueprint_engine.assert_not_locked(quote)
+        self._lock_quote_for_lines(ctx, line.quote_id)
         if "qty" in fields and fields["qty"] is not None:
             self._assert_qty_within_balance(ctx, line, Decimal(str(fields["qty"])))
         updated = self._lines.update(ctx, line_id, **fields)
@@ -449,8 +490,7 @@ class QuoteService:
         line = self._lines.get(ctx, line_id)
         if line is None:
             raise NotFoundException("Quote line not found")
-        quote = self.get(ctx, line.quote_id)
-        sales_blueprint_engine.assert_not_locked(quote)
+        self._lock_quote_for_lines(ctx, line.quote_id)
         if self._child_lines(ctx, line.id):
             raise ConflictException(
                 f"{line.product_name} is split into other quotes - remove those splits first"
@@ -648,7 +688,11 @@ class QuoteService:
         return created
 
     def _recompute(self, ctx: TenantContext, quote_id: UUID) -> CrmQuote:
-        quote = self.get(ctx, quote_id)
+        # Prefer the locked/identity-mapped row when present so version stays in sync
+        # after get_for_update from add/update/delete line.
+        quote = self._repo.get(ctx, quote_id)
+        if quote is None:
+            raise NotFoundException("Quote not found")
         lines = self._lines.list_for_quote(ctx, quote_id)
         computed_lines: list[CrmQuoteLine] = []
         for line in lines:
@@ -694,6 +738,37 @@ class QuoteService:
             "line_types_present": sorted(result.line_types_present),
         }
 
+    def _quotation_pdf_filename(self, quote: CrmQuote) -> str:
+        code = (quote.quote_no or "Quote").replace("/", "_").replace("\\", "_").strip() or "Quote"
+        title = (quote.project_title or quote.subject or "").strip()
+        if title and title.lower() not in {"test", "test1"} and title.lower() != code.lower().replace("_", "/"):
+            safe_title = "".join(ch if ch.isalnum() or ch in {" ", "-", "_"} else " " for ch in title)
+            safe_title = "_".join(safe_title.split())[:60]
+            if safe_title:
+                return f"Quotation_{code}_{safe_title}.pdf"
+        return f"Quotation_{code}.pdf"
+
+    def _quotation_email_attachments(
+        self,
+        quote: CrmQuote,
+        *,
+        quotation_pdf_base64: str | None,
+        quotation_pdf_filename: str | None,
+    ) -> list[dict]:
+        content = (quotation_pdf_base64 or "").strip()
+        if not content:
+            return []
+        filename = (quotation_pdf_filename or "").strip() or self._quotation_pdf_filename(quote)
+        if not filename.lower().endswith(".pdf"):
+            filename = f"{filename}.pdf"
+        return [
+            {
+                "filename": filename,
+                "content_base64": content,
+                "content_type": "application/pdf",
+            }
+        ]
+
     # -- blueprint / approval workflow ---------------------------------
     def send_for_approval(
         self,
@@ -704,10 +779,24 @@ class QuoteService:
         assigned_user_id: UUID | None = None,
         assigned_user_ids: list[UUID] | None = None,
         remarks: str | None = None,
+        quotation_pdf_base64: str | None = None,
+        quotation_pdf_filename: str | None = None,
     ) -> CrmQuote:
         quote = self.get(ctx, quote_id)
         sales_blueprint_engine.assert_not_locked(quote)
+        revision = max(1, int(quote.quote_revision or 1))
+        if revision <= 1 and (
+            str(quote.approval_status or "") == "approved"
+            or str(quote.quote_stage or "")
+            in {"approved_internal", "sent_to_customer", "negotiation", "follow_up", "accepted"}
+        ):
+            raise ConflictException(
+                "Version V1 was already sent for approval. Move to negotiation to open V2 before sending again."
+            )
         self._recompute(ctx, quote_id)
+        quote = self.get(ctx, quote_id)
+        # Freeze printable payload for this revision so Versions can re-download it later.
+        self._snapshot_revision(ctx, quote, remark=remarks)
         next_state = sales_blueprint_engine.transition("quote", quote.quote_stage, "send_for_approval")
 
         from modules.crm.service.approval_task_service import ApprovalTaskService
@@ -724,6 +813,12 @@ class QuoteService:
             company_id=quote.company_id,
             branch_id=quote.branch_id,
             remarks=remarks,
+            email_attachments=self._quotation_email_attachments(
+                quote,
+                quotation_pdf_base64=quotation_pdf_base64,
+                quotation_pdf_filename=quotation_pdf_filename,
+            )
+            or None,
         )
         row = self._repo.update(ctx, quote_id, quote_stage=next_state, approval_status="pending", locked=True)
         self._log(ctx, quote, quote.quote_stage, next_state, "send_for_approval", remarks)
@@ -783,29 +878,319 @@ class QuoteService:
             return self._customer_action(ctx, quote_id, action, payload)
         raise ConflictException(f"Unsupported quote blueprint action '{action}'")
 
+    def list_revisions(self, ctx: TenantContext, quote_id: UUID) -> list[dict[str, Any]]:
+        quote = self.get(ctx, quote_id)
+        snapshots = self._revisions.list_for_quote(ctx, quote_id)
+        rows: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        for snap in snapshots:
+            seen.add(int(snap.revision_no))
+            payload = snap.payload_json if isinstance(snap.payload_json, dict) else None
+            rows.append(
+                {
+                    "revision_no": int(snap.revision_no),
+                    "avg_margin_pct": snap.avg_margin_pct,
+                    "grand_total": snap.grand_total,
+                    "total_margin_amount": snap.total_margin_amount,
+                    "is_current": False,
+                    "snapshotted_at": snap.created_at,
+                    "remark": snap.remark,
+                    "has_print_payload": bool(payload and payload.get("lines") is not None),
+                }
+            )
+        current_rev = max(1, int(quote.quote_revision or 1))
+        if current_rev not in seen:
+            rows.append(
+                {
+                    "revision_no": current_rev,
+                    "avg_margin_pct": quote.avg_margin_pct,
+                    "grand_total": quote.grand_total,
+                    "total_margin_amount": quote.total_margin_amount,
+                    "is_current": True,
+                    "snapshotted_at": quote.updated_at,
+                    "remark": None,
+                    "has_print_payload": True,
+                }
+            )
+        else:
+            # Prefer live totals for the active revision when it matches a snapshot key.
+            for row in rows:
+                if int(row["revision_no"]) == current_rev:
+                    row["avg_margin_pct"] = quote.avg_margin_pct
+                    row["grand_total"] = quote.grand_total
+                    row["total_margin_amount"] = quote.total_margin_amount
+                    row["is_current"] = True
+                    row["has_print_payload"] = True
+                    break
+
+        rows.sort(key=lambda item: int(item["revision_no"]))
+        baseline = Decimal(str(rows[0]["grand_total"])) if rows else Decimal("0")
+        for row in rows:
+            total = Decimal(str(row["grand_total"] or 0))
+            if baseline == 0:
+                row["negotiation_pct"] = Decimal("0")
+            else:
+                row["negotiation_pct"] = ((total - baseline) / baseline * Decimal("100")).quantize(
+                    Decimal("0.01")
+                )
+        return rows
+
+    def revision_print_payload(self, ctx: TenantContext, quote_id: UUID, revision_no: int) -> dict[str, Any]:
+        """Return quote + lines frozen for ``revision_no`` (live data when current)."""
+        quote = self.get(ctx, quote_id)
+        rev = max(1, int(revision_no))
+        current_rev = max(1, int(quote.quote_revision or 1))
+        if rev == current_rev:
+            return {
+                "revision_no": current_rev,
+                "is_current": True,
+                "quote": self._quote_print_header(quote, revision_no=current_rev),
+                "lines": [self._line_print_dict(line) for line in self._lines.list_for_quote(ctx, quote_id)],
+            }
+
+        snap = self._revisions.get_for_revision(ctx, quote_id, rev)
+        if snap is None:
+            raise NotFoundException(f"Quote version V{rev} was not found")
+        payload = snap.payload_json if isinstance(snap.payload_json, dict) else None
+        if payload and isinstance(payload.get("quote"), dict) and isinstance(payload.get("lines"), list):
+            header = dict(payload["quote"])
+            header["quote_revision"] = rev
+            return {
+                "revision_no": rev,
+                "is_current": False,
+                "quote": header,
+                "lines": list(payload["lines"]),
+            }
+        # Legacy snapshots without line payload: still printable as a totals archive.
+        header = self._quote_print_header(quote, revision_no=rev)
+        header["grand_total"] = str(snap.grand_total or 0)
+        header["avg_margin_pct"] = str(snap.avg_margin_pct or 0)
+        header["total_margin_amount"] = str(snap.total_margin_amount or 0)
+        total = Decimal(str(snap.grand_total or 0))
+        return {
+            "revision_no": rev,
+            "is_current": False,
+            "quote": header,
+            "lines": [
+                {
+                    "id": f"archive-{rev}",
+                    "quote_id": str(quote.id),
+                    "line_no": 1,
+                    "product_id": None,
+                    "product_name": f"Version V{rev} archived total",
+                    "hsn_sac": None,
+                    "description": "Line detail was not frozen for this version; grand total only.",
+                    "line_type": "hardware",
+                    "qty": "1",
+                    "unit_cost": "0",
+                    "unit_sell": str(total),
+                    "margin_pct": str(snap.avg_margin_pct or 0),
+                    "margin_amount": str(snap.total_margin_amount or 0),
+                    "gst_pct": "0",
+                    "gst_amount": "0",
+                    "line_total": str(total),
+                    "source_line_id": None,
+                    "version": 1,
+                }
+            ],
+        }
+
+    def _quote_print_header(self, quote: CrmQuote, *, revision_no: int) -> dict[str, Any]:
+        return {
+            "id": str(quote.id),
+            "company_id": str(quote.company_id),
+            "branch_id": str(quote.branch_id),
+            "opportunity_id": str(quote.opportunity_id),
+            "company_account_id": str(quote.company_account_id) if quote.company_account_id else None,
+            "contact_id": str(quote.contact_id) if quote.contact_id else None,
+            "subject": quote.subject,
+            "project_title": quote.project_title,
+            "account_name": quote.account_name,
+            "owner_name": quote.owner_name,
+            "entity_name": quote.entity_name,
+            "entity_email": quote.entity_email,
+            "entity_address": quote.entity_address,
+            "entity_gst": quote.entity_gst,
+            "entity_contact": quote.entity_contact,
+            "quote_no": quote.quote_no,
+            "quote_revision": revision_no,
+            "quote_stage": quote.quote_stage,
+            "approval_status": quote.approval_status,
+            "locked": bool(quote.locked),
+            "valid_until": quote.valid_until.isoformat() if quote.valid_until else None,
+            "freight": str(quote.freight or 0),
+            "grand_total": str(quote.grand_total or 0),
+            "avg_margin_pct": str(quote.avg_margin_pct or 0),
+            "total_margin_amount": str(quote.total_margin_amount or 0),
+            "reason_for_discount": quote.reason_for_discount,
+            "terms": quote.terms,
+            "description": quote.description,
+            "billing_country": quote.billing_country,
+            "shipping_country": quote.shipping_country,
+            "sales_order_id": str(quote.sales_order_id) if quote.sales_order_id else None,
+            "parent_quote_id": str(quote.parent_quote_id) if quote.parent_quote_id else None,
+            "version": int(quote.version or 1),
+            "created_at": quote.created_at.isoformat() if quote.created_at else None,
+        }
+
+    @staticmethod
+    def _line_print_dict(line: Any) -> dict[str, Any]:
+        return {
+            "id": str(line.id),
+            "quote_id": str(line.quote_id),
+            "line_no": int(line.line_no or 1),
+            "product_id": str(line.product_id) if line.product_id else None,
+            "product_name": line.product_name,
+            "hsn_sac": line.hsn_sac,
+            "description": line.description,
+            "line_type": line.line_type or "hardware",
+            "qty": str(line.qty or 0),
+            "unit_cost": str(line.unit_cost or 0),
+            "unit_sell": str(line.unit_sell or 0),
+            "margin_pct": str(line.margin_pct or 0),
+            "margin_amount": str(line.margin_amount or 0),
+            "gst_pct": str(line.gst_pct or 0),
+            "gst_amount": str(line.gst_amount or 0),
+            "line_total": str(line.line_total or 0),
+            "source_line_id": str(line.source_line_id) if line.source_line_id else None,
+            "version": int(line.version or 1),
+        }
+
+    def _snapshot_revision(
+        self,
+        ctx: TenantContext,
+        quote: CrmQuote,
+        *,
+        remark: str | None = None,
+    ) -> None:
+        revision_no = max(1, int(quote.quote_revision or 1))
+        lines = self._lines.list_for_quote(ctx, quote.id)
+        payload_json = {
+            "quote": self._quote_print_header(quote, revision_no=revision_no),
+            "lines": [self._line_print_dict(line) for line in lines],
+        }
+        self._revisions.upsert_snapshot(
+            ctx,
+            quote_id=quote.id,
+            company_id=quote.company_id,
+            branch_id=quote.branch_id,
+            revision_no=revision_no,
+            avg_margin_pct=quote.avg_margin_pct or Decimal("0"),
+            grand_total=quote.grand_total or Decimal("0"),
+            total_margin_amount=quote.total_margin_amount or Decimal("0"),
+            remark=remark,
+            payload_json=payload_json,
+        )
+
     def _customer_action(self, ctx: TenantContext, quote_id: UUID, action: str, payload: dict[str, Any]) -> CrmQuote:
         quote = self.get(ctx, quote_id)
         if action != "lost":
             sales_blueprint_engine.assert_not_locked(quote)
+        from_state = quote.quote_stage
         next_state = sales_blueprint_engine.transition("quote", quote.quote_stage, action)
         updates: dict[str, Any] = {"quote_stage": next_state}
         if action == "lost":
             updates["locked"] = False
+        if action == "negotiate":
+            # Freeze current revision totals, then open the next revision in draft
+            # so Sales re-runs approval → customer send for the negotiated quote.
+            self._recompute(ctx, quote_id)
+            quote = self.get(ctx, quote_id)
+            self._snapshot_revision(ctx, quote, remark=payload.get("remark"))
+            updates["quote_revision"] = max(1, int(quote.quote_revision or 1)) + 1
+            updates["quote_stage"] = "draft"
+            updates["approval_status"] = "not_required"
+            updates["locked"] = False
+            next_state = "draft"
         row = self._repo.update(ctx, quote_id, **updates)
-        self._log(ctx, quote, quote.quote_stage, next_state, action, payload.get("remark"))
+        self._log(ctx, quote, from_state, next_state, action, payload.get("remark"))
 
         if action == "accept":
-            opp = self._opportunities.get(ctx, quote.opportunity_id)
-            if opp and opp.blueprint_state == "quote_in_progress":
-                next_opp_state = sales_blueprint_engine.transition("opportunity", opp.blueprint_state, "quote_accepted")
-                self._opportunities.update(ctx, opp.id, blueprint_state=next_opp_state)
-                log_state_history(
-                    self._db, ctx, company_id=opp.company_id, branch_id=opp.branch_id,
-                    entity_type="opportunity", entity_id=opp.id,
-                    from_state="quote_in_progress", to_state=next_opp_state, action="quote_accepted",
-                    remark=f"Quote {quote.quote_no} accepted by customer",
-                )
+            self._mark_opportunity_won_on_quote_accept(ctx, quote)
         return row
+
+    def _mark_opportunity_won_on_quote_accept(self, ctx: TenantContext, quote: CrmQuote) -> None:
+        """Customer quote acceptance wins the deal; PO/OVF continue as fulfilment."""
+        opp = self._opportunities.get(ctx, quote.opportunity_id)
+        if opp is None:
+            return
+        from_opp_state = opp.blueprint_state
+        already_won = str(opp.status or "").lower() == "won"
+        won_amount = Decimal(str(quote.grand_total or opp.deal_won_amount or 0))
+        opp_updates: dict[str, Any] = {
+            "status": "won",
+            "current_stage": "won",
+            "probability_percent": 100,
+            "deal_won_amount": won_amount,
+            "forecast_amount": won_amount,
+            "won_at": opp.won_at or utcnow(),
+        }
+        next_opp_state = from_opp_state
+        if from_opp_state == "quote_in_progress":
+            next_opp_state = sales_blueprint_engine.transition(
+                "opportunity", from_opp_state, "quote_accepted"
+            )
+            opp_updates["blueprint_state"] = next_opp_state
+            log_state_history(
+                self._db,
+                ctx,
+                company_id=opp.company_id,
+                branch_id=opp.branch_id,
+                entity_type="opportunity",
+                entity_id=opp.id,
+                from_state=from_opp_state,
+                to_state=next_opp_state,
+                action="quote_accepted",
+                remark=f"Quote {quote.quote_no} accepted by customer",
+            )
+
+        self._opportunities.update(ctx, opp.id, **opp_updates)
+        if already_won:
+            return
+        log_state_history(
+            self._db,
+            ctx,
+            company_id=opp.company_id,
+            branch_id=opp.branch_id,
+            entity_type="opportunity",
+            entity_id=opp.id,
+            from_state=next_opp_state,
+            to_state=next_opp_state,
+            action="deal_won",
+            remark=f"Deal won on quote {quote.quote_no} acceptance at {won_amount}",
+        )
+        self._notify_deal_won_on_quote_accept(ctx, opp, won_amount)
+
+    def _notify_deal_won_on_quote_accept(self, ctx: TenantContext, opp: CrmOpportunity, amount: Decimal) -> None:
+        try:
+            from modules.crm.models.company import CrmCompany
+            from modules.crm.service.crm_email_notification_service import CrmEmailNotificationService
+            from modules.crm.service.crm_notification_service import resolve_employee_user_id
+            from modules.foundation.models.security import SecUser
+
+            customer = "—"
+            if opp.company_account_id is not None:
+                account = self._db.get(CrmCompany, opp.company_account_id)
+                if account is not None:
+                    customer = account.customer_name or "—"
+            salesperson = "—"
+            owner_uid = resolve_employee_user_id(self._db, ctx.tenant_id, opp.owner_employee_id)
+            if owner_uid is not None:
+                user = self._db.get(SecUser, owner_uid)
+                if user is not None:
+                    salesperson = user.display_name or user.email or "—"
+            CrmEmailNotificationService(self._db).notify_deal_won(
+                tenant_id=ctx.tenant_id,
+                opportunity_id=opp.id,
+                opportunity_name=opp.opportunity_name or "Opportunity",
+                customer_name=customer,
+                salesperson_name=salesperson,
+                final_value=amount,
+                owner_employee_id=opp.owner_employee_id,
+                created_by=ctx.user_id,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def _log(self, ctx: TenantContext, quote: CrmQuote, from_state: str, to_state: str, action: str, remark: str | None) -> None:
         log_state_history(

@@ -189,17 +189,23 @@ const ACTION_CONFIG: Record<string, ActionConfig> = {
     ],
     description: "DR Number is auto-generated in series. Confirm to register this deal.",
   },
-  oem_received: { label: "Vendor Quotation Received", fields: [] },
   attach_oem_quote: {
-    label: "Attach Vendor Quote",
-    fields: [{ key: "file_name", label: "Vendor / OEM / market quote file", type: "file", required: true }],
+    label: "Attach Vendor Quotation",
+    fields: [{ key: "file_name", label: "Vendor quotation file", type: "file", required: true }],
+    description:
+      "Upload an Outlook email export only (.msg on Windows, .eml on Mac / New Outlook / web).",
   },
   attach_po: {
     label: "Attach Customer PO",
-    fields: [{ key: "file_name", label: "Customer PO file", type: "file", required: true }],
+    description:
+      "Upload the customer PO and send it for Finance → Legal → Management approval in one step.",
+    fields: [
+      { key: "file_name", label: "Customer PO file", type: "file", required: true },
+      ...PO_APPROVAL_DIALOG_FIELDS,
+    ],
   },
   send_po_approval: {
-    label: "Send PO for Approval",
+    label: "Re-submit PO for Approval",
     fields: PO_APPROVAL_DIALOG_FIELDS,
   },
   send_for_approval: {
@@ -260,7 +266,21 @@ const ATTACH_ACTIONS = new Set([
   "attach_contract",
 ]);
 
-const OEM_QUOTE_ACTIONS = new Set(["oem_received", "attach_oem_quote"]);
+const OEM_QUOTE_ACTIONS = new Set(["attach_oem_quote"]);
+
+/** Outlook single-message exports — Windows (.msg) and Mac/New Outlook/OWA (.eml). */
+const OUTLOOK_MAIL_EXPORT_EXTENSIONS = new Set([".msg", ".eml"]);
+const OUTLOOK_MAIL_ACCEPT =
+  ".msg,.eml,message/rfc822,application/vnd.ms-outlook";
+const OUTLOOK_MAIL_HINT =
+  "Vendor quotation must be an Outlook email export (.msg or .eml).";
+
+function isOutlookMailExportFile(file: File): boolean {
+  const name = file.name.trim().toLowerCase();
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return false;
+  return OUTLOOK_MAIL_EXPORT_EXTENSIONS.has(name.slice(dot));
+}
 
 const QUOTE_FLOW_ACTIONS = new Set(["send_to_customer", "accept", "negotiate", "follow_up"]);
 
@@ -300,8 +320,8 @@ function stepKeyForAction(
   if (action === "send_cloud_discount_approval") return "cloud_discount";
   if (action === "send_boq_for_attachment") return "boq_attachment";
   if (action === "send_sow_for_attachment") return "sow_attachment";
-  if (action === "send_boq_approval") return "boq_attachment";
-  if (action === "send_sow_approval") return "sow_attachment";
+  if (action === "send_boq_approval") return "boq_approval";
+  if (action === "send_sow_approval") return "sow_approval";
   return null;
 }
 
@@ -319,6 +339,8 @@ type Props = {
   locked?: boolean;
   /** Human-readable current blueprint stage (28-stage sales flow). */
   currentStageLabel?: string | null;
+  /** Show a persistent light-green Deal Won badge beside the current state. */
+  showDealWonBadge?: boolean;
   /** Opportunity id — used to auto-generate Deal Registration (DR) numbers. */
   opportunityId?: string;
   /** Distinguishes quote vs OVF for send_for_approval step-owner defaults. */
@@ -336,6 +358,7 @@ export function BlueprintActions({
   allowedActions,
   locked,
   currentStageLabel,
+  showDealWonBadge = false,
   opportunityId,
   entityType,
   excludeActions,
@@ -449,7 +472,7 @@ export function BlueprintActions({
     return resolveDefaultApproverIds(action);
   }
 
-  if (!currentStageLabel && visibleActions.length === 0) return null;
+  if (!currentStageLabel && !showDealWonBadge && visibleActions.length === 0) return null;
 
   function resolvePoStageApproversFromOwners(): Record<PoStage, string[]> {
     return {
@@ -468,6 +491,15 @@ export function BlueprintActions({
         label: action.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase()),
         fields: [REMARK_FIELD_ALT],
       };
+    if (action === "attach_po") {
+      return {
+        ...base,
+        fields: [
+          { key: "file_name", label: "Customer PO file", type: "file", required: true },
+          ...PO_APPROVAL_DIALOG_FIELDS,
+        ],
+      };
+    }
     if (action === "send_po_approval") {
       return { ...base, fields: PO_APPROVAL_DIALOG_FIELDS };
     }
@@ -589,9 +621,17 @@ export function BlueprintActions({
         }
       }
     }
+    if (dispatchAction === "attach_oem_quote") {
+      const uploadList = isMultiFile ? files : file ? [file] : [];
+      const invalid = uploadList.filter((row) => !isOutlookMailExportFile(row));
+      if (invalid.length > 0) {
+        setError(OUTLOOK_MAIL_HINT);
+        return;
+      }
+    }
 
     let resolvedPoStageOwners: Record<PoStage, string[]> | null = null;
-    if (dispatchAction === "send_po_approval") {
+    if (dispatchAction === "attach_po" || dispatchAction === "send_po_approval") {
       resolvedPoStageOwners = resolvePoStageApproversFromOwners();
       // Finance is raised immediately; later stages fall back to quote/admin owners on the API.
       if (resolvedPoStageOwners.finance.length === 0) {
@@ -626,7 +666,10 @@ export function BlueprintActions({
         payloadBase.assigned_user_ids = approverIds;
         payloadBase.assigned_user_id = approverIds[0];
       }
-      if (dispatchAction === "send_po_approval" && resolvedPoStageOwners) {
+      if (
+        (dispatchAction === "attach_po" || dispatchAction === "send_po_approval") &&
+        resolvedPoStageOwners
+      ) {
         payloadBase.terms_accepted = values.terms_accepted === "true";
         payloadBase.finance_user_ids = resolvedPoStageOwners.finance;
         payloadBase.legal_user_ids = resolvedPoStageOwners.legal;
@@ -676,7 +719,7 @@ export function BlueprintActions({
       if (action === "negotiate") return 9;
       if (action === "follow_up") return 10;
       if (action === "attach_po") return 11;
-      if (action === "send_po_approval") return 12;
+      if (action === "send_po_approval") return 11;
       if (action === "lost") return 20;
       return 15;
     };
@@ -687,14 +730,21 @@ export function BlueprintActions({
 
   return (
     <div className="space-y-2">
-      {currentStageLabel ? (
+      {currentStageLabel || showDealWonBadge ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             Current State
           </span>
-          <Badge className="rounded-full border-transparent bg-blue-600 px-3 py-0.5 text-xs font-semibold text-white hover:bg-blue-600">
-            {currentStageLabel}
-          </Badge>
+          {currentStageLabel && currentStageLabel !== "Deal Won" ? (
+            <Badge className="rounded-full border-transparent bg-blue-600 px-3 py-0.5 text-xs font-semibold text-white hover:bg-blue-600">
+              {currentStageLabel}
+            </Badge>
+          ) : null}
+          {showDealWonBadge || currentStageLabel === "Deal Won" ? (
+            <Badge className="rounded-full border border-emerald-200 bg-emerald-100 px-3 py-0.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100">
+              Deal Won
+            </Badge>
+          ) : null}
         </div>
       ) : null}
       {showTransitions ? (
@@ -834,6 +884,9 @@ export function BlueprintActions({
                       <input
                         ref={fileInputRef}
                         type="file"
+                        accept={
+                          activeAction === "attach_oem_quote" ? OUTLOOK_MAIL_ACCEPT : undefined
+                        }
                         multiple={
                           activeAction === "attach_boq" ||
                           activeAction === "attach_sow" ||
@@ -844,10 +897,29 @@ export function BlueprintActions({
                         className="sr-only"
                         onChange={(e) => {
                           const selected = Array.from(e.target.files ?? []);
+                          if (activeAction === "attach_oem_quote") {
+                            const valid = selected.filter(isOutlookMailExportFile);
+                            if (selected.length > 0 && valid.length === 0) {
+                              setError(OUTLOOK_MAIL_HINT);
+                              setFiles([]);
+                              setFile(null);
+                              e.target.value = "";
+                              return;
+                            }
+                            if (valid.length < selected.length) {
+                              setError(
+                                `${OUTLOOK_MAIL_HINT} Skipped ${selected.length - valid.length} unsupported file(s).`,
+                              );
+                            } else {
+                              setError(null);
+                            }
+                            setFiles(valid);
+                            setFile(valid[0] ?? null);
+                            return;
+                          }
                           if (
                             activeAction === "attach_boq" ||
                             activeAction === "attach_sow" ||
-                            activeAction === "attach_oem_quote" ||
                             activeAction === "attach_po" ||
                             activeAction === "attach_contract"
                           ) {
@@ -865,6 +937,11 @@ export function BlueprintActions({
                           ? `${files.length} files selected`
                           : file?.name ?? "No file selected"}
                       </span>
+                      {activeAction === "attach_oem_quote" ? (
+                        <span className="w-full text-[11px] text-slate-500">
+                          Outlook export only: .msg (Windows) or .eml (Mac / New Outlook / web)
+                        </span>
+                      ) : null}
                     </div>
                     {files.length > 1 ? (
                       <ul className="space-y-0.5 text-[11px] text-slate-500">

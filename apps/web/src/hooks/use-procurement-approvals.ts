@@ -12,12 +12,18 @@ import {
 } from "@/lib/procurement-approvals";
 import { pushPoApprovalDecisionNotification } from "@/lib/procurement-approval-notifications";
 import {
+  acceptScmPoApproval,
+  collectPoApprovalDocuments,
   finalizeScmOrder,
   listScmFinalizeApprovals,
   rejectScmFinalizeApproval,
   requestScmFinalizeApproval,
   type ScmFinalizeApproval,
 } from "@/services/procurement-service";
+import {
+  ensureScmOvfPdfAttached,
+  isScmOvfPdfAttachment,
+} from "@/utils/scm-ovf-pdf-attach";
 
 function mapServerFinalize(row: ScmFinalizeApproval): PoApprovalRequest {
   return {
@@ -34,10 +40,90 @@ function mapServerFinalize(row: ScmFinalizeApproval): PoApprovalRequest {
     reason: null,
     documents: [],
     requestedByRole: "user",
+    requestedByName: (row.requested_by_name || "").trim() || null,
     status: row.status,
     createdAt: row.requested_at || new Date().toISOString(),
     decidedAt: row.decided_at,
+    scmApprovalStage: row.scm_approval_stage ?? null,
+    stageLabel: row.stage_label ?? null,
   };
+}
+
+function compareCompanyPoNumberDesc(a: PoApprovalRequest, b: PoApprovalRequest): number {
+  const poA = (a.companyPoNumber || a.documentNumber || "").trim();
+  const poB = (b.companyPoNumber || b.documentNumber || "").trim();
+  if (poA !== poB) {
+    return poB.localeCompare(poA, undefined, { numeric: true, sensitivity: "base" });
+  }
+  return b.createdAt.localeCompare(a.createdAt);
+}
+
+function generatedOvfPdfDocument(
+  ovfId: string,
+  ovfNo: string | null | undefined,
+): PoApprovalRequest["documents"][number] {
+  const safeNo = String(ovfNo || ovfId).replace(/[^\w.-]+/g, "_");
+  return {
+    id: `generated-ovf-pdf:${ovfId}`,
+    fileName: `OVF-${safeNo}.pdf`,
+    category: "ovf_pdf",
+    remarks: "Auto-generated OVF PDF (same as View OVF → Download PDF)",
+    entityType: "ovf",
+    source: "ovf",
+    attachmentSource: "generated",
+    externalUrl: null,
+  };
+}
+
+async function withOvfCommercialDocuments(
+  rows: PoApprovalRequest[],
+): Promise<PoApprovalRequest[]> {
+  return Promise.all(
+    rows.map(async (row) => {
+      const ovfId = String(row.ovfId || "").trim();
+      if (ovfId) {
+        // Same PDF as View OVF → Download PDF (persists when requester/approver can upload).
+        await ensureScmOvfPdfAttached(ovfId).catch(() => null);
+      }
+
+      const hasOvfPdf = row.documents.some((doc) =>
+        isScmOvfPdfAttachment({
+          category: doc.category,
+          fileName: doc.fileName,
+        }),
+      );
+      if (row.documents.length > 0 && hasOvfPdf) return row;
+
+      const collected = await collectPoApprovalDocuments({
+        orderId: row.orderId,
+        ovfId: row.ovfId,
+      }).catch(() => []);
+      const documents = collected.map((doc) => ({
+        id: doc.id,
+        fileName: doc.fileName,
+        category: doc.category,
+        remarks: doc.remarks,
+        entityType: doc.entityType,
+        source: doc.source,
+        attachmentSource: doc.attachmentSource,
+        externalUrl: doc.externalUrl,
+      }));
+
+      const collectedHasOvfPdf = documents.some((doc) =>
+        isScmOvfPdfAttachment({
+          category: doc.category,
+          fileName: doc.fileName,
+        }),
+      );
+      // Always surface Download PDF for OVF-sourced approval requests.
+      if (ovfId && !collectedHasOvfPdf) {
+        documents.unshift(generatedOvfPdfDocument(ovfId, row.ovfNo));
+      }
+
+      if (documents.length === 0) return row;
+      return { ...row, documents };
+    }),
+  );
 }
 
 function mergeApprovalRows(
@@ -48,7 +134,7 @@ function mergeApprovalRows(
   for (const row of [...serverFinalize, ...localCreatePo]) {
     byId.set(row.id, row);
   }
-  return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return [...byId.values()].sort(compareCompanyPoNumberDesc);
 }
 
 export function useProcurementApprovals() {
@@ -62,7 +148,9 @@ export function useProcurementApprovals() {
     try {
       const server = await listScmFinalizeApprovals();
       setLoadError(null);
-      setRows(mergeApprovalRows(server.map(mapServerFinalize), localCreatePo));
+      const merged = mergeApprovalRows(server.map(mapServerFinalize), localCreatePo);
+      // Attach OVF commercial pack (BOQ / SOW / quotes / etc.) for approval review.
+      setRows(await withOvfCommercialDocuments(merged));
     } catch (err) {
       // Keep IN STOCK Create-PO requests visible even if the shared inbox fails.
       setLoadError(err instanceof Error ? err.message : "Failed to load finalize approvals");
@@ -112,7 +200,12 @@ export function useProcurementApprovals() {
     async (row: PoApprovalRequest, status: Exclude<PoApprovalStatus, "pending">) => {
       if (row.kind === "finalize") {
         if (status === "accepted") {
-          await finalizeScmOrder(row.orderId);
+          const stage = row.scmApprovalStage || "accept_po";
+          if (stage === "accept_po") {
+            await acceptScmPoApproval(row.orderId);
+          } else {
+            await finalizeScmOrder(row.orderId);
+          }
         } else {
           await rejectScmFinalizeApproval(row.orderId);
         }

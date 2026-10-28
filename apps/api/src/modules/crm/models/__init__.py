@@ -28,7 +28,7 @@ from modules.crm.models.opportunity_stage import CrmOpportunityStage
 from modules.crm.models.ovf import CrmOvf, CrmOvfExpense, CrmOvfLine, CrmOvfPayment
 from modules.crm.models.pipeline import CrmPipeline
 from modules.crm.models.product import CrmProduct
-from modules.crm.models.quote import CrmQuote, CrmQuoteLine
+from modules.crm.models.quote import CrmQuote, CrmQuoteLine, CrmQuoteRevisionSnapshot
 from modules.crm.models.saved_report import CrmSavedReport
 from modules.crm.models.state_history import CrmStateHistory
 from modules.crm.models.task import CrmTask
@@ -68,6 +68,7 @@ __all__ = [
     "CrmProduct",
     "CrmQuote",
     "CrmQuoteLine",
+    "CrmQuoteRevisionSnapshot",
     "CrmSavedReport",
     "CrmStateHistory",
     "CrmTask",

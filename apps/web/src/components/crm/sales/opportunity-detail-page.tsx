@@ -27,7 +27,13 @@ import { CompanyWorkspaceNav } from "@/components/crm/company-workspace-nav";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { cloneOpportunityRecord, downloadOpportunityExport, printOpportunityPreview } from "@/lib/crm/crm-record-actions";
+import {
+  buildOvfPrintPdfAttachmentById,
+  buildQuotePrintPdfAttachment,
+  cloneOpportunityRecord,
+  downloadOpportunityExport,
+  printOpportunityPreview,
+} from "@/lib/crm/crm-record-actions";
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
 import { setCrmOpportunityContext, setCrmSidebarFocus } from "@/lib/crm-sidebar-focus";
 import { ApiClientError } from "@/services/api-client";
@@ -46,6 +52,7 @@ import {
   listLeadSourceOptions,
   listMarketingEventOptions,
   listOvfs,
+  listQuoteLines,
   listQuotes,
   downloadAttachment,
   markOvfDealWon,
@@ -91,7 +98,7 @@ const QUOTE_STAGE_ACTIONS: Record<string, string[]> = {
 const OVF_STAGE_ACTIONS: Record<string, string[]> = {
   draft: ["send_for_approval"],
   approved: ["share_to_scm"],
-  shared_scm: ["deal_won"],
+  // shared_scm is CRM-terminal (no Mark Deal Won / further transitions)
 };
 const OVF_FOLLOW_ON = new Set(Object.values(OVF_STAGE_ACTIONS).flat());
 
@@ -217,6 +224,12 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
           if (!assignedUserId && assignedUserIds.length === 0) {
             throw new ApiClientError("Select an approver before sending for approval.", 400);
           }
+          let ovfPdf: { filename: string; base64: string } | null = null;
+          try {
+            ovfPdf = await buildOvfPrintPdfAttachmentById(ovf.id);
+          } catch {
+            ovfPdf = null;
+          }
           await sendOvfForApproval(ovf.id, {
             team_role: typeof payload.team_role === "string" ? payload.team_role : undefined,
             remarks: typeof payload.remarks === "string" ? payload.remarks : null,
@@ -227,6 +240,8 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
                 : assignedUserId
                   ? [assignedUserId]
                   : undefined,
+            ovf_pdf_base64: ovfPdf?.base64 ?? null,
+            ovf_pdf_filename: ovfPdf?.filename ?? null,
           });
         } else if (action === "share_to_scm") {
           await shareOvfToScm(ovf.id);
@@ -240,7 +255,24 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
       } else if (quote && quoteFollowOn.includes(action)) {
         await applyQuoteAction(quote.id, action, payload);
       } else {
-        await applyOpportunityAction(opportunityId, action, payload);
+        let enrichedPayload = payload;
+        if (action === "attach_po" || action === "send_po_approval") {
+          const acceptedQuote = quotes.find((row) => row.quote_stage === "accepted") ?? quote;
+          if (acceptedQuote) {
+            try {
+              const lineRows = await listQuoteLines(acceptedQuote.id);
+              const quotationPdf = await buildQuotePrintPdfAttachment(acceptedQuote, lineRows);
+              enrichedPayload = {
+                ...payload,
+                quotation_pdf_base64: quotationPdf.base64,
+                quotation_pdf_filename: quotationPdf.filename,
+              };
+            } catch {
+              // PO approval still proceeds; email may omit the quote print.
+            }
+          }
+        }
+        await applyOpportunityAction(opportunityId, action, enrichedPayload);
       }
       await load();
     } catch (err) {
@@ -347,7 +379,10 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
       ? (QUOTE_STAGE_ACTIONS[activeQuote.quote_stage] ?? [])
       : [];
   const ovfFollowOnActions =
-    existingOvf && !existingOvf.locked && !existingOvf.deal_won
+    existingOvf &&
+    !existingOvf.locked &&
+    !existingOvf.deal_won &&
+    !existingOvf.shared_to_scm
       ? (OVF_STAGE_ACTIONS[existingOvf.blueprint_state] ?? [])
       : [];
   const blueprintActions = Array.from(
@@ -542,6 +577,10 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
               quotes,
               ovfs,
             })}
+            showDealWonBadge={
+              String(opp.status || "").toLowerCase() === "won" ||
+              quotes.some((row) => row.quote_stage === "accepted")
+            }
             excludeActions={CUSTOM_ACTIONS}
             actionLabelOverrides={createOvfLabels}
             defaultValues={{

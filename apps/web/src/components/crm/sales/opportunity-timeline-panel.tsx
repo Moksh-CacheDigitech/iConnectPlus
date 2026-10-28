@@ -85,7 +85,9 @@ const CURRENT_STATE_TITLES = new Set([
   "BOQ/SOW Studied",
   "Deal Registration",
   "Deal Registration Submitted",
+  "Attach Vendor Quotation",
   "Vendor Quotation Received",
+  "Vendor Quotation Attached",
   "Vendor Quote Attached",
   "Quote Created",
   "Quote Sent for Approval",
@@ -98,7 +100,6 @@ const CURRENT_STATE_TITLES = new Set([
   "OVF Ready",
   "Customer PO Approved / OVF Ready",
   "OVF Created",
-  "OVF Created · Draft",
   "OVF Sent for Approval",
   "OVF Approved",
   "OVF Shared to SCM",
@@ -111,6 +112,7 @@ const STAGE_ENTITIES = new Set<string>(["lead", "opportunity", "quote", "ovf"]);
 /** Prefer API Current State titles; only remap unknown history titles. */
 function resolveTimelineEventTitle(event: OpportunityTimelineEvent): string {
   const title = (event.title || "").trim();
+  if (title === "OVF Created · Draft") return "OVF Created";
   if (title && CURRENT_STATE_TITLES.has(title)) {
     return title;
   }

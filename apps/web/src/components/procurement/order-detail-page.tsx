@@ -18,8 +18,6 @@ import { PoFulfillmentCharts } from "@/components/procurement/po-fulfillment-cha
 import {
   ReceiptSerialsDialog,
   type ReceiptSerialDialogLine,
-  type VendorInvoiceDraft,
-  emptyVendorInvoiceDraft,
 } from "@/components/procurement/receipt-serials-dialog";
 import { PoOrderDocumentsCard } from "@/components/procurement/po-order-documents-card";
 
@@ -44,20 +42,18 @@ import {
   listVendorOptions,
   requestScmFinalizeApproval,
   listVendorPos,
-  resolveVendorOrgScope,
   updateLineReceipt,
-  saveReceiptBatchVendorInvoice,
-  uploadReceiptBatchAttachment,
+  createInvoiceGenerationTasks,
   type ProcOrder,
   type ScmReceiptBatch,
 } from "@/services/procurement-service";
-import { fileToBase64 } from "@/services/sales-crm-service";
 import type { GrnReceiptPdfContext } from "@/utils/grn-batch-pdf-download";
 import { resolveReceiptBatchId } from "@/utils/resolve-receipt-batch-id";
 import {
   buildDeliveryChallanPdfInputFromRecordResolved,
   downloadDeliveryChallanPdf,
 } from "@/utils/delivery-challan-pdf";
+import { ensureScmOvfPdfAttached } from "@/utils/scm-ovf-pdf-attach";
 import {
   formatChallanGrnSummary,
   listDeliveryChallansByOrderId,
@@ -314,9 +310,6 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
   const [receiptSerialOpen, setReceiptSerialOpen] = useState(false);
   const [pendingReceiptLines, setPendingReceiptLines] = useState<ReceiptSerialDialogLine[]>([]);
   const [receiptModalError, setReceiptModalError] = useState<string | null>(null);
-  const [vendorInvoiceDraft, setVendorInvoiceDraft] = useState<VendorInvoiceDraft>(
-    emptyVendorInvoiceDraft,
-  );
   const [challanOpen, setChallanOpen] = useState(false);
   const [challanSavedBanner, setChallanSavedBanner] = useState<string | null>(null);
   const [decisionNotice, setDecisionNotice] = useState<PoApprovalDecisionNotification | null>(
@@ -436,6 +429,10 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
     setBusy(true);
     setError(null);
     try {
+      const ovfId = String(order.source_document_id || "").trim();
+      if (ovfId) {
+        await ensureScmOvfPdfAttached(ovfId).catch(() => null);
+      }
       const updated = await requestScmFinalizeApproval(order.id);
       setOrder(updated);
       setError(null);
@@ -535,29 +532,6 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
       });
     }
 
-    const invoiceTouched =
-      vendorInvoiceDraft.files.length > 0 ||
-      vendorInvoiceDraft.invoiceNumber.trim() !== "" ||
-      vendorInvoiceDraft.invoiceDate.trim() !== "" ||
-      vendorInvoiceDraft.quantity.trim() !== "" ||
-      vendorInvoiceDraft.subtotal.trim() !== "";
-    if (vendorInvoiceDraft.files.length > 0 && !vendorInvoiceDraft.invoiceNumber.trim()) {
-      setReceiptModalError("Enter invoice number for the attached vendor invoice.");
-      return;
-    }
-    if (invoiceTouched) {
-      const qtyRaw = vendorInvoiceDraft.quantity.trim();
-      const subRaw = vendorInvoiceDraft.subtotal.trim();
-      if (qtyRaw && Number.isNaN(Number(qtyRaw))) {
-        setReceiptModalError("Invoice quantity must be a number.");
-        return;
-      }
-      if (subRaw && Number.isNaN(Number(subRaw))) {
-        setReceiptModalError("Invoice total amount must be a number.");
-        return;
-      }
-    }
-
     setSavingReceipts(true);
     setReceiptModalError(null);
     setError(null);
@@ -576,76 +550,6 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
       const refreshed = await loadOrderWithCommercial(latest.id);
       const batchId = resolveReceiptBatchId(refreshed);
 
-      async function resolveUploadScope() {
-        const branchId = refreshed.branch_id?.trim();
-        const companyId = refreshed.company_id?.trim();
-        if (branchId && companyId) {
-          return { company_id: companyId, branch_id: branchId };
-        }
-        return resolveVendorOrgScope();
-      }
-
-      if (invoiceTouched && batchId) {
-        const scope = await resolveUploadScope();
-        if (!scope?.branch_id) {
-          setError(
-            "Receipt saved, but vendor invoice could not be saved (missing branch scope).",
-          );
-        } else {
-          try {
-            const qtyRaw = vendorInvoiceDraft.quantity.trim();
-            const subRaw = vendorInvoiceDraft.subtotal.trim();
-            const invoiceFiles = vendorInvoiceDraft.files;
-            const primaryFile = invoiceFiles[0];
-            const content_base64 = primaryFile ? await fileToBase64(primaryFile) : null;
-            await saveReceiptBatchVendorInvoice(batchId, {
-              vendor_invoice_number: vendorInvoiceDraft.invoiceNumber.trim() || null,
-              vendor_invoice_date: vendorInvoiceDraft.invoiceDate.trim() || null,
-              vendor_invoice_quantity: qtyRaw ? Number(qtyRaw) : null,
-              vendor_invoice_subtotal: subRaw ? Number(subRaw) : null,
-              file_name: primaryFile?.name ?? null,
-              content_base64,
-              content_type: primaryFile?.type || null,
-              branch_id: scope.branch_id,
-              company_id: scope.company_id ?? null,
-            });
-            for (let i = 1; i < invoiceFiles.length; i += 1) {
-              const doc = invoiceFiles[i];
-              await uploadReceiptBatchAttachment(batchId, {
-                file_name: doc.name,
-                content_base64: await fileToBase64(doc),
-                content_type: doc.type || null,
-                branch_id: scope.branch_id,
-                company_id: scope.company_id ?? null,
-              });
-            }
-          } catch (uploadErr) {
-            const uploadDetail =
-              uploadErr instanceof ApiClientError
-                ? [uploadErr.message, ...uploadErr.errors].filter(Boolean).join(" - ")
-                : uploadErr instanceof Error && uploadErr.message.trim()
-                  ? uploadErr.message
-                  : "Failed to save vendor invoice";
-            setReceiptModalError(
-              `Receipt saved, but vendor invoice failed: ${uploadDetail}`,
-            );
-            setOrder(refreshed);
-            void listOrderReceiptBatches(orderId)
-              .then((batches) => setReceiptBatches(batches))
-              .catch(() => setReceiptBatches([]));
-            const drafts = emptyReceiptDrafts(refreshed.lines || []);
-            setQtyDraft(drafts.qty);
-            setCostDraft(drafts.cost);
-            setSerialDraft({});
-            setPendingReceiptLines([]);
-            setVendorInvoiceDraft(emptyVendorInvoiceDraft());
-            return;
-          }
-        }
-      } else if (invoiceTouched && !batchId) {
-        setError("Receipt saved, but vendor invoice could not be linked (no receipt batch).");
-      }
-
       setOrder(refreshed);
       {
         const drafts = emptyReceiptDrafts(refreshed.lines || []);
@@ -654,7 +558,6 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
       }
       setSerialDraft({});
       setPendingReceiptLines([]);
-      setVendorInvoiceDraft(emptyVendorInvoiceDraft());
       setReceiptSerialOpen(false);
 
       const batches = await listOrderReceiptBatches(orderId).catch(() => [] as ScmReceiptBatch[]);
@@ -717,9 +620,48 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
             kind: "billing",
             itemsSummary: itemsSummaryForKind("billing"),
           });
+          const batchUuid =
+            (latestBatch?.id && String(latestBatch.id)) ||
+            (batchId ? String(batchId) : "");
+          if (batchUuid) {
+            try {
+              await createInvoiceGenerationTasks({
+                order_id: refreshed.id,
+                receipt_batch_id: batchUuid,
+                items_summary: itemsSummaryForKind("billing"),
+                vendor_name: vendorName.trim(),
+                customer_name:
+                  refreshed.customer_name?.trim() ||
+                  order?.customer_name?.trim() ||
+                  "",
+              });
+              try {
+                sessionStorage.setItem(
+                  "erp.procurement.accounts-invoice-notified",
+                  "Accounts was notified to fill invoice number, date, quantity, and amount in My Jobs.",
+                );
+              } catch {
+                /* ignore */
+              }
+            } catch (notifyErr) {
+              const notifyDetail =
+                notifyErr instanceof ApiClientError
+                  ? [notifyErr.message, ...notifyErr.errors].filter(Boolean).join(" - ")
+                  : notifyErr instanceof Error && notifyErr.message.trim()
+                    ? notifyErr.message
+                    : "Could not notify Accounts";
+              setError(
+                `Receipt saved, but Accounts was not notified: ${notifyDetail}`,
+              );
+            }
+          }
         }
       }
-      router.push("/procurement/delivery-challan");
+      router.push(
+        hasBilling || hasDeliveryChallan
+          ? "/procurement/delivery-challan"
+          : `/procurement/orders/${orderId}?tab=grn`,
+      );
     } catch (err) {
       const detail =
         err instanceof ApiClientError
@@ -813,7 +755,6 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
     }
     setSerialDraft(draft);
     setPendingReceiptLines(result.lines);
-    setVendorInvoiceDraft(emptyVendorInvoiceDraft());
     setReceiptSerialOpen(true);
   }
 
@@ -821,15 +762,8 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
     if (savingReceipts) return;
     setReceiptSerialOpen(false);
     setReceiptModalError(null);
-    setVendorInvoiceDraft(emptyVendorInvoiceDraft());
   }
 
-  /** GRN / receipt / challan only after admin finalizes (issued PO). */
-  const canReceipt = Boolean(
-    order &&
-      !["draft", "submitted", "cancelled"].includes((order.status || "").toLowerCase()),
-  );
-  const showGrnWorkspace = canReceipt && viewMode === "grn";
   const orderStatus = (order?.status || "").toLowerCase();
   const workflowStatus = (order?.workflow_status || "").toLowerCase();
   const pendingApproval = orderStatus === "submitted";
@@ -854,6 +788,28 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
       order.source_module === "crm" &&
       !["draft", "submitted", "cancelled"].includes((order.status || "").toLowerCase()),
   );
+  /** Any prior receipt means acknowledgement was already satisfied for this PO. */
+  const hasStartedGrn = Boolean(
+    order &&
+      ((order.lines || []).some((ln) => Number(ln.quantity_received ?? 0) > 1e-9) ||
+        Number(order.received_amount ?? 0) > 1e-9 ||
+        receiptBatches.some((batch) =>
+          (batch.lines || []).some((ln) => Number(ln.quantity) > 1e-9),
+        )),
+  );
+  /**
+   * CRM POs: ask for acknowledgement only once before the first GRN.
+   * After ack is sent — or GRN has already started — do not block again.
+   */
+  const deliveryAckRequired =
+    deliveryTrackingApplies && !order?.customer_ack_sent_at && !hasStartedGrn;
+  /** GRN / receipt / challan only after issue (+ delivery ack for CRM POs). */
+  const canReceipt = Boolean(
+    order &&
+      !["draft", "submitted", "cancelled"].includes((order.status || "").toLowerCase()) &&
+      !deliveryAckRequired,
+  );
+  const showGrnWorkspace = canReceipt && viewMode === "grn";
   const negotiationBlocksIssue =
     order?.negotiation_status === "pending" || order?.negotiation_status === "rejected";
   const canFinalize =
@@ -1068,6 +1024,19 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
                 Record GRN
               </Button>
             ) : null}
+            {deliveryAckRequired && !challanOpen && !showGrnWorkspace ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled
+                title="Send Delivery Tracking acknowledgement first"
+                className="cursor-not-allowed transition-colors duration-200"
+              >
+                <PackageCheck className="mr-1.5 size-3.5" />
+                Record GRN (send ack first)
+              </Button>
+            ) : null}
             {canFinalize && !showGrnWorkspace ? (
               <Button
                 type="button"
@@ -1212,6 +1181,8 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
                 <DeliveryTrackingCard
                   order={order}
                   isAdmin={isAdmin}
+                  grnStarted={hasStartedGrn}
+                  lockGrnUntilAck={deliveryAckRequired}
                   onSaved={() => void load()}
                 />
               ) : null}
@@ -1453,7 +1424,7 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
                     <th className="px-3 py-2 font-bold">Description</th>
                     <th className="px-3 py-2 font-bold">HSN/SAC</th>
                     <th className="px-3 py-2 font-bold">Ordered</th>
-                    <th className="px-3 py-2 text-center font-bold">Receive now</th>
+                    <th className="px-3 py-2 text-center font-bold">GRN qty</th>
                     {showReceiptColumns ? (
                       <th className="px-3 py-2 font-bold">Remaining</th>
                     ) : null}
@@ -1702,8 +1673,6 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
             });
           }}
           onSerialImportError={setReceiptModalError}
-          vendorInvoice={vendorInvoiceDraft}
-          onVendorInvoiceChange={setVendorInvoiceDraft}
           onConfirm={() => void confirmReceiptWithSerials()}
           onClose={closeReceiptSerialModal}
         />

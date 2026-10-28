@@ -7,10 +7,16 @@ import {
   type ProjectMyJob,
 } from "@/services/projects-portal-service";
 import {
+  listMyInvoiceGenerationTasks,
+  type ProcInvoiceGenerationTask,
+} from "@/services/procurement-service";
+import {
   listMyJobs,
   myJobEntityHref,
   type ApprovalTask,
 } from "@/services/sales-crm-service";
+
+export type PlatformMyJobOpenMode = "link" | "invoice_generation_dialog";
 
 export type PlatformMyJobRow = {
   id: string;
@@ -19,6 +25,11 @@ export type PlatformMyJobRow = {
   detail: string;
   status: string;
   href: string;
+  /** When set, Open uses an in-page dialog instead of navigating. */
+  openMode?: PlatformMyJobOpenMode;
+  invoiceTaskId?: string;
+  orderId?: string;
+  receiptBatchId?: string;
 };
 
 export type PlatformMyJobModuleSection = {
@@ -29,7 +40,7 @@ export type PlatformMyJobModuleSection = {
   error?: string;
 };
 
-const MODULE_ORDER = ["crm", "projects", "hr"] as const;
+const MODULE_ORDER = ["crm", "projects", "hr", "procurement"] as const;
 
 const MODULE_META: Record<
   (typeof MODULE_ORDER)[number],
@@ -38,6 +49,7 @@ const MODULE_META: Record<
   crm: { title: "CRM", href: "/crm/my-jobs" },
   projects: { title: "Projects", href: "/projects/my-jobs" },
   hr: { title: "HR", href: "/hr/ess-inbox" },
+  procurement: { title: "Procurement", href: "/procurement/my-jobs" },
 };
 
 function crmRows(tasks: ApprovalTask[]): PlatformMyJobRow[] {
@@ -66,6 +78,25 @@ function projectRows(jobs: ProjectMyJob[]): PlatformMyJobRow[] {
     href: job.form_path?.startsWith("/")
       ? job.form_path
       : `/projects/projects/${job.project_id}`,
+  }));
+}
+
+function procurementRows(tasks: ProcInvoiceGenerationTask[]): PlatformMyJobRow[] {
+  return tasks.map((task) => ({
+    id: `proc-inv-${task.id}`,
+    title: task.title || task.task_code,
+    reference:
+      [task.grn_number, task.purchase_order_number].filter(Boolean).join(" · ") ||
+      task.task_code,
+    detail:
+      [task.vendor_name, task.items_summary].filter(Boolean).join(" · ") ||
+      "Invoice generation",
+    status: task.status,
+    href: "/procurement/my-jobs",
+    openMode: "invoice_generation_dialog",
+    invoiceTaskId: task.id,
+    orderId: task.order_header_id,
+    receiptBatchId: task.receipt_batch_id,
   }));
 }
 
@@ -119,6 +150,11 @@ export async function loadPlatformMyJobs(input: {
             href: inboxItemHref(item),
           }));
       },
+    },
+    {
+      key: "procurement",
+      run: async () =>
+        procurementRows(await listMyInvoiceGenerationTasks("pending")),
     },
   ];
 

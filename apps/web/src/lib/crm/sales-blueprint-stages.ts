@@ -14,10 +14,15 @@ export type SalesStageContext = {
   ovfs?: Ovf[];
 };
 
-function resolveQuoteStageLabel(quoteStage: string, locked?: boolean): string {
+function resolveQuoteStageLabel(
+  quoteStage: string,
+  locked?: boolean,
+  quoteRevision?: number | null,
+): string {
+  const rev = Math.max(1, Number(quoteRevision) || 1);
   switch (quoteStage) {
     case "draft":
-      return "Quote Created";
+      return rev > 1 ? `V${rev} Draft` : "Quote Created";
     case "internal_approval":
       return locked ? "Quote Sent for Approval" : "Quote Sent for Approval";
     case "approved_internal":
@@ -39,7 +44,7 @@ function resolveOvfStageLabel(blueprintState: string, ovf: Ovf): string {
   if (ovf.deal_won || blueprintState === "deal_won") return "Deal Won";
   switch (blueprintState) {
     case "draft":
-      return "OVF Created · Draft";
+      return "OVF Created";
     case "approval":
       return ovf.locked ? "OVF Sent for Approval" : "OVF Sent for Approval";
     case "approved":
@@ -100,11 +105,11 @@ function resolveOpportunityBlueprintState(
     case "deal_reg":
       return resolveOpportunityDealReg(opp);
     case "oem_pending":
-      return "Awaiting Vendor Quotation";
+      return "Attach Vendor Quotation";
     case "oem_attached":
-      return "Vendor Quotation Received";
+      return "Attach Vendor Quotation";
     case "quote_ready":
-      return "Vendor Quote Attached";
+      return "Vendor Quotation Attached";
     case "quote_in_progress":
       return "Quote Created";
     case "po_pending":
@@ -143,14 +148,14 @@ function resolveUnifiedOpportunityStage(ctx: SalesStageContext): string {
     ctx.quotes?.[0];
 
   if (quote) {
-    const quoteLabel = resolveQuoteStageLabel(quote.quote_stage, quote.locked);
+    const quoteLabel = resolveQuoteStageLabel(quote.quote_stage, quote.locked, quote.quote_revision);
     const quotePastDraft = quote.quote_stage !== "draft";
     const oppInQuotePhase = ["quote_in_progress", "po_pending", "po_approval", "ovf_ready"].includes(
       state,
     );
     if (quotePastDraft || oppInQuotePhase || state === "quote_in_progress") {
       if (quote.quote_stage === "draft" && state === "quote_in_progress") {
-        return "Quote Created";
+        return quoteLabel;
       }
       if (quote.quote_stage !== "draft") {
         return quoteLabel;
@@ -171,7 +176,11 @@ export function resolveSalesStageLabel(ctx: SalesStageContext): string {
       return ctx.lead?.created_at ? "Lead Open" : "Lead Open";
     }
     case "quote":
-      return resolveQuoteStageLabel(state, ctx.locked ?? ctx.quote?.locked);
+      return resolveQuoteStageLabel(
+        state,
+        ctx.locked ?? ctx.quote?.locked,
+        ctx.quote?.quote_revision,
+      );
     case "ovf":
       if (ctx.ovf) return resolveOvfStageLabel(state, ctx.ovf);
       return resolveOvfStageLabel(state, {

@@ -24,12 +24,15 @@ import { formatCrmCode } from "@/lib/crm/format-crm-code";
 import { resolveSessionEmployeeLabel } from "@/lib/crm/session-employee";
 import {
   normalizeQuoteServiceType,
+  parseLeadProductTypes,
 } from "@/lib/crm/lead-product-options";
+import { downloadQuoteExport } from "@/lib/crm/crm-record-actions";
 import { ApiClientError } from "@/services/api-client";
 import { extractVendorQuoteLines, getDefaultQuoteTerms } from "@/services/crm-deal-controls-service";
 import {
   addQuoteLine,
   createAttachment,
+  createContact,
   createQuote,
   deleteQuoteLine,
   fileToBase64,
@@ -47,6 +50,7 @@ import {
   quoteLineMarkupPct,
   updateQuote,
   updateQuoteLine,
+  type Company,
   type Contact,
   type Opportunity,
   type Quote,
@@ -132,13 +136,13 @@ const EMPTY_FORM: QuoteDraft = {
   freight: "0",
 };
 
-function newLine(): LineDraft {
+function newLine(lineType: string = "hardware"): LineDraft {
   return {
     key: crypto.randomUUID(),
     product_name: "",
     hsn_sac: "",
     description: "",
-    line_type: "hardware",
+    line_type: lineType,
     qty: "1",
     unit_cost: "0",
     unit_sell: "0",
@@ -147,6 +151,89 @@ function newLine(): LineDraft {
     vendorFile: null,
   };
 }
+
+function isServiceLine(line: LineDraft): boolean {
+  return (line.line_type || "").trim().toLowerCase() === "services";
+}
+
+function namesMatch(
+  left: { first_name?: string | null; last_name?: string | null },
+  right: { first_name?: string | null; last_name?: string | null },
+): boolean {
+  const a = fullName(left).trim().toLowerCase();
+  const b = fullName(right).trim().toLowerCase();
+  return Boolean(a && b && a !== "-" && a === b);
+}
+
+/** Prefer the lead/company person (e.g. "Moksh Sharma") as quote Contact Name. */
+async function resolveQuoteContact(input: {
+  opportunity: Opportunity;
+  company: Company | null;
+  lead: SalesLead | null;
+  contacts: Contact[];
+}): Promise<{ contacts: Contact[]; contactId: string }> {
+  const preferred = {
+    first_name: (input.lead?.first_name || input.company?.first_name || "").trim(),
+    last_name: (input.lead?.last_name || input.company?.last_name || "").trim() || null,
+    email: input.lead?.email || input.company?.customer_email || null,
+    mobile: input.lead?.mobile || input.company?.phone || null,
+    title: input.lead?.designation || input.company?.role || null,
+  };
+
+  let contacts = [...input.contacts];
+  let match =
+    preferred.first_name
+      ? contacts.find((contact) => namesMatch(contact, preferred))
+      : undefined;
+  if (!match) {
+    match = contacts.find((contact) => contact.is_primary) ?? contacts[0];
+  }
+
+  if (
+    !match &&
+    preferred.first_name &&
+    input.opportunity.company_account_id &&
+    input.opportunity.branch_id
+  ) {
+    try {
+      const created = await createContact({
+        company_account_id: input.opportunity.company_account_id,
+        branch_id: input.opportunity.branch_id,
+        first_name: preferred.first_name,
+        last_name: preferred.last_name,
+        email: preferred.email,
+        mobile: preferred.mobile,
+        phone: preferred.mobile,
+        title: preferred.title,
+        is_primary: contacts.length === 0,
+      });
+      contacts = [created, ...contacts];
+      match = created;
+    } catch {
+      // Keep the dropdown empty if contact sync fails; user can still pick/create later.
+    }
+  }
+
+  return { contacts, contactId: match?.id ?? "" };
+}
+
+const LINE_TABLE_HEADERS = [
+  "S.No",
+  "Product Name",
+  "HSN/SAC Code",
+  "Item Description",
+  "Quantity",
+  "Unit Price (₹)",
+  "Margin %",
+  "Unit Margin Value (₹)",
+  "Unit Price Margin (₹)",
+  "Total Margin Value (₹)",
+  "Total Qty Price Margin (₹)",
+  "GST %",
+  "Total GST",
+  "Total Amount incl. GST",
+  "",
+] as const;
 
 export function QuoteFormPage({
   opportunityId,
@@ -174,6 +261,7 @@ export function QuoteFormPage({
   const vendorImportRef = useRef<HTMLInputElement>(null);
   const [importingVendor, setImportingVendor] = useState(false);
   const [vendorImportNote, setVendorImportNote] = useState<string | null>(null);
+  const [leadProductType, setLeadProductType] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -197,6 +285,7 @@ export function QuoteFormPage({
         ]);
         setQuote(quoteRow);
         setOpportunity(opportunityRow);
+        setLeadProductType(opportunityRow.product_type ?? null);
         setContacts(contactRows);
         setForm({
           project_title: quoteRow.project_title ?? "",
@@ -285,7 +374,15 @@ export function QuoteFormPage({
         );
       }
       setOpportunity(opportunityRow);
-      setContacts(contactRows);
+      const productTypeSource = leadRow?.product_type ?? opportunityRow.product_type ?? null;
+      setLeadProductType(productTypeSource);
+      const resolvedContact = await resolveQuoteContact({
+        opportunity: opportunityRow,
+        company: companyRow,
+        lead: leadRow,
+        contacts: contactRows,
+      });
+      setContacts(resolvedContact.contacts);
 
       const billingAddress = companyRow
         ? [
@@ -298,7 +395,6 @@ export function QuoteFormPage({
           .filter(Boolean)
           .join(", ")
         : "";
-      const primaryContact = contactRows.find((contact) => contact.is_primary) ?? contactRows[0];
       const ownerLabel =
         resolveSessionEmployeeLabel(employeeRows, user) ||
         employeeRows.find((employee) => employee.id === opportunityRow.owner_employee_id)?.label ||
@@ -306,7 +402,7 @@ export function QuoteFormPage({
       setForm({
         project_title: opportunityRow.project_title || opportunityRow.opportunity_name || "",
         account_name: companyRow?.customer_name ?? "",
-        contact_id: primaryContact?.id ?? "",
+        contact_id: resolvedContact.contactId,
         service_type:
           normalizeQuoteServiceType(leadRow?.product_type ?? opportunityRow.product_type) ||
           "",
@@ -336,7 +432,15 @@ export function QuoteFormPage({
         terms: await getDefaultQuoteTerms().catch(() => ""),
         freight: "0",
       });
-      setLines([newLine()]);
+      const selectedTypes = parseLeadProductTypes(productTypeSource);
+      const wantsServices =
+        Boolean(opportunityRow.has_services) || selectedTypes.includes("Services");
+      const wantsProducts =
+        selectedTypes.length === 0 || selectedTypes.some((type) => type !== "Services");
+      const starter: LineDraft[] = [];
+      if (wantsProducts) starter.push(newLine("hardware"));
+      if (wantsServices) starter.push(newLine("services"));
+      setLines(starter.length > 0 ? starter : [newLine("hardware")]);
       setInitialLineIds([]);
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Failed to load quote details");
@@ -403,7 +507,7 @@ export function QuoteFormPage({
       const imported = result.lines.map((row, index): LineDraft => {
         const cost = String(Number(row.unit_cost));
         return {
-          ...newLine(),
+          ...newLine("hardware"),
           product_name: row.product_name,
           hsn_sac: row.hsn_sac ?? "",
           qty: String(Number(row.qty)),
@@ -414,7 +518,10 @@ export function QuoteFormPage({
         };
       });
       setLines((current) => [
-        ...current.filter((line) => line.serverId || line.product_name.trim()),
+        ...current.filter(
+          (line) =>
+            isServiceLine(line) || line.serverId || line.product_name.trim(),
+        ),
         ...imported,
       ]);
       setVendorImportNote(
@@ -433,6 +540,23 @@ export function QuoteFormPage({
     );
   }
 
+  const productTypes = useMemo(
+    () => parseLeadProductTypes(leadProductType ?? opportunity?.product_type),
+    [leadProductType, opportunity?.product_type],
+  );
+  const showServicesTable = useMemo(() => {
+    if (opportunity?.has_services) return true;
+    if (productTypes.includes("Services")) return true;
+    return lines.some(isServiceLine);
+  }, [opportunity?.has_services, productTypes, lines]);
+  const showProductsTable = useMemo(() => {
+    if (productTypes.length === 0) return true;
+    if (productTypes.some((type) => type !== "Services")) return true;
+    return lines.some((line) => !isServiceLine(line));
+  }, [productTypes, lines]);
+  const productLines = useMemo(() => lines.filter((line) => !isServiceLine(line)), [lines]);
+  const serviceLines = useMemo(() => lines.filter(isServiceLine), [lines]);
+
   const totals = useMemo(() => {
     const rows = lines.map((line) => {
       const qty = Number(line.qty) || 0;
@@ -446,6 +570,7 @@ export function QuoteFormPage({
       const totalQtyPriceMargin = qty * unitPriceMargin;
       const gstAmount = (totalQtyPriceMargin * gstPct) / 100;
       return {
+        key: line.key,
         unitMarginValue,
         unitPriceMargin,
         totalMarginValue,
@@ -457,6 +582,7 @@ export function QuoteFormPage({
         sellTotal: totalQtyPriceMargin,
       };
     });
+    const byKey = Object.fromEntries(rows.map((row) => [row.key, row]));
     const sellTotal = rows.reduce((sum, row) => sum + row.sellTotal, 0);
     const marginAmount = rows.reduce((sum, row) => sum + row.totalMarginValue, 0);
     const grandTotal = sellTotal;
@@ -477,6 +603,7 @@ export function QuoteFormPage({
         : 0;
     return {
       rows,
+      byKey,
       avgMargin,
       marginAmount,
       grandTotal,
@@ -555,6 +682,14 @@ export function QuoteFormPage({
     };
   }
 
+  async function downloadSavedQuotePdf(savedQuoteId: string) {
+    const [savedQuote, savedLines] = await Promise.all([
+      getQuote(savedQuoteId),
+      listQuoteLines(savedQuoteId),
+    ]);
+    await downloadQuoteExport(savedQuote, savedLines);
+  }
+
   async function onSave() {
     if (!opportunity) return;
     const missing: string[] = [];
@@ -580,44 +715,53 @@ export function QuoteFormPage({
     setSaving(true);
     setError(null);
     try {
+      let savedId: string;
       if (isEdit && quoteId) {
         const saved = await updateQuote(quoteId, quotePayload());
         const keptIds = new Set(lines.map((line) => line.serverId).filter(Boolean) as string[]);
-        await Promise.all(
-          initialLineIds
-            .filter((id) => !keptIds.has(id))
-            .map((id) => deleteQuoteLine(id)),
-        );
-        await Promise.all(
-          lines.map((line) =>
-            line.serverId
-              ? updateQuoteLine(line.serverId, linePayload(line))
-              : addQuoteLine(saved.id, linePayload(line)),
-          ),
-        );
+        // Line add/update/delete each recomputes quote totals with optimistic locking —
+        // must run sequentially to avoid StaleDataError / 409 races.
+        for (const id of initialLineIds.filter((lineId) => !keptIds.has(lineId))) {
+          await deleteQuoteLine(id);
+        }
+        for (const line of lines) {
+          if (line.serverId) {
+            await updateQuoteLine(line.serverId, linePayload(line));
+          } else {
+            await addQuoteLine(saved.id, linePayload(line));
+          }
+        }
         const files = lines.flatMap((line) =>
           line.vendorFile
             ? [{ file: line.vendorFile, category: "vendor_quote" as const }]
             : [],
         );
         await Promise.all(files.map(({ file, category }) => uploadFile(saved.id, file, category)));
-        router.push(`/crm/quotes/${saved.id}`);
-        return;
+        savedId = saved.id;
+      } else {
+        const created = await createQuote({
+          opportunity_id: opportunity.id,
+          branch_id: opportunity.branch_id,
+          ...quotePayload(),
+        });
+        for (const line of lines) {
+          await addQuoteLine(created.id, linePayload(line));
+        }
+        const files = lines.flatMap((line) =>
+          line.vendorFile
+            ? [{ file: line.vendorFile, category: "vendor_quote" as const }]
+            : [],
+        );
+        await Promise.all(files.map(({ file, category }) => uploadFile(created.id, file, category)));
+        savedId = created.id;
       }
 
-      const created = await createQuote({
-        opportunity_id: opportunity.id,
-        branch_id: opportunity.branch_id,
-        ...quotePayload(),
-      });
-      await Promise.all(lines.map((line) => addQuoteLine(created.id, linePayload(line))));
-      const files = lines.flatMap((line) =>
-        line.vendorFile
-          ? [{ file: line.vendorFile, category: "vendor_quote" as const }]
-          : [],
-      );
-      await Promise.all(files.map(({ file, category }) => uploadFile(created.id, file, category)));
-      router.push(`/crm/quotes/${created.id}`);
+      try {
+        await downloadSavedQuotePdf(savedId);
+      } catch {
+        // Save succeeded; do not block navigation if PDF generation fails.
+      }
+      router.push(`/crm/quotes/${savedId}`);
     } catch (err) {
       setError(
         err instanceof ApiClientError
@@ -660,7 +804,7 @@ export function QuoteFormPage({
               Cancel
             </Link>
             <Button type="button" className="cursor-pointer" disabled={saving} onClick={() => void onSave()}>
-              {saving ? "Saving…" : isEdit ? "Save changes" : "Save"}
+              {saving ? "Saving…" : "Save and Print"}
             </Button>
           </div>
         }
@@ -816,177 +960,325 @@ export function QuoteFormPage({
         </div>
       </CrmSection>
 
-      <CrmListPanel className="min-w-0 max-w-full overflow-x-clip">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <CrmIconBadge icon={ListOrdered} />
-            <h2 className="text-base font-extrabold tracking-tight">Quoted Items</h2>
+      {showProductsTable ? (
+        <CrmListPanel className="min-w-0 max-w-full overflow-x-clip">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              <CrmIconBadge icon={ListOrdered} />
+              <h2 className="text-base font-extrabold tracking-tight">Quoted Products</h2>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="cursor-pointer"
+                disabled={importingVendor}
+                onClick={() => vendorImportRef.current?.click()}
+              >
+                <FileInput className="size-3.5" />{" "}
+                {importingVendor ? "Reading quote…" : "Import from vendor quote"}
+              </Button>
+              <input
+                ref={vendorImportRef}
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.txt"
+                className="hidden"
+                aria-label="Vendor quote file"
+                onChange={(e) => void importVendorQuote(e.target.files?.[0])}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="cursor-pointer"
+                onClick={() => setLines((current) => [...current, newLine("hardware")])}
+              >
+                <Plus className="size-3.5" /> Add row
+              </Button>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="cursor-pointer"
-              disabled={importingVendor}
-              onClick={() => vendorImportRef.current?.click()}
+          {vendorImportNote ? (
+            <p
+              className="border-b border-border/70 bg-muted/30 px-4 py-2 text-xs text-muted-foreground"
+              role="status"
             >
-              <FileInput className="size-3.5" /> {importingVendor ? "Reading quote…" : "Import from vendor quote"}
-            </Button>
-            <input
-              ref={vendorImportRef}
-              type="file"
-              accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.txt"
-              className="hidden"
-              aria-label="Vendor quote file"
-              onChange={(e) => void importVendorQuote(e.target.files?.[0])}
-            />
+              {vendorImportNote}
+            </p>
+          ) : null}
+          <div className="erp-scroll min-w-0 overflow-x-auto">
+            <table className="w-max min-w-full text-left text-xs">
+              <thead>
+                <tr className="border-b bg-muted/40 text-[10px] uppercase text-muted-foreground">
+                  {LINE_TABLE_HEADERS.map((label) => (
+                    <th key={label || "actions"} className="whitespace-nowrap px-2 py-2">
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {productLines.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={LINE_TABLE_HEADERS.length}
+                      className="px-4 py-6 text-center text-muted-foreground"
+                    >
+                      No product lines yet. Add a row or import from a vendor quote.
+                    </td>
+                  </tr>
+                ) : (
+                  productLines.map((line, index) => {
+                    const rowTotal = totals.byKey[line.key];
+                    return (
+                      <tr key={line.key} className="border-b last:border-0">
+                        <td className="px-2 py-2 text-center">{index + 1}</td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-40 min-w-[9rem]"
+                            value={line.product_name}
+                            onChange={(e) => setLine(line.key, "product_name", e.target.value)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-24 min-w-[6rem]"
+                            value={line.hsn_sac}
+                            onChange={(e) => setLine(line.key, "hsn_sac", e.target.value)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-44 min-w-[10rem]"
+                            value={line.description}
+                            onChange={(e) => setLine(line.key, "description", e.target.value)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-20"
+                            type="number"
+                            min={0}
+                            value={line.qty}
+                            onChange={(e) => setLine(line.key, "qty", e.target.value)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-28"
+                            type="number"
+                            min={0}
+                            value={line.unit_sell}
+                            onChange={(e) => setLine(line.key, "unit_sell", e.target.value)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-20"
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={line.margin_pct}
+                            onChange={(e) => setLine(line.key, "margin_pct", e.target.value)}
+                          />
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 tabular-nums">
+                          {formatInrPrecise(rowTotal?.unitMarginValue ?? 0)}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 tabular-nums">
+                          {formatInrPrecise(rowTotal?.unitPriceMargin ?? 0)}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 tabular-nums">
+                          {formatInrPrecise(rowTotal?.totalMarginValue ?? 0)}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 font-medium tabular-nums">
+                          {formatInrPrecise(rowTotal?.totalQtyPriceMargin ?? 0)}
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-20"
+                            type="number"
+                            min={0}
+                            value={line.gst_pct}
+                            onChange={(e) => setLine(line.key, "gst_pct", e.target.value)}
+                          />
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 tabular-nums">
+                          {formatInrPrecise(rowTotal?.gstAmount ?? 0)}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 font-medium tabular-nums">
+                          {formatInrPrecise(rowTotal?.withGst ?? 0)}
+                        </td>
+                        <td className="px-2 py-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            className="cursor-pointer text-destructive"
+                            disabled={lines.length <= 1}
+                            onClick={() =>
+                              setLines((current) => current.filter((row) => row.key !== line.key))
+                            }
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CrmListPanel>
+      ) : null}
+
+      {showServicesTable ? (
+        <CrmListPanel className="min-w-0 max-w-full overflow-x-clip">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              <CrmIconBadge icon={ListOrdered} />
+              <h2 className="text-base font-extrabold tracking-tight">Quoted Services</h2>
+            </div>
             <Button
               type="button"
               variant="outline"
               size="sm"
               className="cursor-pointer"
-              onClick={() => setLines((current) => [...current, newLine()])}
+              onClick={() => setLines((current) => [...current, newLine("services")])}
             >
               <Plus className="size-3.5" /> Add row
             </Button>
           </div>
-        </div>
-        {vendorImportNote ? (
-          <p className="border-b border-border/70 bg-muted/30 px-4 py-2 text-xs text-muted-foreground" role="status">
-            {vendorImportNote}
-          </p>
-        ) : null}
-        <div className="erp-scroll min-w-0 overflow-x-auto">
-          <table className="w-max min-w-full text-left text-xs">
-            <thead>
-              <tr className="border-b bg-muted/40 text-[10px] uppercase text-muted-foreground">
-                {[
-                  "S.No",
-                  "Product Name",
-                  "HSN/SAC Code",
-                  "Item Description",
-                  "Quantity",
-                  "Unit Price (₹)",
-                  "Margin %",
-                  "Unit Margin Value (₹)",
-                  "Unit Price Margin (₹)",
-                  "Total Margin Value (₹)",
-                  "Total Qty Price Margin (₹)",
-                  "GST %",
-                  "Total GST",
-                  "Total Amount incl. GST",
-                  "",
-                ].map((label) => (
-                  <th key={label || "actions"} className="whitespace-nowrap px-2 py-2">
-                    {label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((line, index) => {
-                const rowTotal = totals.rows[index];
-                return (
-                  <tr key={line.key} className="border-b last:border-0">
-                    <td className="px-2 py-2 text-center">{index + 1}</td>
-                    <td className="px-2 py-2">
-                      <Input
-                        className="w-40 min-w-[9rem]"
-                        value={line.product_name}
-                        onChange={(e) => setLine(line.key, "product_name", e.target.value)}
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <Input
-                        className="w-24 min-w-[6rem]"
-                        value={line.hsn_sac}
-                        onChange={(e) => setLine(line.key, "hsn_sac", e.target.value)}
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <Input
-                        className="w-44 min-w-[10rem]"
-                        value={line.description}
-                        onChange={(e) => setLine(line.key, "description", e.target.value)}
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <Input
-                        className="w-20"
-                        type="number"
-                        min={0}
-                        value={line.qty}
-                        onChange={(e) => setLine(line.key, "qty", e.target.value)}
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <Input
-                        className="w-28"
-                        type="number"
-                        min={0}
-                        value={line.unit_sell}
-                        onChange={(e) => setLine(line.key, "unit_sell", e.target.value)}
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <Input
-                        className="w-20"
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={line.margin_pct}
-                        onChange={(e) => setLine(line.key, "margin_pct", e.target.value)}
-                      />
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-2 tabular-nums">
-                      {formatInrPrecise(rowTotal?.unitMarginValue ?? 0)}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-2 tabular-nums">
-                      {formatInrPrecise(rowTotal?.unitPriceMargin ?? 0)}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-2 tabular-nums">
-                      {formatInrPrecise(rowTotal?.totalMarginValue ?? 0)}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-2 font-medium tabular-nums">
-                      {formatInrPrecise(rowTotal?.totalQtyPriceMargin ?? 0)}
-                    </td>
-                    <td className="px-2 py-2">
-                      <Input
-                        className="w-20"
-                        type="number"
-                        min={0}
-                        value={line.gst_pct}
-                        onChange={(e) => setLine(line.key, "gst_pct", e.target.value)}
-                      />
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-2 tabular-nums">
-                      {formatInrPrecise(rowTotal?.gstAmount ?? 0)}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-2 font-medium tabular-nums">
-                      {formatInrPrecise(rowTotal?.withGst ?? 0)}
-                    </td>
-                    <td className="px-2 py-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="cursor-pointer text-destructive"
-                        disabled={lines.length === 1}
-                        onClick={() =>
-                          setLines((current) => current.filter((row) => row.key !== line.key))
-                        }
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
+          <div className="erp-scroll min-w-0 overflow-x-auto">
+            <table className="w-max min-w-full text-left text-xs">
+              <thead>
+                <tr className="border-b bg-muted/40 text-[10px] uppercase text-muted-foreground">
+                  {LINE_TABLE_HEADERS.map((label) => (
+                    <th key={label || "service-actions"} className="whitespace-nowrap px-2 py-2">
+                      {label === "Product Name" ? "Service Name" : label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {serviceLines.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={LINE_TABLE_HEADERS.length}
+                      className="px-4 py-6 text-center text-muted-foreground"
+                    >
+                      No service lines yet. Add a row for implementation, support, or AMC.
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <div className="ml-auto w-full max-w-sm space-y-2.5 border-t border-border/70 px-4 py-4 text-xs sm:px-5">
+                ) : (
+                  serviceLines.map((line, index) => {
+                    const rowTotal = totals.byKey[line.key];
+                    return (
+                      <tr key={line.key} className="border-b last:border-0">
+                        <td className="px-2 py-2 text-center">{index + 1}</td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-40 min-w-[9rem]"
+                            value={line.product_name}
+                            onChange={(e) => setLine(line.key, "product_name", e.target.value)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-24 min-w-[6rem]"
+                            value={line.hsn_sac}
+                            onChange={(e) => setLine(line.key, "hsn_sac", e.target.value)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-44 min-w-[10rem]"
+                            value={line.description}
+                            onChange={(e) => setLine(line.key, "description", e.target.value)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-20"
+                            type="number"
+                            min={0}
+                            value={line.qty}
+                            onChange={(e) => setLine(line.key, "qty", e.target.value)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-28"
+                            type="number"
+                            min={0}
+                            value={line.unit_sell}
+                            onChange={(e) => setLine(line.key, "unit_sell", e.target.value)}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-20"
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={line.margin_pct}
+                            onChange={(e) => setLine(line.key, "margin_pct", e.target.value)}
+                          />
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 tabular-nums">
+                          {formatInrPrecise(rowTotal?.unitMarginValue ?? 0)}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 tabular-nums">
+                          {formatInrPrecise(rowTotal?.unitPriceMargin ?? 0)}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 tabular-nums">
+                          {formatInrPrecise(rowTotal?.totalMarginValue ?? 0)}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 font-medium tabular-nums">
+                          {formatInrPrecise(rowTotal?.totalQtyPriceMargin ?? 0)}
+                        </td>
+                        <td className="px-2 py-2">
+                          <Input
+                            className="w-20"
+                            type="number"
+                            min={0}
+                            value={line.gst_pct}
+                            onChange={(e) => setLine(line.key, "gst_pct", e.target.value)}
+                          />
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 tabular-nums">
+                          {formatInrPrecise(rowTotal?.gstAmount ?? 0)}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 font-medium tabular-nums">
+                          {formatInrPrecise(rowTotal?.withGst ?? 0)}
+                        </td>
+                        <td className="px-2 py-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            className="cursor-pointer text-destructive"
+                            disabled={lines.length <= 1}
+                            onClick={() =>
+                              setLines((current) => current.filter((row) => row.key !== line.key))
+                            }
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CrmListPanel>
+      ) : null}
+
+      <CrmListPanel className="min-w-0 max-w-full overflow-x-clip">
+        <div className="ml-auto w-full max-w-sm space-y-2.5 px-4 py-4 text-xs sm:px-5">
           <div className="flex items-baseline justify-between gap-6">
             <span className="shrink-0 text-muted-foreground">Margin in Avg (%)</span>
             <span className="tabular-nums text-foreground">{totals.avgMargin.toFixed(3)}%</span>

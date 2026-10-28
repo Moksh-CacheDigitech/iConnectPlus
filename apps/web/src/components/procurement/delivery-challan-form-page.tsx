@@ -32,6 +32,7 @@ import {
 } from "@/components/procurement/delivery-bill-taken-badge";
 import { ApiClientError, formatApiError } from "@/services/api-client";
 import {
+  getInvoiceGenerationTaskForBatch,
   getPurchaseOrder,
   getScmOvfPreview,
   listOrderReceiptBatches,
@@ -114,7 +115,8 @@ function safeProcurementReturnTo(raw: string | null): string | null {
   }
 }
 
-function challanBackLabel(backHref: string): string {
+function challanBackLabel(backHref: string, kind?: GrnChallanKind | "" | null): string {
+  if (kind === "billing") return "Back to billing";
   if (/\/orders\/[^/]+/.test(backHref)) return "Purchase order";
   if (backHref.includes("/grns")) return "GRNs";
   if (backHref.includes("/inventory")) return "Inventory";
@@ -155,7 +157,6 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
   const backHref = resolveChallanModuleExitHref(
     returnTo || (fromInventory ? "/procurement/inventory" : null),
   );
-  const backLabel = challanBackLabel(backHref);
   const isNew = !challanId;
   const isLocked = Boolean(challanId) && !embedded;
 
@@ -198,6 +199,7 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
         ? ""
         : "delivery_challan",
   );
+  const backLabel = challanBackLabel(backHref, grnKind || kindParam);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
   const [loadedOrder, setLoadedOrder] = useState<ProcOrder | null>(null);
@@ -782,11 +784,27 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
           const matchedBatch = resolvedBatches.find(
             (batch) => receiptBatchKey(batch) === fromGrn,
           );
-          if (matchedBatch?.vendor_invoice_number) {
-            setInvoiceNumber(String(matchedBatch.vendor_invoice_number).trim());
-          }
-          if (matchedBatch?.vendor_invoice_date) {
-            setInvoiceDate(String(matchedBatch.vendor_invoice_date).slice(0, 10));
+          if (kind === "billing" && matchedBatch?.id) {
+            try {
+              const invoiceTask = await getInvoiceGenerationTaskForBatch(
+                String(matchedBatch.id),
+              );
+              if (invoiceTask?.invoice_number) {
+                setInvoiceNumber(String(invoiceTask.invoice_number).trim());
+              }
+              if (invoiceTask?.invoice_date) {
+                setInvoiceDate(String(invoiceTask.invoice_date).slice(0, 10));
+              }
+            } catch {
+              /* optional prefill */
+            }
+          } else {
+            if (matchedBatch?.vendor_invoice_number) {
+              setInvoiceNumber(String(matchedBatch.vendor_invoice_number).trim());
+            }
+            if (matchedBatch?.vendor_invoice_date) {
+              setInvoiceDate(String(matchedBatch.vendor_invoice_date).slice(0, 10));
+            }
           }
           const merged = mergeSelectedGrnChallanLines(
             resolvedBatches,
@@ -899,23 +917,6 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
   }
 
   function onSave() {
-    let numberToSave = challanNumber.trim();
-    if (!numberToSave) {
-      numberToSave = peekNextDeliveryChallanNumber();
-      setChallanNumber(numberToSave);
-    }
-    if (!numberToSave) {
-      setLoadError("Challan number is required.");
-      return;
-    }
-    if (!purchaseOrderNumber.trim()) {
-      setLoadError("Customer PO number is required.");
-      return;
-    }
-    if (!customerName.trim()) {
-      setLoadError("Customer name is required.");
-      return;
-    }
     if (grnKind === "billing") {
       if (!invoiceNumber.trim()) {
         setLoadError("Invoice number is required for billing GRNs.");
@@ -925,6 +926,30 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
         setLoadError("Invoice date is required for billing GRNs.");
         return;
       }
+    }
+    let numberToSave = challanNumber.trim();
+    if (grnKind === "billing") {
+      numberToSave = invoiceNumber.trim() || numberToSave;
+      if (numberToSave && numberToSave !== challanNumber.trim()) {
+        setChallanNumber(numberToSave);
+      }
+    } else if (!numberToSave) {
+      numberToSave = peekNextDeliveryChallanNumber();
+      setChallanNumber(numberToSave);
+    }
+    if (!numberToSave) {
+      setLoadError(
+        grnKind === "billing" ? "Invoice number is required." : "Challan number is required.",
+      );
+      return;
+    }
+    if (!purchaseOrderNumber.trim()) {
+      setLoadError("Customer PO number is required.");
+      return;
+    }
+    if (!customerName.trim()) {
+      setLoadError("Customer name is required.");
+      return;
     }
     setLoadError(null);
     const existingChallan = recordId ? getDeliveryChallan(recordId) : null;
@@ -1149,26 +1174,52 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
         disabled={isLocked || hasSaved}
         className="m-0 min-w-0 space-y-4 border-0 p-0 disabled:opacity-100"
       >
-      <DeliverySectionCard title="Challan & purchase order" icon={FileText}>
+      <DeliverySectionCard
+        title={grnKind === "billing" ? "Invoice details" : "Challan & purchase order"}
+        icon={FileText}
+      >
         {loadedOrder ? (
           <p className="mb-3 text-sm font-medium text-foreground">{entityPdf.entityName}</p>
         ) : null}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <FinanceField label="Challan number">
-            <Input
-              value={challanNumber}
-              onChange={(e) => setChallanNumber(e.target.value)}
-              className="h-8"
-            />
-          </FinanceField>
-          <FinanceField label="Challan date">
-            <Input
-              type="date"
-              value={challanDate}
-              onChange={(e) => setChallanDate(e.target.value)}
-              className="h-8"
-            />
-          </FinanceField>
+          {grnKind === "billing" ? (
+            <>
+              <FinanceField label="Invoice number *">
+                <Input
+                  value={invoiceNumber}
+                  onChange={(e) => setInvoiceNumber(e.target.value)}
+                  className="h-8"
+                  placeholder="Customer / cache invoice no."
+                />
+              </FinanceField>
+              <FinanceField label="Invoice date *">
+                <Input
+                  type="date"
+                  value={invoiceDate}
+                  onChange={(e) => setInvoiceDate(e.target.value)}
+                  className="h-8"
+                />
+              </FinanceField>
+            </>
+          ) : (
+            <>
+              <FinanceField label="Challan number">
+                <Input
+                  value={challanNumber}
+                  onChange={(e) => setChallanNumber(e.target.value)}
+                  className="h-8"
+                />
+              </FinanceField>
+              <FinanceField label="Challan date">
+                <Input
+                  type="date"
+                  value={challanDate}
+                  onChange={(e) => setChallanDate(e.target.value)}
+                  className="h-8"
+                />
+              </FinanceField>
+            </>
+          )}
           <FinanceField label="Customer PO number">
             <Input
               value={purchaseOrderNumber}
@@ -1185,27 +1236,6 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
             />
           </FinanceField>
         </div>
-        {grnKind === "billing" ? (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <FinanceField label="Invoice number *">
-              <Input
-                value={invoiceNumber}
-                onChange={(e) => setInvoiceNumber(e.target.value)}
-                className="h-8"
-                placeholder="Customer / cache invoice no."
-              />
-            </FinanceField>
-            <FinanceField label="Invoice date *">
-              <Input
-                type="date"
-                value={invoiceDate}
-                onChange={(e) => setInvoiceDate(e.target.value)}
-                className="h-8"
-              />
-            </FinanceField>
-          </div>
-        ) : null}
-        {null}
       </DeliverySectionCard>
 
       <DeliverySectionCard title="Customer" icon={FileText}>

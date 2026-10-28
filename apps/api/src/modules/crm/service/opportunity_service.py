@@ -185,8 +185,8 @@ class OpportunityService:
         opp = self.get(ctx, opportunity_id)
         if opp.blueprint_state and opp.blueprint_state not in {"won", "lost"}:
             raise ConflictException(
-                "This opportunity is on the sales blueprint. Mark Deal Won from the "
-                "OVF after Share to SCM - do not use legacy close-won."
+                "This opportunity is on the sales blueprint. Deal outcome is driven by "
+                "quote accept / OVF → Share to SCM - do not use legacy close-won."
             )
         self._engine.apply_win(opp)
         now = datetime.now(timezone.utc)

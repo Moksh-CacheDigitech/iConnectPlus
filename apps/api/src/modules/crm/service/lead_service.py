@@ -961,10 +961,25 @@ class LeadService:
                 self._repo.update(ctx, lead_id, dr_number=dr_number)
             opp_fields["opportunity_code"] = dr_number
             opp_fields["deal_reg_number"] = dr_number
+            opp_fields["product_type"] = lead.product_type
+            product_tokens = {
+                part.strip().lower()
+                for part in (lead.product_type or "").replace("&", ",").split(",")
+                if part.strip()
+            }
+            opp_fields["has_services"] = "services" in product_tokens
+            opp_fields["has_software"] = "software" in product_tokens
+            opp_fields["has_hardware"] = bool(
+                product_tokens
+                & {"hardware", "networking", "cybersecurity", "ai", "cloud", "others"}
+            ) or (
+                bool(product_tokens)
+                and not opp_fields["has_services"]
+                and not opp_fields["has_software"]
+            )
             cloud_variant = cloud_variant_from_lead(lead)
             if cloud_variant:
                 opp_fields["cloud_blueprint_variant"] = cloud_variant
-                opp_fields["product_type"] = lead.product_type
                 opp_fields["cloud_sub_product"] = cloud_sub_product_label(lead)
                 opp_fields["distributor_discount_percent"] = DEFAULT_DISTRIBUTOR_DISCOUNT_PERCENT
                 opp_fields["distributor_discount_locked"] = True

@@ -1,3 +1,5 @@
+import { listVendorOptions } from "@/services/procurement-service";
+
 const RAW_LEAD_DISTRIBUTOR_OPTIONS = [
   "IN STOCK",
   "Redington",
@@ -47,14 +49,45 @@ export function formatLeadDistributorNames(names: readonly string[]): string {
   return names.join(LEAD_DISTRIBUTOR_SEPARATOR);
 }
 
+function mergeDistributorNames(...groups: readonly (readonly string[])[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const group of groups) {
+    for (const raw of group) {
+      const name = raw.trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(name);
+    }
+  }
+  return out;
+}
+
 /** Preset lead distributors plus any custom names saved on the lead (for single-select dropdowns). */
 export function buildLeadDistributorDropdownOptions(
   leadDistributorField: string | null | undefined,
+  scmVendorNames: readonly string[] = [],
 ): string[] {
-  const presetLower = new Set(LEAD_DISTRIBUTOR_OPTIONS.map((name) => name.toLowerCase()));
-  const selectedOnLead = parseLeadDistributorNames(leadDistributorField);
-  const customFromLead = selectedOnLead.filter(
-    (name) => !presetLower.has(name.toLowerCase()),
+  return mergeDistributorNames(
+    LEAD_DISTRIBUTOR_OPTIONS,
+    scmVendorNames,
+    parseLeadDistributorNames(leadDistributorField),
   );
-  return [...LEAD_DISTRIBUTOR_OPTIONS, ...customFromLead];
+}
+
+/** Load SCM Vendors master list and merge with presets + any names already on the lead. */
+export async function loadCrmDistributorOptions(
+  leadDistributorField?: string | null,
+): Promise<string[]> {
+  const scmNames = await listVendorOptions()
+    .then((rows) =>
+      rows
+        .filter((vendor) => (vendor.status || "active").toLowerCase() !== "inactive")
+        .map((vendor) => vendor.label.trim())
+        .filter(Boolean),
+    )
+    .catch(() => [] as string[]);
+  return buildLeadDistributorDropdownOptions(leadDistributorField, scmNames);
 }

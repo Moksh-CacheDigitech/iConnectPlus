@@ -4,13 +4,13 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileText, MapPinned, Package, Truck } from "lucide-react";
 
-import { DeliveryStatusBillDialog } from "@/components/procurement/delivery-status-bill-dialog";
 import { DeliveryStatusOutcomeDialog } from "@/components/procurement/delivery-status-outcome-dialog";
 import { PageHeader } from "@/components/layout/page-header";
 import { procurementUi } from "@/components/procurement/procurement-ui";
 import {
   DeliveryStatusForm,
   deliveryStatusToFormValue,
+  type AccountsInvoiceDocumentRef,
   type DeliveryStatusFormValue,
 } from "@/components/procurement/delivery-status-form";
 import { DeliverySectionCard } from "@/components/procurement/delivery-section-card";
@@ -20,8 +20,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
+  getInvoiceGenerationTaskForBatch,
   getPurchaseOrder,
   listOrderReceiptBatches,
+  listReceiptBatchAttachments,
+  openReceiptBatchAttachment,
 } from "@/services/procurement-service";
 import {
   deliveryStatusGrnItemRowsFromBatches,
@@ -30,10 +33,6 @@ import {
   resolveChallanReceiptBatches,
   type DeliveryStatusGrnItemRow,
 } from "@/utils/delivery-challan-grn";
-import {
-  challanDeliveredQuantity,
-  resolveDeliveryBillStatus,
-} from "@/utils/delivery-challan-bill";
 import {
   getDeliveryChallan,
   type DeliveryChallanRecord,
@@ -45,6 +44,7 @@ import {
   isFailedShipmentStatus,
   openStoredDeliveryFile,
   resolveDeliveryStatusForChallan,
+  upsertDeliveryStatus,
   validateDeliveryStatusForm,
   type DeliveryStatusFormErrors,
 } from "@/utils/delivery-status-storage";
@@ -75,15 +75,17 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
   const [fieldErrors, setFieldErrors] = useState<DeliveryStatusFormErrors>({});
   const [saving, setSaving] = useState(false);
   const [formPhase, setFormPhase] = useState<"initial" | "tracking">("initial");
-  const [billOpen, setBillOpen] = useState(false);
   const [outcomeOpen, setOutcomeOpen] = useState(false);
   const [billTick, setBillTick] = useState(0);
   const [orderTracking, setOrderTracking] = useState<{ milestone: string | null; awb: string | null } | null>(null);
+  const [accountsInvoiceDocument, setAccountsInvoiceDocument] =
+    useState<AccountsInvoiceDocumentRef | null>(null);
 
   useEffect(() => {
     try {
       const row = getDeliveryChallan(challanId);
       setChallan(row);
+      setAccountsInvoiceDocument(null);
       if (!row) {
         setForm(null);
         setGrnItems([]);
@@ -102,6 +104,10 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
       }
       if (!String(seeded.customerName ?? "").trim()) {
         seeded.customerName = String(row.customerName ?? "").trim();
+      }
+      const challanInvoice = String(row.invoiceNumber ?? "").trim();
+      if (challanInvoice && !String(seeded.cacheInvoiceNumber ?? "").trim()) {
+        seeded.cacheInvoiceNumber = challanInvoice;
       }
       setForm(seeded);
       setGrnItems(deliveryStatusGrnItemRowsFromChallan(row));
@@ -125,6 +131,43 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
           if (liveRows.length > 0) setGrnItems(liveRows);
           const fromOrder = String(order.customer_po_number ?? "").trim();
           const fromOrderCustomer = String(order.customer_name ?? "").trim();
+
+          let accountsInvoice = "";
+          let accountsDoc: AccountsInvoiceDocumentRef | null = null;
+          const primaryBatch = matched.find((b) => Boolean(b.id)) || matched[0] || null;
+          if (primaryBatch?.id) {
+            try {
+              const task = await getInvoiceGenerationTaskForBatch(String(primaryBatch.id));
+              if (task?.invoice_number) {
+                accountsInvoice = String(task.invoice_number).trim();
+              }
+            } catch {
+              /* optional */
+            }
+            if (!accountsInvoice && primaryBatch.vendor_invoice_number) {
+              accountsInvoice = String(primaryBatch.vendor_invoice_number).trim();
+            }
+            try {
+              const attachments =
+                primaryBatch.attachments && primaryBatch.attachments.length > 0
+                  ? primaryBatch.attachments
+                  : await listReceiptBatchAttachments(String(primaryBatch.id));
+              const file = attachments[0];
+              if (file?.id) {
+                accountsDoc = {
+                  id: String(file.id),
+                  fileName: file.file_name || "Invoice document",
+                };
+              }
+            } catch {
+              /* optional */
+            }
+          }
+          if (!accountsInvoice) {
+            accountsInvoice = challanInvoice;
+          }
+          if (!cancelled) setAccountsInvoiceDocument(accountsDoc);
+
           setForm((prev) => {
             if (!prev) return prev;
             let next = prev;
@@ -134,6 +177,9 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
             }
             if (!String(prev.customerName ?? "").trim() && fromOrderCustomer) {
               next = { ...next, customerName: fromOrderCustomer };
+            }
+            if (accountsInvoice) {
+              next = { ...next, cacheInvoiceNumber: accountsInvoice };
             }
             return next === prev ? prev : next;
           });
@@ -149,13 +195,18 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
       setChallan(null);
       setForm(null);
       setGrnItems([]);
+      setAccountsInvoiceDocument(null);
       setError("Could not load this delivery status record.");
     }
   }, [challanId, billTick]);
 
+  const isBilling = challan?.grnKind === "billing";
+
   async function onSave() {
     if (!challan || !form || saving) return;
-    const errors = validateDeliveryStatusForm(form);
+    const errors = validateDeliveryStatusForm(form, {
+      requireDispatch: challan.grnKind !== "billing",
+    });
     setFieldErrors(errors);
     const message = Object.values(errors).find(Boolean);
     if (message) {
@@ -207,9 +258,6 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
     );
   }
 
-  const status = resolveDeliveryStatusForChallan(challan);
-  const billKey = resolveDeliveryBillStatus(status, challanDeliveredQuantity(challan));
-  const canUpdateBill = billKey === "fully_billed";
   const readOnly = formPhase === "tracking";
 
   return (
@@ -230,17 +278,6 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
               >
                 <MapPinned className="mr-1.5 size-3.5" />
                 Update status
-              </Button>
-            ) : null}
-            {canUpdateBill ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="cursor-pointer transition-colors duration-200"
-                onClick={() => setBillOpen(true)}
-              >
-                Update bill
               </Button>
             ) : null}
           </div>
@@ -269,7 +306,11 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
                     const next = { ...form, customerName: e.target.value };
                     setForm(next);
                     if (Object.keys(fieldErrors).length > 0) {
-                      setFieldErrors(validateDeliveryStatusForm(next));
+                      setFieldErrors(
+                        validateDeliveryStatusForm(next, {
+                          requireDispatch: !isBilling,
+                        }),
+                      );
                     }
                   }}
                   className="h-8"
@@ -283,7 +324,11 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
                     const next = { ...form, customerPoNumber: e.target.value };
                     setForm(next);
                     if (Object.keys(fieldErrors).length > 0) {
-                      setFieldErrors(validateDeliveryStatusForm(next));
+                      setFieldErrors(
+                        validateDeliveryStatusForm(next, {
+                          requireDispatch: !isBilling,
+                        }),
+                      );
                     }
                   }}
                   className="h-8"
@@ -308,10 +353,53 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
           orderId={challan.orderId}
           initialMilestone={orderTracking.milestone}
           initialAwb={orderTracking.awb}
+          initialCustomerEmail={form?.reminderEmail}
+          challan={challan}
+          deliveryStatus={form}
+          onCustomerEmailChange={(email) => {
+            setForm((prev) => (prev ? { ...prev, reminderEmail: email } : prev));
+            const existing = resolveDeliveryStatusForChallan(challan);
+            upsertDeliveryStatus({ ...existing, reminderEmail: email.trim() });
+          }}
         />
       ) : null}
 
       {form && readOnly ? (
+        <DeliverySectionCard title="Cache invoice" icon={FileText}>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Invoice number and document are entered by Accounts and shown here read-only.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ReadOnlyField label="Invoice number" value={form.cacheInvoiceNumber} />
+            <div className="space-y-0.5">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Invoice document
+              </div>
+              {accountsInvoiceDocument?.id ? (
+                <button
+                  type="button"
+                  className="cursor-pointer text-sm font-medium text-[#0369A1] underline-offset-2 transition-colors duration-150 hover:underline"
+                  onClick={() => void openReceiptBatchAttachment(accountsInvoiceDocument.id)}
+                >
+                  {accountsInvoiceDocument.fileName}
+                </button>
+              ) : form.cacheInvoiceDocument?.fileName ? (
+                <button
+                  type="button"
+                  className="cursor-pointer text-sm font-medium text-[#0369A1] underline-offset-2 transition-colors duration-150 hover:underline"
+                  onClick={() => openStoredDeliveryFile(form.cacheInvoiceDocument!)}
+                >
+                  {form.cacheInvoiceDocument.fileName}
+                </button>
+              ) : (
+                <div className="text-sm text-muted-foreground">Not attached by Accounts yet</div>
+              )}
+            </div>
+          </div>
+        </DeliverySectionCard>
+      ) : null}
+
+      {form && readOnly && !isBilling ? (
         <DeliverySectionCard title="Dispatch detail" icon={Truck}>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <ReadOnlyField
@@ -378,10 +466,19 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
           <DeliveryStatusForm
             mode="initial"
             value={form}
+            showDispatchDetail={!isBilling}
+            accountsInvoiceDocument={accountsInvoiceDocument}
+            onOpenAccountsInvoiceDocument={(id) => {
+              void openReceiptBatchAttachment(id);
+            }}
             onChange={(next) => {
               setForm(next);
               if (Object.keys(fieldErrors).length > 0) {
-                setFieldErrors(validateDeliveryStatusForm(next));
+                setFieldErrors(
+                  validateDeliveryStatusForm(next, {
+                    requireDispatch: !isBilling,
+                  }),
+                );
               }
             }}
             fieldErrors={fieldErrors}
@@ -399,13 +496,6 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
           </div>
         </>
       ) : null}
-
-      <DeliveryStatusBillDialog
-        open={billOpen}
-        challanId={challan.id}
-        onClose={() => setBillOpen(false)}
-        onSaved={() => setBillTick((n) => n + 1)}
-      />
 
       <DeliveryStatusOutcomeDialog
         open={outcomeOpen}

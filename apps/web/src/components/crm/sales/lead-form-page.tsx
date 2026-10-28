@@ -30,7 +30,10 @@ import {
 } from "@/components/finance/journals/finance-form-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { buildLeadDistributorDropdownOptions } from "@/lib/crm/lead-distributor-options";
+import {
+  LEAD_DISTRIBUTOR_OPTIONS,
+  loadCrmDistributorOptions,
+} from "@/lib/crm/lead-distributor-options";
 import { LEAD_OEM_OPTIONS } from "@/lib/crm/lead-oem-options";
 import {
   emptyLeadPartnerRow,
@@ -195,6 +198,9 @@ export function LeadFormPage({
   const [nextDrNumber, setNextDrNumber] = useState("");
   const [oemRows, setOemRows] = useState<LeadPartnerRow[]>([emptyLeadPartnerRow()]);
   const [distributorRows, setDistributorRows] = useState<LeadPartnerRow[]>([emptyLeadPartnerRow()]);
+  const [distributorNameOptions, setDistributorNameOptions] = useState<string[]>([
+    ...LEAD_DISTRIBUTOR_OPTIONS,
+  ]);
 
   const selectedLeadSource = leadSources.find((source) => source.id === form.lead_source_id);
   const isMultiTierSource = isMultiTierLeadSourceLabel(selectedLeadSource?.label);
@@ -462,12 +468,19 @@ export function LeadFormPage({
     setForm((f) => ({ ...f, ...formatDistributorPartnerFields(rows) }));
   }
 
-  const distributorNameOptions = buildLeadDistributorDropdownOptions(
-    distributorRows
+  useEffect(() => {
+    let cancelled = false;
+    const selectedNames = distributorRows
       .map((row) => row.name.trim())
       .filter(Boolean)
-      .join(", "),
-  );
+      .join(", ");
+    void loadCrmDistributorOptions(selectedNames).then((options) => {
+      if (!cancelled) setDistributorNameOptions(options);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [distributorRows]);
 
   function onEntityPickChange(value: string) {
     setEntityPick(value);

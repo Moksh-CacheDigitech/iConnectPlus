@@ -160,6 +160,31 @@ function chargeRowFileFromAttachment(
   };
 }
 
+function dedupeChargeRowFiles(files: ChargeRowFile[]): ChargeRowFile[] {
+  const seen = new Set<string>();
+  const out: ChargeRowFile[] = [];
+  for (const file of files) {
+    const key = (file.fileName || "").trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(file);
+  }
+  return out;
+}
+
+/** Keep one attachment per file name (newest first when caller sorts desc). */
+export function dedupeAttachmentsByFileName<T extends { file_name: string }>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const row of rows) {
+    const key = (row.file_name || "").trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
 export function mergeCustomerRowsWithPoAttachments(
   rows: CustomerChargeRow[],
   attachments: { id: string; file_name: string; file_path?: string | null; content_type?: string | null }[],
@@ -169,7 +194,7 @@ export function mergeCustomerRowsWithPoAttachments(
   const byKey = new Map<string, ChargeRowFile[]>();
   const legacy: ChargeRowFile[] = [];
 
-  for (const att of attachments) {
+  for (const att of dedupeAttachmentsByFileName(attachments)) {
     const file = chargeRowFileFromAttachment(att, { copyOnSave });
     const parsed = parseChargeLineFileName(att.file_name);
     if (parsed.rowKey) {
@@ -186,15 +211,18 @@ export function mergeCustomerRowsWithPoAttachments(
       byKey.get(row.key) ??
       (row.serverId ? byKey.get(row.serverId) : undefined) ??
       [];
-    return { ...row, poFiles: files };
+    return { ...row, poFiles: dedupeChargeRowFiles(files) };
   });
 
   if (legacy.length > 0) {
+    const uniqueLegacy = dedupeChargeRowFiles(legacy);
     const targetIndex = merged.findIndex((row) => row.product_name.trim());
     const idx = targetIndex >= 0 ? targetIndex : 0;
     if (merged[idx]) {
       merged = merged.map((row, index) =>
-        index === idx ? { ...row, poFiles: [...row.poFiles, ...legacy] } : row,
+        index === idx
+          ? { ...row, poFiles: dedupeChargeRowFiles([...row.poFiles, ...uniqueLegacy]) }
+          : row,
       );
     }
   }
@@ -772,12 +800,15 @@ function ChargesTableShell({
   headerRight,
   totalLabel,
   totalValue,
+  totalAwaiting,
 }: {
   title: string;
   children: ReactNode;
   headerRight?: ReactNode;
   totalLabel: string;
   totalValue: string;
+  /** Replace the ₹ total with a waiting status (e.g. awaiting SCM price). */
+  totalAwaiting?: string | null;
 }) {
   return (
     <div className="space-y-3">
@@ -789,12 +820,18 @@ function ChargesTableShell({
       <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="flex items-center gap-2">
           <span className="text-[13px] font-medium text-foreground">{totalLabel}</span>
-          <Input
-            readOnly
-            tabIndex={-1}
-            value={totalValue}
-            className="h-9 w-48 cursor-default rounded-[4px] border-[#cfd7e3] bg-[#f8fafc] text-right text-[13px] tabular-nums shadow-none"
-          />
+          {totalAwaiting ? (
+            <span className="inline-flex h-9 min-w-48 items-center justify-end rounded-[4px] border border-amber-200 bg-amber-50 px-3 text-right text-[12px] font-medium text-amber-800">
+              {totalAwaiting}
+            </span>
+          ) : (
+            <Input
+              readOnly
+              tabIndex={-1}
+              value={totalValue}
+              className="h-9 w-48 cursor-default rounded-[4px] border-[#cfd7e3] bg-[#f8fafc] text-right text-[13px] tabular-nums shadow-none"
+            />
+          )}
         </div>
       </div>
     </div>
@@ -958,6 +995,8 @@ type OvfOrderLinesSectionProps = {
   supportingDescription?: string;
   /** Header action for the supporting-items block (e.g. Ask Operations). */
   supportingHeaderRight?: ReactNode;
+  /** When true, total shows “Awaiting price from SCM” instead of ₹0.00. */
+  supportingAwaitingScmPrices?: boolean;
   /** Additional charge verticals (supporting, service visits, other). */
   additionalChargeRows?: AdditionalChargeVertical[];
   /** Fully lock the section (detail view / while saving). */
@@ -978,6 +1017,7 @@ export function OvfOrderLinesSection({
   supportingRows,
   supportingDescription,
   supportingHeaderRight,
+  supportingAwaitingScmPrices = false,
   additionalChargeRows,
   disabled = false,
   readOnlyLines = false,
@@ -1377,6 +1417,9 @@ export function OvfOrderLinesSection({
           <ChargesTableShell
             title="Supporting items (outside the main PO)"
             headerRight={supportingHeaderRight}
+            totalAwaiting={
+              supportingAwaitingScmPrices ? "Awaiting price from SCM" : null
+            }
             totalLabel="Supporting items total"
             totalValue={formatInrPrecise(sumLineTotals(supportingRows))}
           >

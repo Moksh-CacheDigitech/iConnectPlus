@@ -5,6 +5,7 @@ from __future__ import annotations
 import smtplib
 from dataclasses import dataclass
 from email.message import EmailMessage
+from typing import Sequence
 
 from core.config import settings
 from shared.email_utils import strip_html
@@ -16,6 +17,13 @@ class EmailSendResult:
     status_code: int
     message: str
     provider_response: str
+
+
+@dataclass(frozen=True)
+class EmailAttachment:
+    filename: str
+    content: bytes
+    content_type: str = "application/pdf"
 
 
 class SmtpEmailAdapter:
@@ -58,7 +66,14 @@ class SmtpEmailAdapter:
             client.login(self._user, self._password)
         return client
 
-    def send_mail(self, *, to_address: str, subject: str, body_html: str) -> EmailSendResult:
+    def send_mail(
+        self,
+        *,
+        to_address: str,
+        subject: str,
+        body_html: str,
+        attachments: Sequence[EmailAttachment] | None = None,
+    ) -> EmailSendResult:
         recipient = (to_address or "").strip()
         if not recipient:
             return EmailSendResult(False, 400, "Recipient address is required", "missing_recipient")
@@ -72,6 +87,18 @@ class SmtpEmailAdapter:
         msg.set_content(strip_html(body_html or "") or " ")
         if body_html:
             msg.add_alternative(body_html, subtype="html")
+
+        for attachment in attachments or []:
+            filename = (attachment.filename or "attachment.bin").strip() or "attachment.bin"
+            maintype, _, subtype = (attachment.content_type or "application/octet-stream").partition("/")
+            if not subtype:
+                maintype, subtype = "application", "octet-stream"
+            msg.add_attachment(
+                attachment.content,
+                maintype=maintype,
+                subtype=subtype,
+                filename=filename,
+            )
 
         try:
             with self._connect() as client:
