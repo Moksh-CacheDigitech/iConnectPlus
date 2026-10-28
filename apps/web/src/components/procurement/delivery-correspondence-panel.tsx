@@ -173,23 +173,24 @@ export function DeliveryCorrespondencePanel({
   const kinds = Array.from(new Set(templates.map((t) => t.kind)));
 
   return (
-    <div className="mt-5 border-t border-border/60 pt-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-bold tracking-tight">Correspondence</h3>
-          <p className="text-[11px] text-muted-foreground">
-            Reminder mails sent for this order, delivery status, and editable
-            templates{customerName ? ` for ${customerName}` : ""}.
+    <div className="rounded-xl border border-border/70 bg-muted/15 p-3.5 sm:p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-xs font-semibold tracking-tight text-foreground sm:text-sm">
+            Correspondence
+          </h3>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+            Reminder mails for this order and editable templates
+            {customerName ? ` for ${customerName}` : ""}.
           </p>
         </div>
-        <div className="flex rounded-lg border border-border/70 bg-muted/40 p-0.5">
+        <div className="flex rounded-lg border border-border/70 bg-background p-0.5">
           <button
             type="button"
-            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors duration-200 ${
-              tab === "log"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors duration-200 ${tab === "log"
+              ? "bg-muted text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+              }`}
             onClick={() => setTab("log")}
           >
             <Mail className="size-3" aria-hidden />
@@ -197,11 +198,10 @@ export function DeliveryCorrespondencePanel({
           </button>
           <button
             type="button"
-            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors duration-200 ${
-              tab === "templates"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors duration-200 ${tab === "templates"
+              ? "bg-muted text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+              }`}
             onClick={() => setTab("templates")}
           >
             <FileText className="size-3" aria-hidden />
@@ -245,8 +245,8 @@ export function DeliveryCorrespondencePanel({
                     colSpan={5}
                     className="px-3 py-6 text-center text-muted-foreground"
                   >
-                    No reminder mails yet. Use &ldquo;Run correspondence now&rdquo; to
-                    send the next batch.
+                    No reminder mails yet. Acknowledgement and delivery updates
+                    appear here after they are sent.
                   </td>
                 </tr>
               ) : (

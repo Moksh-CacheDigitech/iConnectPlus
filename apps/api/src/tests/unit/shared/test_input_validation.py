@@ -39,6 +39,20 @@ def test_validate_json_entries_allows_plain() -> None:
     validate_json_entries({"title": "Acme Corp", "notes": "Follow up next week"})
 
 
+def test_validate_json_entries_allows_email_body_template() -> None:
+    validate_json_entries(
+        {
+            "kind": "order_acknowledged",
+            "scope": "default",
+            "subject_template": "Your order {{reference}} has been placed",
+            "body_template": (
+                "<p>Dear {{customer_name}},</p>"
+                "<p>The expected delivery date (ETD) is <strong>{{etd}}</strong>.</p>"
+            ),
+        }
+    )
+
+
 def test_extract_multipart_filenames() -> None:
     body = (
         b"------boundary\r\n"

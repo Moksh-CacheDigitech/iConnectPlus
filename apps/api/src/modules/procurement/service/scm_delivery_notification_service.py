@@ -2,8 +2,8 @@
 
 Three messages come off one scheduled pass, so nobody chases dates by hand:
 
-1. **Order acknowledgement** to the customer once the PO is issued - their order
-   is placed and we are waiting on the delivery date.
+1. **Order acknowledgement** to the customer once the PO is issued — includes the
+   expected delivery date (ETD) when known (or \"to be confirmed\").
 2. **ETD chase** to the distributor every ``ETD_REMINDER_INTERVAL_DAYS`` until an
    expected delivery date is on the PO.
 3. **Delivery update** to the customer whenever that ETD is set or changes.
@@ -24,8 +24,10 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from core.exceptions import ConflictException, NotFoundException, ValidationException
 from modules.foundation.domain.value_objects import TenantContext
+from modules.foundation.models.notification import NtfDelivery
 from modules.foundation.repository.notification_repository import NotificationRepository
 from modules.foundation.service.engines.email_delivery_engine import render_template
 from modules.foundation.service.notification_service import NotificationService
@@ -82,8 +84,8 @@ TEMPLATE_META = {
             "<p>Dear {{customer_name}},</p>"
             "<p>Your order against PO <strong>{{reference}}</strong> has been executed and "
             "placed with our supply partner.</p>"
-            "<p>We are waiting on the confirmed delivery date and will share it as soon as "
-            "we have it. You will hear from us at least 7 to 10 days before the material "
+            "<p>The expected delivery date (ETD) is <strong>{{etd}}</strong>.</p>"
+            "<p>You will hear from us at least 7 to 10 days before the material "
             "reaches you.</p>"
             "<p>Thank you for your business.</p>"
         ),
@@ -174,6 +176,8 @@ class ScmDeliveryNotificationService:
                     created_by=ctx.user_id,
                 )
                 base = self._ntf_repo.get_template_by_code(ctx.tenant_id, template_code=meta["code"])
+            elif kind == KIND_ORDER_ACK:
+                base = self._upgrade_order_ack_template(ctx, base, meta)
             out.append(self._template_row(kind, base, scope="default", company_account_id=None))
             if company_account_id is not None:
                 override_code = _customer_template_code(meta["code"], company_account_id)
@@ -249,6 +253,35 @@ class ScmDeliveryNotificationService:
                 "company_po_number",
             ],
         }
+
+    def _upgrade_order_ack_template(self, ctx: TenantContext, base, meta: dict[str, str]):
+        """Bring shipped defaults forward when the tenant still has the pre-ETD body."""
+        body = (getattr(base, "body_template", None) or "").strip()
+        if "{{etd}}" in body:
+            return base
+        legacy_markers = (
+            "waiting on the confirmed delivery date",
+            "We are waiting on the confirmed delivery date",
+        )
+        if not any(marker in body for marker in legacy_markers):
+            return base
+        return self._ntf_repo.upsert_template(
+            tenant_id=ctx.tenant_id,
+            template_code=meta["code"],
+            template_name=meta["name"],
+            channel="email",
+            subject_template=getattr(base, "subject_template", None) or meta["default_subject"],
+            body_template=meta["default_body"],
+            updated_by=ctx.user_id,
+        )
+
+    def _format_etd(self, order: ProcOrderHeader) -> str:
+        etd = order.expected_delivery_date
+        if etd is None:
+            return "to be confirmed"
+        if hasattr(etd, "isoformat"):
+            return etd.isoformat()
+        return str(etd)
 
     def _template_row(
         self,
@@ -328,8 +361,12 @@ class ScmDeliveryNotificationService:
         order: ProcOrderHeader,
         variables: dict[str, Any],
         company_account_id: str | UUID | None = None,
+        require_delivered: bool = False,
     ) -> None:
         tpl = self._resolve_template(ctx, kind=kind, company_account_id=company_account_id)
+        if kind == KIND_ORDER_ACK and tpl is not None:
+            meta_for_upgrade = TEMPLATE_META[KIND_ORDER_ACK]
+            tpl = self._upgrade_order_ack_template(ctx, tpl, meta_for_upgrade)
         meta = TEMPLATE_META[kind]
         payload = {k: ("" if v is None else str(v)) for k, v in variables.items()}
         if tpl is not None:
@@ -343,7 +380,7 @@ class ScmDeliveryNotificationService:
         # Wrap plain paragraphs if template forgot outer styling.
         if "<" not in body_html:
             body_html = _html([body_html])
-        self._notifications.send_email(
+        event = self._notifications.send_email(
             tenant_id=ctx.tenant_id,
             to_address=to_address,
             subject=subject,
@@ -359,6 +396,24 @@ class ScmDeliveryNotificationService:
             },
             created_by=ctx.user_id,
         )
+        if not require_delivered:
+            return
+        delivery = self._db.scalars(
+            select(NtfDelivery)
+            .where(
+                NtfDelivery.tenant_id == ctx.tenant_id,
+                NtfDelivery.event_id == event.id,
+            )
+            .order_by(NtfDelivery.id.desc())
+            .limit(1)
+        ).first()
+        if delivery is None or (delivery.status or "").lower() != "delivered":
+            detail = (
+                (delivery.provider_response if delivery is not None else None)
+                or (delivery.status if delivery is not None else None)
+                or "smtp_send_failed"
+            )
+            raise ValidationException(f"Failed to send acknowledgement email: {detail}")
 
     def _order_reference(self, customer: dict[str, Any], order: ProcOrderHeader) -> str:
         return (
@@ -368,9 +423,14 @@ class ScmDeliveryNotificationService:
         )
 
     def acknowledge_order(
-        self, ctx: TenantContext, order: ProcOrderHeader, customer: dict[str, Any]
+        self,
+        ctx: TenantContext,
+        order: ProcOrderHeader,
+        customer: dict[str, Any],
+        *,
+        require_delivered: bool = False,
     ) -> bool:
-        """Tell the customer their order is placed and an ETD is being chased."""
+        """Tell the customer their order is placed and share the ETD when known."""
         to_address = customer.get("email")
         if not to_address:
             return False
@@ -381,12 +441,15 @@ class ScmDeliveryNotificationService:
             kind=KIND_ORDER_ACK,
             order=order,
             company_account_id=customer.get("company_account_id"),
+            require_delivered=require_delivered,
             variables={
-                "customer_name": customer.get("customer_name") or "Customer",
+                "customer_name": customer.get("customer_name")
+                or customer.get("account_name")
+                or "Customer",
                 "vendor_name": "",
                 "reference": reference,
                 "document_date": order.document_date or "",
-                "etd": "",
+                "etd": self._format_etd(order),
                 "company_po_number": order.company_po_number or order.document_number,
             },
         )
@@ -518,7 +581,7 @@ class ScmDeliveryNotificationService:
         self._db.flush()
         return counts
 
-    # -- delivery contact / dummy send (SMTP later) ------------------------
+    # -- delivery contact / manual acknowledgement send --------------------
     def get_delivery_contact(self, ctx: TenantContext, order_id: UUID) -> dict[str, Any]:
         """CRM customer email for the Delivery Tracking send field."""
         order = self._require_order(ctx, order_id)
@@ -535,23 +598,26 @@ class ScmDeliveryNotificationService:
             "customer_ack_sent_at": order.customer_ack_sent_at,
         }
 
-    def dummy_send_acknowledgement(
+    def send_acknowledgement(
         self,
         ctx: TenantContext,
         order_id: UUID,
         *,
         email: str | None = None,
     ) -> dict[str, Any]:
-        """Mark customer acknowledgement as sent without SMTP.
-
-        Unlocks GRN on CRM-sourced POs. Real mail delivery will replace this
-        stub once SMTP is configured.
-        """
+        """Send order acknowledgement over SMTP and unlock Record GRN once delivered."""
         order = self._require_order(ctx, order_id)
         if order.status not in _LIVE_STATUSES:
             raise ValidationException(
                 "Issue the purchase order before sending delivery acknowledgement"
             )
+        if order.customer_ack_sent_at is not None:
+            raise ConflictException("Acknowledgement was already sent for this order")
+        if not settings.smtp_configured:
+            raise ValidationException(
+                "SMTP is not configured. Set SMTP_HOST and SMTP_FROM_ADDRESS before sending."
+            )
+
         customer: dict[str, Any] = {}
         if order.source_document_id is not None:
             customer = self._customer_contact(ctx, order.source_document_id)
@@ -563,19 +629,51 @@ class ScmDeliveryNotificationService:
         if "@" not in to_address or "." not in to_address.split("@")[-1]:
             raise ValidationException("Enter a valid email address")
 
-        order.customer_ack_sent_at = utcnow()
+        customer_for_send = {
+            **customer,
+            "email": to_address,
+            "customer_name": customer.get("customer_name")
+            or customer.get("account_name")
+            or "Customer",
+        }
+        sent = self.acknowledge_order(
+            ctx,
+            order,
+            customer_for_send,
+            require_delivered=True,
+        )
+        if not sent:
+            raise ValidationException("Failed to send acknowledgement email")
+
         order.updated_by = ctx.user_id
         self._db.flush()
+        etd_label = self._format_etd(order)
         return {
             "order_id": order.id,
             "email": to_address,
             "customer_ack_sent_at": order.customer_ack_sent_at,
-            "dummy": True,
+            "dummy": False,
+            "etd": None if etd_label == "to be confirmed" else etd_label,
             "message": (
-                f"Acknowledgement marked as sent to {to_address} "
-                "(SMTP not configured yet). Record GRN is now available."
+                f"Acknowledgement emailed to {to_address} via SMTP"
+                + (
+                    f" (ETD {etd_label})."
+                    if etd_label != "to be confirmed"
+                    else "."
+                )
+                + " Record GRN is now available."
             ),
         }
+
+    def dummy_send_acknowledgement(
+        self,
+        ctx: TenantContext,
+        order_id: UUID,
+        *,
+        email: str | None = None,
+    ) -> dict[str, Any]:
+        """Compatibility alias — now sends real SMTP mail (same as send_acknowledgement)."""
+        return self.send_acknowledgement(ctx, order_id, email=email)
 
     # -- ETD maintenance ---------------------------------------------------
     def set_expected_delivery_date(

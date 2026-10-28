@@ -13,11 +13,13 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { ConfirmDialog } from "@/components/finance/journals/confirm-dialog";
 import { FinanceStatusBadge } from "@/components/finance/finance-status-badge";
 import { PageHeader } from "@/components/layout/page-header";
 import { InvoiceGenerationTaskDialog } from "@/components/procurement/invoice-generation-task-dialog";
 import { Button } from "@/components/ui/button";
 import { useAuthUser } from "@/hooks/use-auth-user";
+import { downloadQuoteExport } from "@/lib/crm/crm-record-actions";
 import { isErpAdmin } from "@/lib/module-access";
 import { cn } from "@/lib/utils";
 import {
@@ -26,6 +28,12 @@ import {
   type PlatformMyJobModuleSection,
   type PlatformMyJobRow,
 } from "@/services/platform-my-jobs-service";
+import {
+  acceptScmPoApproval,
+  finalizeScmOrder,
+  rejectScmFinalizeApproval,
+} from "@/services/procurement-service";
+import { decideMyJob, getQuote, listQuoteLines } from "@/services/sales-crm-service";
 import {
   downloadInvoiceJobGrnPdf,
   downloadInvoiceJobPoPdf,
@@ -38,14 +46,24 @@ const MODULE_ICONS: Record<string, LucideIcon> = {
   procurement: Package,
 };
 
+type PendingDecision = {
+  job: PlatformMyJobRow;
+  outcome: "approved" | "rejected";
+};
+
 export function PlatformMyJobsPage() {
   const { moduleKeys, adminModuleKeys, user, loading: authLoading } = useAuthUser();
   const [sections, setSections] = useState<PlatformMyJobModuleSection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [invoiceTaskId, setInvoiceTaskId] = useState<string | null>(null);
   const [pdfBusyKey, setPdfBusyKey] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingDecision | null>(null);
+  const [remark, setRemark] = useState("");
+  const [deciding, setDeciding] = useState(false);
+  const [busyJobId, setBusyJobId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -110,6 +128,225 @@ export function PlatformMyJobsPage() {
     }
   }
 
+  async function onDownloadQuote(job: PlatformMyJobRow) {
+    if (!job.quoteId) return;
+    const key = `quote-${job.id}`;
+    setPdfBusyKey(key);
+    setPdfError(null);
+    try {
+      const [quoteRow, lineRows] = await Promise.all([
+        getQuote(job.quoteId),
+        listQuoteLines(job.quoteId),
+      ]);
+      await downloadQuoteExport(quoteRow, lineRows);
+    } catch (err) {
+      setPdfError(
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : "Failed to download quotation PDF",
+      );
+    } finally {
+      setPdfBusyKey(null);
+    }
+  }
+
+  function openDecision(job: PlatformMyJobRow, outcome: "approved" | "rejected") {
+    setActionError(null);
+    setRemark("");
+    setPending({ job, outcome });
+  }
+
+  async function confirmDecision() {
+    if (!pending) return;
+    const { job, outcome } = pending;
+    setDeciding(true);
+    setActionError(null);
+    setBusyJobId(job.id);
+    try {
+      const kind = job.actionKind;
+      if (kind === "crm_approve" && job.crmTaskId) {
+        await decideMyJob(
+          job.crmTaskId,
+          outcome,
+          remark.trim() || undefined,
+        );
+      } else if (
+        (kind === "proc_accept_po" || kind === "proc_issue_po") &&
+        job.orderId
+      ) {
+        if (outcome === "rejected") {
+          await rejectScmFinalizeApproval(job.orderId);
+        } else if (kind === "proc_accept_po") {
+          await acceptScmPoApproval(job.orderId);
+        } else {
+          await finalizeScmOrder(job.orderId);
+        }
+      } else {
+        throw new Error("This job cannot be decided here");
+      }
+      setPending(null);
+      setRemark("");
+      await load();
+    } catch (err) {
+      setActionError(
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : "Failed to record decision",
+      );
+    } finally {
+      setDeciding(false);
+      setBusyJobId(null);
+    }
+  }
+
+  function decisionTitle(decision: PendingDecision): string {
+    const { job, outcome } = decision;
+    if (outcome === "rejected") {
+      if (job.actionKind === "proc_accept_po" || job.actionKind === "proc_issue_po") {
+        return "Reject PO approval?";
+      }
+      return "Reject this job?";
+    }
+    return `${job.approveLabel || "Approve"}?`;
+  }
+
+  function decisionDescription(decision: PendingDecision): string {
+    const { job, outcome } = decision;
+    const ref = job.reference || job.title;
+    if (outcome === "rejected") {
+      return `Reject “${ref}”. The requester can revise and resubmit.`;
+    }
+    if (job.actionKind === "proc_accept_po") {
+      return `Accept PO “${ref}”. It will move to Management for Issue PO.`;
+    }
+    if (job.actionKind === "proc_issue_po") {
+      return `Issue PO “${ref}”. It stays in Procurement for GRN / delivery.`;
+    }
+    return `Approve “${ref}”.`;
+  }
+
+  function renderJobActions(job: PlatformMyJobRow) {
+    const busy = busyJobId === job.id;
+    const kind = job.actionKind;
+
+    if (kind === "crm_approve") {
+      return (
+        <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 cursor-pointer px-2.5 text-xs transition-colors duration-200"
+            disabled={busy || deciding}
+            onClick={() => openDecision(job, "approved")}
+          >
+            {job.approveLabel || "Approve"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 cursor-pointer px-2.5 text-xs text-destructive transition-colors duration-200 hover:bg-destructive/5 hover:text-destructive"
+            disabled={busy || deciding}
+            onClick={() => openDecision(job, "rejected")}
+          >
+            Reject
+          </Button>
+          <Link
+            href={job.href}
+            className="inline-flex h-7 cursor-pointer items-center rounded-md border border-border/80 bg-background px-2.5 text-xs font-medium text-foreground transition-colors duration-200 hover:bg-muted"
+          >
+            Open
+          </Link>
+        </div>
+      );
+    }
+
+    if (kind === "crm_complex") {
+      return (
+        <Link
+          href={job.href}
+          className="inline-flex h-7 cursor-pointer items-center rounded-md border border-primary/30 bg-primary/5 px-2.5 text-xs font-medium text-primary transition-colors duration-200 hover:bg-primary/10"
+        >
+          Complete in CRM
+        </Link>
+      );
+    }
+
+    if (kind === "proc_accept_po" || kind === "proc_issue_po") {
+      return (
+        <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 cursor-pointer px-2.5 text-xs transition-colors duration-200"
+            disabled={busy || deciding}
+            onClick={() => openDecision(job, "approved")}
+          >
+            {job.approveLabel || (kind === "proc_issue_po" ? "Issue PO" : "Accept PO")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 cursor-pointer px-2.5 text-xs text-destructive transition-colors duration-200 hover:bg-destructive/5 hover:text-destructive"
+            disabled={busy || deciding}
+            onClick={() => openDecision(job, "rejected")}
+          >
+            Reject
+          </Button>
+          <Link
+            href={job.href}
+            className="inline-flex h-7 cursor-pointer items-center rounded-md border border-border/80 bg-background px-2.5 text-xs font-medium text-foreground transition-colors duration-200 hover:bg-muted"
+          >
+            Open
+          </Link>
+        </div>
+      );
+    }
+
+    if (kind === "proc_invoice" && job.invoiceTaskId) {
+      return (
+        <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 cursor-pointer px-2.5 text-xs transition-colors duration-200"
+            onClick={() => {
+              const id = job.invoiceTaskId;
+              if (id) setInvoiceTaskId(id);
+            }}
+          >
+            {job.approveLabel || "Complete invoice"}
+          </Button>
+        </div>
+      );
+    }
+
+    if (job.openMode === "invoice_generation_dialog" && job.invoiceTaskId) {
+      return (
+        <button
+          type="button"
+          className="inline-flex h-7 cursor-pointer items-center rounded-md border border-border/80 bg-background px-2.5 text-xs font-medium text-foreground transition-colors duration-200 hover:bg-muted"
+          onClick={() => {
+            const id = job.invoiceTaskId;
+            if (id) setInvoiceTaskId(id);
+          }}
+        >
+          Open
+        </button>
+      );
+    }
+
+    return (
+      <Link
+        href={job.href}
+        className="inline-flex h-7 cursor-pointer items-center rounded-md border border-border/80 bg-background px-2.5 text-xs font-medium text-foreground transition-colors duration-200 hover:bg-muted"
+      >
+        Open
+      </Link>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -142,12 +379,12 @@ export function PlatformMyJobsPage() {
         </div>
       ) : null}
 
-      {pdfError ? (
+      {pdfError || actionError ? (
         <div
           role="alert"
           className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
         >
-          {pdfError}
+          {actionError || pdfError}
         </div>
       ) : null}
 
@@ -226,7 +463,7 @@ export function PlatformMyJobsPage() {
                 </p>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+                  <table className="w-full min-w-[720px] border-collapse text-left text-sm">
                     <thead>
                       <tr className="border-b border-border/80 bg-muted/30 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                         <th className="px-4 py-2.5 font-semibold sm:px-5">Job</th>
@@ -234,17 +471,17 @@ export function PlatformMyJobsPage() {
                         <th className="px-4 py-2.5 font-semibold sm:px-5">Detail</th>
                         <th className="px-4 py-2.5 font-semibold sm:px-5">Status</th>
                         <th className="px-4 py-2.5 text-right font-semibold sm:px-5">
-                          <span className="sr-only">Open</span>
+                          Actions
                         </th>
                       </tr>
                     </thead>
                     <tbody>
                       {section.jobs.map((job) => {
-                        const showPdf =
-                          job.openMode === "invoice_generation_dialog" &&
-                          Boolean(job.orderId);
+                        const showPdf = Boolean(job.showPoDownload && job.orderId);
+                        const showQuote = Boolean(job.showQuoteDownload && job.quoteId);
                         const poBusy = pdfBusyKey === `po-${job.id}`;
                         const grnBusy = pdfBusyKey === `grn-${job.id}`;
+                        const quoteBusy = pdfBusyKey === `quote-${job.id}`;
                         return (
                           <tr
                             key={job.id}
@@ -256,6 +493,21 @@ export function PlatformMyJobsPage() {
                             <td className="px-4 py-3 text-muted-foreground sm:px-5">
                               <div className="flex flex-wrap items-center gap-2">
                                 <span>{job.reference || "—"}</span>
+                                {showQuote ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 cursor-pointer gap-1 px-2 text-xs transition-colors duration-200"
+                                    disabled={Boolean(pdfBusyKey)}
+                                    title="Download quotation PDF"
+                                    aria-label="Download quotation PDF"
+                                    onClick={() => void onDownloadQuote(job)}
+                                  >
+                                    <FileDown className="size-3.5" aria-hidden />
+                                    {quoteBusy ? "PDF…" : "Quote"}
+                                  </Button>
+                                ) : null}
                                 {showPdf ? (
                                   <span className="inline-flex items-center gap-1.5">
                                     <Button
@@ -269,7 +521,7 @@ export function PlatformMyJobsPage() {
                                       onClick={() => void onDownloadPo(job)}
                                     >
                                       <FileDown className="size-3.5" aria-hidden />
-                                      {poBusy ? "PO…" : "PO PDF"}
+                                      {poBusy ? "PO…" : "PO"}
                                     </Button>
                                     {job.receiptBatchId ? (
                                       <Button
@@ -297,26 +549,7 @@ export function PlatformMyJobsPage() {
                               <FinanceStatusBadge status={job.status} />
                             </td>
                             <td className="px-4 py-3 text-right sm:px-5">
-                              {job.openMode === "invoice_generation_dialog" &&
-                              job.invoiceTaskId ? (
-                                <button
-                                  type="button"
-                                  className="inline-flex cursor-pointer items-center rounded-md border border-border/80 bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-colors duration-200 hover:bg-muted"
-                                  onClick={() => {
-                                    const id = job.invoiceTaskId;
-                                    if (id) setInvoiceTaskId(id);
-                                  }}
-                                >
-                                  Open
-                                </button>
-                              ) : (
-                                <Link
-                                  href={job.href}
-                                  className="inline-flex cursor-pointer items-center rounded-md border border-border/80 bg-background px-2.5 py-1 text-xs font-medium text-foreground transition-colors duration-200 hover:bg-muted"
-                                >
-                                  Open
-                                </Link>
-                              )}
+                              {renderJobActions(job)}
                             </td>
                           </tr>
                         );
@@ -336,6 +569,38 @@ export function PlatformMyJobsPage() {
         onClose={() => setInvoiceTaskId(null)}
         onCompleted={() => void load()}
       />
+
+      <ConfirmDialog
+        open={Boolean(pending)}
+        title={pending ? decisionTitle(pending) : ""}
+        description={pending ? decisionDescription(pending) : undefined}
+        confirmLabel={
+          pending?.outcome === "rejected"
+            ? "Reject"
+            : pending?.job.approveLabel || "Approve"
+        }
+        tone={pending?.outcome === "rejected" ? "destructive" : "default"}
+        busy={deciding}
+        onConfirm={() => void confirmDecision()}
+        onCancel={() => {
+          if (deciding) return;
+          setPending(null);
+          setRemark("");
+          setActionError(null);
+        }}
+      >
+        <label className="block space-y-1.5">
+          <span className="text-xs font-medium text-slate-600">Remark (optional)</span>
+          <textarea
+            value={remark}
+            onChange={(e) => setRemark(e.target.value)}
+            rows={3}
+            className="w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-foreground outline-none transition-colors duration-200 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
+            placeholder="Add a short note…"
+            disabled={deciding}
+          />
+        </label>
+      </ConfirmDialog>
     </div>
   );
 }

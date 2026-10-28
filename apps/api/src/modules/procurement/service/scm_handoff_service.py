@@ -1899,8 +1899,147 @@ class ScmHandoffService:
             return
         raise ForbiddenException("You are not assigned to approve this PO stage")
 
+    def _po_label(self, order: ProcOrderHeader) -> str:
+        return (
+            (getattr(order, "company_po_number", None) or "").strip()
+            or (getattr(order, "document_number", None) or "").strip()
+            or "Purchase Order"
+        )
+
+    def _store_po_print_pdf(
+        self,
+        ctx: TenantContext,
+        order: ProcOrderHeader,
+        *,
+        po_pdf_base64: str | None,
+        po_pdf_filename: str | None,
+    ) -> None:
+        content = (po_pdf_base64 or "").strip()
+        if not content:
+            return
+        filename = (po_pdf_filename or "").strip() or f"PO_{self._po_label(order)}.pdf"
+        if not filename.lower().endswith(".pdf"):
+            filename = f"{filename}.pdf"
+        branch_id = getattr(order, "branch_id", None)
+        if branch_id is None:
+            return
+        # Nested transaction so a category/storage failure cannot poison the PO submit.
+        try:
+            with self._db.begin_nested():
+                self.attach_po_document(
+                    ctx,
+                    order.id,
+                    file_name=filename,
+                    content_base64=content,
+                    content_type="application/pdf",
+                    branch_id=branch_id,
+                    company_id=getattr(order, "company_id", None),
+                    category="po_pdf",
+                    remarks="Auto-generated PO print for approval email",
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _po_print_email_attachments(
+        self,
+        ctx: TenantContext,
+        order_id: UUID,
+        *,
+        po_pdf_base64: str | None = None,
+        po_pdf_filename: str | None = None,
+    ) -> list[dict]:
+        """Prefer freshly supplied PDF, else stored po_pdf / first PO PDF attachment."""
+        import base64
+
+        content = (po_pdf_base64 or "").strip()
+        if content:
+            order = self._order_service.get_order(ctx, order_id)
+            filename = (po_pdf_filename or "").strip() or f"PO_{self._po_label(order)}.pdf"
+            if not filename.lower().endswith(".pdf"):
+                filename = f"{filename}.pdf"
+            return [
+                {
+                    "filename": filename,
+                    "content_base64": content,
+                    "content_type": "application/pdf",
+                }
+            ]
+
+        from modules.crm.service.attachment_service import AttachmentService
+
+        attachment_svc = AttachmentService(self._db)
+        rows = ProcurementCrmAdapter(self._db).list_attachments(
+            ctx,
+            entity_filters=[(self.PO_ATTACHMENT_ENTITY, order_id)],
+        )
+        preferred = sorted(
+            rows,
+            key=lambda row: 0 if (row.category or "").lower() == "po_pdf" else 1,
+        )
+        for row in preferred:
+            name = (row.file_name or "").lower()
+            ctype = (row.content_type or "").lower()
+            if "pdf" not in ctype and not name.endswith(".pdf"):
+                continue
+            try:
+                download = attachment_svc.resolve_download(ctx, row.id)
+            except Exception:  # noqa: BLE001
+                continue
+            raw = download.content
+            if raw is None and download.path is not None:
+                raw = download.path.read_bytes()
+            if not raw:
+                continue
+            return [
+                {
+                    "filename": row.file_name or "Purchase_Order.pdf",
+                    "content_base64": base64.b64encode(raw).decode("ascii"),
+                    "content_type": row.content_type or "application/pdf",
+                }
+            ]
+        return []
+
+    def _notify_po_step_owners(
+        self,
+        ctx: TenantContext,
+        order: ProcOrderHeader,
+        *,
+        step_key: str,
+        remarks: str | None = None,
+        attachments: list[dict] | None = None,
+        jobs_path: str = "/procurement",
+    ) -> None:
+        owner_ids = self._approvers.list_user_ids(ctx, step_key)
+        if not owner_ids:
+            return
+        label, _team = APPROVAL_STEP_CATALOG.get(step_key, (step_key, "scm"))
+        po_label = self._po_label(order)
+        try:
+            from modules.procurement.service.proc_email_notification_service import (
+                ProcEmailNotificationService,
+            )
+
+            ProcEmailNotificationService(self._db).notify_step_approvers(
+                tenant_id=ctx.tenant_id,
+                recipient_user_ids=owner_ids,
+                approval_type=label,
+                record_title=f"{label} · {po_label}",
+                requested_by=ctx.user_id,
+                remarks=remarks,
+                jobs_path=jobs_path,
+                attachments=attachments or None,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     def request_finalize_approval(
-        self, ctx: TenantContext, order_id: UUID
+        self,
+        ctx: TenantContext,
+        order_id: UUID,
+        *,
+        po_pdf_base64: str | None = None,
+        po_pdf_filename: str | None = None,
+        remarks: str | None = None,
     ) -> ProcOrderHeader:
         """Mark a draft SCM PO as submitted for Accept PO (then Management)."""
         order = self._order_service.get_order(ctx, order_id)
@@ -1912,6 +2051,25 @@ class ScmHandoffService:
             if not getattr(order, "scm_approval_stage", None):
                 order.scm_approval_stage = "accept_po"
                 self._db.flush()
+            self._store_po_print_pdf(
+                ctx,
+                order,
+                po_pdf_base64=po_pdf_base64,
+                po_pdf_filename=po_pdf_filename,
+            )
+            attachments = self._po_print_email_attachments(
+                ctx,
+                order_id,
+                po_pdf_base64=po_pdf_base64,
+                po_pdf_filename=po_pdf_filename,
+            )
+            self._notify_po_step_owners(
+                ctx,
+                order,
+                step_key="accept_po",
+                remarks=remarks,
+                attachments=attachments,
+            )
             return order
         if order.status != OrderStatus.DRAFT.value:
             raise InvalidDocumentState("Only draft SCM POs can be sent for admin approval")
@@ -1935,6 +2093,12 @@ class ScmHandoffService:
         order.updated_by = ctx.user_id
         order.version = int(getattr(order, "version", 0) or 0) + 1
         self._db.flush()
+        self._store_po_print_pdf(
+            ctx,
+            order,
+            po_pdf_base64=po_pdf_base64,
+            po_pdf_filename=po_pdf_filename,
+        )
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,
             entity_name="proc_order_header",
@@ -1946,6 +2110,19 @@ class ScmHandoffService:
                 "workflow_status": order.workflow_status,
                 "scm_approval_stage": order.scm_approval_stage,
             },
+        )
+        attachments = self._po_print_email_attachments(
+            ctx,
+            order_id,
+            po_pdf_base64=po_pdf_base64,
+            po_pdf_filename=po_pdf_filename,
+        )
+        self._notify_po_step_owners(
+            ctx,
+            order,
+            step_key="accept_po",
+            remarks=remarks,
+            attachments=attachments,
         )
         return order
 
@@ -1975,6 +2152,14 @@ class ScmHandoffService:
             operation="scm_accept_po_approval",
             performed_by=ctx.user_id,
             new_value={"scm_approval_stage": order.scm_approval_stage},
+        )
+        attachments = self._po_print_email_attachments(ctx, order_id)
+        self._notify_po_step_owners(
+            ctx,
+            order,
+            step_key="management_po",
+            remarks="Accepted by SCM — awaiting Management issue",
+            attachments=attachments,
         )
         return order
 
@@ -2678,9 +2863,9 @@ class ScmHandoffService:
 
         _ = remarks  # reserved for future metadata; CRM attachment model has no remarks column
         order = self._order_service.get_order(ctx, order_id)
-        # Preset document slots (Customer PO / Vendor Quote) replace prior file.
+        # Preset document slots (Customer PO / Vendor Quote / print PDF) replace prior file.
         category_key = (category or "other").strip().lower() or "other"
-        replace = category_key in {"customer_po", "vendor_quote"}
+        replace = category_key in {"customer_po", "vendor_quote", "po_pdf"}
         if not replace:
             existing = self.list_po_attachments(ctx, order_id)
             if len(existing) >= PO_MAX_ATTACHMENTS:

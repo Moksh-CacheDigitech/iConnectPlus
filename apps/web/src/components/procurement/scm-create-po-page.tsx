@@ -71,6 +71,7 @@ import {
   type PurchaseOrderPdfInput,
 } from "@/utils/purchase-order-pdf";
 import { ensureScmOvfPdfAttached } from "@/utils/scm-ovf-pdf-attach";
+import { buildScmPoPrintPdfAttachment } from "@/utils/scm-po-pdf-attach";
 import { matchVendorByDistributor } from "@/utils/vendor-oem-match";
 import {
   bindOvfItemPlanRowsToPo,
@@ -218,13 +219,13 @@ function resolvePoDistributorName(
   if (!preview) return param;
   const seedVendorLines = remainderFromStock
     ? (() => {
-        const all = preview.vendor_lines || [];
-        const limited = peekOvfPoRemainderProducts(ovfId);
-        if (!limited || limited.length === 0) return all;
-        const keys = new Set(limited.map((name) => ovfProductKey(name)));
-        const matched = all.filter((ln) => keys.has(ovfProductKey(ln.product_name)));
-        return matched.length > 0 ? matched : all;
-      })()
+      const all = preview.vendor_lines || [];
+      const limited = peekOvfPoRemainderProducts(ovfId);
+      if (!limited || limited.length === 0) return all;
+      const keys = new Set(limited.map((name) => ovfProductKey(name)));
+      const matched = all.filter((ln) => keys.has(ovfProductKey(ln.product_name)));
+      return matched.length > 0 ? matched : all;
+    })()
     : ovfPoSeedVendorLines(preview.vendor_lines || [], distributorParam);
   return (param || seedVendorLines[0]?.distributor_name || preview.distributor_name || "").trim();
 }
@@ -758,10 +759,10 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
     () =>
       preview
         ? ovfCreatePoSeedVendorLines(preview, {
-            ovfId,
-            distributorParam,
-            remainderFromStock,
-          })
+          ovfId,
+          distributorParam,
+          remainderFromStock,
+        })
         : [],
     [preview, ovfId, distributorParam, remainderFromStock],
   );
@@ -1008,20 +1009,20 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
         const matchedEntry = matched?.addressEntries?.[0];
         const addressFields = keepVendor
           ? {
-              vendorAddress: current.vendorAddress || "",
-              vendorGstNumber: current.vendorGstNumber || "",
-              sourceOfSupply: current.sourceOfSupply || "",
-            }
+            vendorAddress: current.vendorAddress || "",
+            vendorGstNumber: current.vendorGstNumber || "",
+            sourceOfSupply: current.sourceOfSupply || "",
+          }
           : matched
             ? {
-                ...applyVendorAddressFields(matchedEntry, matched.taxNumber || ""),
-                sourceOfSupply: matchedEntry?.sourceOfSupply || "",
-              }
+              ...applyVendorAddressFields(matchedEntry, matched.taxNumber || ""),
+              sourceOfSupply: matchedEntry?.sourceOfSupply || "",
+            }
             : {
-                vendorAddress: "",
-                vendorGstNumber: "",
-                sourceOfSupply: "",
-              };
+              vendorAddress: "",
+              vendorGstNumber: "",
+              sourceOfSupply: "",
+            };
         const pendingItemPlanRows = peekOvfPendingItemPlanPoRows(ovfId);
         // Same-distributor item-plan groups reuse the vendor draft (one PO).
         const draftTarget =
@@ -1031,20 +1032,20 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
         const entityFromDraftPo = companyLocationFromPoNumber(draftTarget?.companyPoNumber);
         const selectedLocation = companyLocationById(
           current.companyLocationId ||
-            entityFromDraftPo?.id ||
-            companyLocationFromPoNumber(ovf.company_po_number)?.id ||
-            location.id,
+          entityFromDraftPo?.id ||
+          companyLocationFromPoNumber(ovf.company_po_number)?.id ||
+          location.id,
         );
         const seededLines =
           seedVendorLines.length > 0
             ? seedVendorLines.map((ln) =>
-                normalizeTaxOption(
-                  ln.gst_pct != null && Number.isFinite(Number(ln.gst_pct))
-                    ? ln.gst_pct
-                    : defaultTax,
-                  defaultTax,
-                ),
-              )
+              normalizeTaxOption(
+                ln.gst_pct != null && Number.isFinite(Number(ln.gst_pct))
+                  ? ln.gst_pct
+                  : defaultTax,
+                defaultTax,
+              ),
+            )
             : [defaultTax];
         const uniformSeed = seededLines.every((pct) => pct === seededLines[0])
           ? seededLines[0]
@@ -1565,6 +1566,11 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
 
   function validateVendorFields(): string | null {
     if (!resolveVendorId()) {
+      const locked =
+        (lockedVendorDisplayName || activeDistributorName || form.vendorName || "").trim();
+      if (locked) {
+        return `No vendor master record matched "${locked}". Add or link a vendor before creating the purchase order.`;
+      }
       return "Select a vendor before creating the purchase order";
     }
     if (!resolveVendorAddress()) {
@@ -1720,15 +1726,15 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
     const location = companyLocationById(form.companyLocationId);
     const presets = location.lockShippingToEntity
       ? [
-          {
-            id: "mumbai-eastern-court",
-            address: formatEntityAddress(location),
-          },
-        ]
+        {
+          id: "mumbai-eastern-court",
+          address: formatEntityAddress(location),
+        },
+      ]
       : SHIPPING_ADDRESS_OPTIONS.map((option) => ({
-          id: option.id,
-          address: formatShippingAddress(location.addressHeader, option.id),
-        }));
+        id: option.id,
+        address: formatShippingAddress(location.addressHeader, option.id),
+      }));
     const extras = poShippingExtras.filter(
       (extra) => !presets.some((preset) => preset.address === extra.address),
     );
@@ -1871,7 +1877,11 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
       clearOvfPoRemainderProducts(ovfId);
       if (needsApproval) {
         await ensureScmOvfPdfAttached(ovfId).catch(() => null);
-        await requestScmFinalizeApproval(order.id);
+        const poPdf = await buildScmPoPrintPdfAttachment(order.id);
+        await requestScmFinalizeApproval(order.id, {
+          po_pdf_base64: poPdf?.base64 ?? null,
+          po_pdf_filename: poPdf?.filename ?? null,
+        });
         router.replace(`/procurement/orders/${order.id}?approval=pending`);
         return;
       }
@@ -1935,11 +1945,11 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
         allUsdLines(lines) || !form.freightTaxable
           ? []
           : lines
-              .filter((row) => !isUsdLine(row))
-              .map((row) => ({
-                taxableAmount: lineSubtotal(row, distiPct, form.distiSign),
-                taxPct: toNumber(row.taxPct),
-              }));
+            .filter((row) => !isUsdLine(row))
+            .map((row) => ({
+              taxableAmount: lineSubtotal(row, distiPct, form.distiSign),
+              taxPct: toNumber(row.taxPct),
+            }));
       if (!allUsdLines(lines) && form.freightTaxable && freightAmount > 0) {
         buckets.push({
           taxableAmount: freightAmount,
@@ -2003,10 +2013,10 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
   const editingDraft = Boolean(createPoDraftTarget);
   const blockedForInStockApproval = Boolean(
     preview &&
-      !editingDraft &&
-      ovfRequiresInStockCreatePoApproval(preview) &&
-      !isAdmin &&
-      !hasAcceptedCreatePoInStockApproval(ovfId),
+    !editingDraft &&
+    ovfRequiresInStockCreatePoApproval(preview) &&
+    !isAdmin &&
+    !hasAcceptedCreatePoInStockApproval(ovfId),
   );
 
   if (!loading && blockedForInStockApproval) {
@@ -2158,14 +2168,69 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
               <PoField label="Vendor name *">
                 <div
                   className="flex min-h-8 min-w-0 items-center rounded-lg border border-input bg-muted/30 px-3 py-1.5"
-                  title="Vendor is set from the item plan and cannot be changed here"
-                  aria-label="Vendor name (locked from item plan)"
+                  title={
+                    form.vendorId && selectedVendor
+                      ? "Vendor is set from the item plan and cannot be changed here"
+                      : "Distributor from item plan — link or add a vendor master record"
+                  }
+                  aria-label="Vendor name (from item plan)"
                 >
                   <span className="truncate text-sm font-bold text-foreground">
                     {lockedVendorDisplayName || "—"}
                   </span>
                 </div>
               </PoField>
+              {!form.vendorId || !selectedVendor ? (
+                <div className="space-y-2 rounded-lg border border-amber-200/80 bg-amber-50/80 px-3 py-2.5">
+                  <p className="text-sm text-amber-950">
+                    <span className="font-semibold">
+                      {lockedVendorDisplayName || "This distributor"}
+                    </span>{" "}
+                    is not linked to a vendor master record yet. Add the vendor (or pick an
+                    existing one) so address and GST can be filled for the PO.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 cursor-pointer gap-1.5 px-3 text-xs transition-colors duration-200"
+                      disabled={disabled || vendorDialogBusy}
+                      onClick={openVendorDialog}
+                    >
+                      <Plus className="size-3.5" />
+                      Add vendor
+                    </Button>
+                    {vendors.length > 0 ? (
+                      <FinanceSelect
+                        value=""
+                        disabled={disabled}
+                        className="h-8 max-w-xs cursor-pointer text-xs"
+                        aria-label="Link existing vendor"
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          const matched = vendors.find((row) => row.id === id);
+                          if (!matched) return;
+                          const entry = matched.addressEntries?.[0];
+                          setForm((current) => ({
+                            ...current,
+                            vendorId: matched.id,
+                            vendorName: matched.label,
+                            ...applyVendorAddressFields(entry, matched.taxNumber || ""),
+                          }));
+                          setError(null);
+                        }}
+                      >
+                        <option value="">Link existing vendor…</option>
+                        {vendors.map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.label}
+                          </option>
+                        ))}
+                      </FinanceSelect>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               {form.vendorId && selectedVendor ? (
                 <>
                   <div className="block min-w-0 space-y-1.5">
@@ -2791,12 +2856,12 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
                               isUsdLine(row) || distiPct === 0
                                 ? (row.rate ?? "")
                                 : formatRateValue(
-                                    adjustedUnitRate(
-                                      toNumber(row.rate),
-                                      distiPct,
-                                      form.distiSign,
-                                    ),
-                                  )
+                                  adjustedUnitRate(
+                                    toNumber(row.rate),
+                                    distiPct,
+                                    form.distiSign,
+                                  ),
+                                )
                             }
                             onChange={(e) => {
                               const raw = e.target.value;
@@ -3300,47 +3365,47 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
 
       {usdConvertLineId != null
         ? createPortal(
-            <ConfirmDialog
-              open
-              title="USD rate"
-              confirmLabel="Use USD rate"
-              cancelLabel="Cancel"
-              contentClassName="max-w-md p-6"
-              overlayClassName="z-[90]"
-              onConfirm={confirmUsdConvert}
-              onCancel={closeUsdConvertDialog}
-            >
-              <div className="mt-4 space-y-3">
-                {usdConvertError ? (
-                  <p className="rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive">
-                    {usdConvertError}
-                  </p>
-                ) : null}
-                <PoField label="1 USD equals (INR) *">
-                  <Input
-                    type="number"
-                    min={0}
-                    step="any"
-                    inputMode="decimal"
-                    value={usdConvertRateDraft}
-                    onChange={(e) => {
-                      setUsdConvertRateDraft(e.target.value);
-                      setUsdConvertError(null);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        confirmUsdConvert();
-                      }
-                    }}
-                    className={cn("h-9 tabular-nums", NO_SPINNER)}
-                    autoFocus
-                  />
-                </PoField>
-              </div>
-            </ConfirmDialog>,
-            document.body,
-          )
+          <ConfirmDialog
+            open
+            title="USD rate"
+            confirmLabel="Use USD rate"
+            cancelLabel="Cancel"
+            contentClassName="max-w-md p-6"
+            overlayClassName="z-[90]"
+            onConfirm={confirmUsdConvert}
+            onCancel={closeUsdConvertDialog}
+          >
+            <div className="mt-4 space-y-3">
+              {usdConvertError ? (
+                <p className="rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive">
+                  {usdConvertError}
+                </p>
+              ) : null}
+              <PoField label="1 USD equals (INR) *">
+                <Input
+                  type="number"
+                  min={0}
+                  step="any"
+                  inputMode="decimal"
+                  value={usdConvertRateDraft}
+                  onChange={(e) => {
+                    setUsdConvertRateDraft(e.target.value);
+                    setUsdConvertError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      confirmUsdConvert();
+                    }
+                  }}
+                  className={cn("h-9 tabular-nums", NO_SPINNER)}
+                  autoFocus
+                />
+              </PoField>
+            </div>
+          </ConfirmDialog>,
+          document.body,
+        )
         : null}
     </div>
   );

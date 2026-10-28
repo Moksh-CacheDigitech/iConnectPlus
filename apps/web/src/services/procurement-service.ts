@@ -911,20 +911,29 @@ export type ScmDummyDeliverySend = {
   email: string;
   customer_ack_sent_at: string;
   dummy: boolean;
+  etd?: string | null;
   message: string;
 };
 
-/** Placeholder acknowledgement send until SMTP is wired - unlocks Record GRN. */
-export async function dummySendScmDeliveryAcknowledgement(
+/** Send order acknowledgement over SMTP (includes ETD) and unlock Record GRN. */
+export async function sendScmDeliveryAcknowledgement(
   orderId: string,
   body?: { email?: string | null },
 ): Promise<ScmDummyDeliverySend> {
   const res = await apiClient<ScmDummyDeliverySend>(
-    `${SCM_API}/orders/${orderId}/delivery-acknowledgement/dummy-send`,
+    `${SCM_API}/orders/${orderId}/delivery-acknowledgement/send`,
     { method: "POST", body: { email: body?.email ?? null } },
   );
   invalidateProcurementListCache();
   return unwrapData(res);
+}
+
+/** @deprecated Use sendScmDeliveryAcknowledgement */
+export async function dummySendScmDeliveryAcknowledgement(
+  orderId: string,
+  body?: { email?: string | null },
+): Promise<ScmDummyDeliverySend> {
+  return sendScmDeliveryAcknowledgement(orderId, body);
 }
 
 export type ScmDeliveryNotificationRun = {
@@ -1189,10 +1198,24 @@ export async function submitInvoiceGenerationTask(
   return unwrapData(res);
 }
 
-export async function requestScmFinalizeApproval(orderId: string): Promise<ProcOrder> {
+export async function requestScmFinalizeApproval(
+  orderId: string,
+  body?: {
+    po_pdf_base64?: string | null;
+    po_pdf_filename?: string | null;
+    remarks?: string | null;
+  },
+): Promise<ProcOrder> {
   const res = await apiClient<ProcOrder>(
     `${SCM_API}/orders/${orderId}/request-finalize-approval`,
-    { method: "POST", body: {} },
+    {
+      method: "POST",
+      body: {
+        po_pdf_base64: body?.po_pdf_base64 ?? null,
+        po_pdf_filename: body?.po_pdf_filename ?? null,
+        remarks: body?.remarks ?? null,
+      },
+    },
   );
   invalidateProcurementListCache();
   return unwrapData(res);

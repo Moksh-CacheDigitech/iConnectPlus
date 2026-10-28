@@ -24,6 +24,7 @@ import {
   ensureScmOvfPdfAttached,
   isScmOvfPdfAttachment,
 } from "@/utils/scm-ovf-pdf-attach";
+import { buildScmPoPrintPdfAttachment } from "@/utils/scm-po-pdf-attach";
 
 function mapServerFinalize(row: ScmFinalizeApproval): PoApprovalRequest {
   return {
@@ -180,7 +181,11 @@ export function useProcurementApprovals() {
 
   const submitFinalizeRequest = useCallback(
     async (orderId: string) => {
-      const order = await requestScmFinalizeApproval(orderId);
+      const poPdf = await buildScmPoPrintPdfAttachment(orderId);
+      const order = await requestScmFinalizeApproval(orderId, {
+        po_pdf_base64: poPdf?.base64 ?? null,
+        po_pdf_filename: poPdf?.filename ?? null,
+      });
       await refresh();
       return order;
     },

@@ -33,6 +33,7 @@ import {
   listVendorOptions,
   openScmCommercialAttachment,
 } from "@/services/procurement-service";
+import { downloadInvoiceJobPoPdf } from "@/utils/invoice-job-pdf";
 import { buildScmOvfPdfBlob } from "@/utils/scm-ovf-pdf";
 
 function formatWhen(iso: string): string {
@@ -241,6 +242,7 @@ export function ProcurementApprovalsPage() {
   const { isAdmin, canDecideApprovals } = access;
   const { rows, pending, pendingCount, decide, refresh, loadError } = useProcurementApprovals();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [downloadingPoId, setDownloadingPoId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "pending" | "accepted" | "rejected">("all");
@@ -307,6 +309,21 @@ export function ProcurementApprovalsPage() {
 
   const acceptedCount = rows.filter((row) => row.status === "accepted").length;
   const rejectedCount = rows.filter((row) => row.status === "rejected").length;
+
+  async function onDownloadPo(row: PoApprovalRequest, event?: MouseEvent) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (row.kind !== "finalize" || isOvfCreatePoApprovalOrderKey(row.orderId)) return;
+    setDownloadingPoId(row.id);
+    setError(null);
+    try {
+      await downloadInvoiceJobPoPdf(row.orderId);
+    } catch (err) {
+      setError(formatApiError(err, "Failed to download PO PDF"));
+    } finally {
+      setDownloadingPoId(null);
+    }
+  }
 
   async function onAccept(row: PoApprovalRequest, event?: MouseEvent) {
     event?.preventDefault();
@@ -520,6 +537,27 @@ export function ProcurementApprovalsPage() {
                         >
                           {row.kind === "create_po_in_stock" ? "Open OVF" : "Open PO"}
                         </Link>
+                        {row.kind === "finalize" &&
+                        !isOvfCreatePoApprovalOrderKey(row.orderId) ? (
+                          <button
+                            type="button"
+                            disabled={downloadingPoId === row.id}
+                            title="Download PO print PDF"
+                            onClick={(event) => void onDownloadPo(row, event)}
+                            className={cn(
+                              "inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground",
+                              "transition-colors duration-200 hover:bg-muted/50 hover:text-foreground",
+                              "disabled:cursor-not-allowed disabled:opacity-60",
+                            )}
+                          >
+                            {downloadingPoId === row.id ? (
+                              <Loader2 className="size-3 animate-spin" aria-hidden />
+                            ) : (
+                              <Download className="size-3" aria-hidden />
+                            )}
+                            {downloadingPoId === row.id ? "PO…" : "PO"}
+                          </button>
+                        ) : null}
                         {canDecideRow(row, access) ? (
                           <>
                             <button

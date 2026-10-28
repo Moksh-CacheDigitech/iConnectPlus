@@ -114,7 +114,87 @@ class ProcInvoiceGenerationTaskService:
                 updated_by=ctx.user_id,
             )
             created.append(self._repo.add(row))
+
+        if created:
+            self._notify_assignees(
+                ctx,
+                order=order,
+                tasks=created,
+                po_number=po_number,
+            )
         return created
+
+    def _po_print_email_attachments(
+        self, ctx: TenantContext, order_id: UUID
+    ) -> list[dict]:
+        import base64
+
+        from modules.crm.service.attachment_service import AttachmentService
+        from modules.procurement.adapters.crm_adapter import ProcurementCrmAdapter
+
+        attachment_svc = AttachmentService(self._db)
+        rows = ProcurementCrmAdapter(self._db).list_attachments(
+            ctx,
+            entity_filters=[("purchase_order", order_id)],
+        )
+        preferred = sorted(
+            rows,
+            key=lambda row: 0 if (row.category or "").lower() == "po_pdf" else 1,
+        )
+        for row in preferred:
+            name = (row.file_name or "").lower()
+            ctype = (row.content_type or "").lower()
+            if "pdf" not in ctype and not name.endswith(".pdf"):
+                continue
+            try:
+                download = attachment_svc.resolve_download(ctx, row.id)
+            except Exception:  # noqa: BLE001
+                continue
+            raw = download.content
+            if raw is None and download.path is not None:
+                raw = download.path.read_bytes()
+            if not raw:
+                continue
+            return [
+                {
+                    "filename": row.file_name or "Purchase_Order.pdf",
+                    "content_base64": base64.b64encode(raw).decode("ascii"),
+                    "content_type": row.content_type or "application/pdf",
+                }
+            ]
+        return []
+
+    def _notify_assignees(
+        self,
+        ctx: TenantContext,
+        *,
+        order: ProcOrderHeader,
+        tasks: list[ProcInvoiceGenerationTask],
+        po_number: str,
+    ) -> None:
+        from modules.procurement.domain.approval_step_owners import APPROVAL_STEP_CATALOG
+        from modules.procurement.service.proc_email_notification_service import (
+            ProcEmailNotificationService,
+        )
+
+        label, _team = APPROVAL_STEP_CATALOG.get(
+            INVOICE_STEP_KEY, ("Invoice generation", "accounts")
+        )
+        attachments = self._po_print_email_attachments(ctx, order.id)
+        recipient_ids = [task.assigned_user_id for task in tasks if task.assigned_user_id]
+        try:
+            ProcEmailNotificationService(self._db).notify_step_approvers(
+                tenant_id=ctx.tenant_id,
+                recipient_user_ids=recipient_ids,
+                approval_type=label,
+                record_title=f"{label} · {po_number or 'PO'}",
+                requested_by=ctx.user_id,
+                remarks="Billing GRN saved — fill invoice details in My Jobs",
+                jobs_path="/procurement/my-jobs",
+                attachments=attachments or None,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def list_my_tasks(
         self,

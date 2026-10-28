@@ -40,6 +40,7 @@ import {
   formatCompanyShippingAddress,
   shippingOptionsForLocation,
 } from "@/utils/company-po-locations";
+import { buildScmPoPrintPdfAttachment } from "@/utils/scm-po-pdf-attach";
 import {
   buildProcurementInventoryStockSummary,
   isGrnNonBilledStockRow,
@@ -704,7 +705,11 @@ export function ProcurementManualCreatePoPage() {
         import_line_ids: importLineIds,
       });
       // Manual / list Create PO always drafts then queues admin finalize approval.
-      await requestScmFinalizeApproval(order.id);
+      const poPdf = await buildScmPoPrintPdfAttachment(order.id);
+      await requestScmFinalizeApproval(order.id, {
+        po_pdf_base64: poPdf?.base64 ?? null,
+        po_pdf_filename: poPdf?.filename ?? null,
+      });
       router.replace(`/procurement/orders/${order.id}?approval=pending`);
     } catch (err) {
       setError(formatApiError(err, "Failed to create purchase order"));

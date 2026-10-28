@@ -28,6 +28,8 @@ _EXEMPT_MARKUP_KEYS = frozenset(
         "body_html",
         "email_html",
         "template_html",
+        "body_template",
+        "subject_template",
         "rich_text",
         "content_html",
         "signature_html",

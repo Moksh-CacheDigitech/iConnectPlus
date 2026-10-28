@@ -33,6 +33,7 @@ from modules.procurement.schemas import (
     ScmDummyDeliverySendResponse,
     ScmEtdUpdateRequest,
     ScmEtdUpdateResponse,
+    ScmFinalizeApprovalRequest,
     ScmFinalizeApprovalResponse,
     ScmFulfillFromStockRequest,
     ScmFulfillFromStockResponse,
@@ -515,17 +516,17 @@ def get_scm_delivery_contact(
 
 
 @scm_router.post(
-    "/orders/{order_id}/delivery-acknowledgement/dummy-send",
+    "/orders/{order_id}/delivery-acknowledgement/send",
     response_model=APIResponse[ScmDummyDeliverySendResponse],
 )
-def dummy_send_scm_delivery_acknowledgement(
+def send_scm_delivery_acknowledgement(
     order_id: UUID,
     body: ScmDummyDeliverySendRequest,
     ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> APIResponse[ScmDummyDeliverySendResponse]:
-    """Placeholder send until SMTP is wired - unlocks Record GRN."""
-    row = ScmDeliveryNotificationService(db).dummy_send_acknowledgement(
+    """Email order acknowledgement via SMTP (includes ETD) and unlock Record GRN."""
+    row = ScmDeliveryNotificationService(db).send_acknowledgement(
         ctx,
         order_id,
         email=body.email,
@@ -535,6 +536,21 @@ def dummy_send_scm_delivery_acknowledgement(
         message=row["message"],
         data=ScmDummyDeliverySendResponse.model_validate(row),
     )
+
+
+@scm_router.post(
+    "/orders/{order_id}/delivery-acknowledgement/dummy-send",
+    response_model=APIResponse[ScmDummyDeliverySendResponse],
+    deprecated=True,
+)
+def dummy_send_scm_delivery_acknowledgement(
+    order_id: UUID,
+    body: ScmDummyDeliverySendRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmDummyDeliverySendResponse]:
+    """Compatibility alias for /delivery-acknowledgement/send."""
+    return send_scm_delivery_acknowledgement(order_id, body, ctx, db)
 
 
 @scm_router.post(
@@ -804,8 +820,16 @@ def request_scm_finalize_approval(
     order_id: UUID,
     ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
     db: Annotated[Session, Depends(get_db)],
+    body: ScmFinalizeApprovalRequest | None = None,
 ) -> APIResponse[OrderResponse]:
-    row = ScmHandoffService(db).request_finalize_approval(ctx, order_id)
+    payload = body.model_dump() if body is not None else {}
+    row = ScmHandoffService(db).request_finalize_approval(
+        ctx,
+        order_id,
+        po_pdf_base64=payload.get("po_pdf_base64"),
+        po_pdf_filename=payload.get("po_pdf_filename"),
+        remarks=payload.get("remarks"),
+    )
     db.commit()
     return APIResponse(
         message="SCM purchase order sent for Accept PO approval",

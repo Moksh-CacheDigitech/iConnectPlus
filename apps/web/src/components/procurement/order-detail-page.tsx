@@ -54,6 +54,7 @@ import {
   downloadDeliveryChallanPdf,
 } from "@/utils/delivery-challan-pdf";
 import { ensureScmOvfPdfAttached } from "@/utils/scm-ovf-pdf-attach";
+import { buildScmPoPrintPdfAttachment } from "@/utils/scm-po-pdf-attach";
 import {
   formatChallanGrnSummary,
   listDeliveryChallansByOrderId,
@@ -433,7 +434,11 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
       if (ovfId) {
         await ensureScmOvfPdfAttached(ovfId).catch(() => null);
       }
-      const updated = await requestScmFinalizeApproval(order.id);
+      const poPdf = await buildScmPoPrintPdfAttachment(order.id);
+      const updated = await requestScmFinalizeApproval(order.id, {
+        po_pdf_base64: poPdf?.base64 ?? null,
+        po_pdf_filename: poPdf?.filename ?? null,
+      });
       setOrder(updated);
       setError(null);
       router.replace(`${pathname}?approval=pending`);

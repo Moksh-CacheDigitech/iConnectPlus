@@ -707,6 +707,14 @@ class ScmNegotiationResponse(BaseModel):
     can_issue: bool
 
 
+class ScmFinalizeApprovalRequest(BaseModel):
+    """Optional PO print PDF for Accept PO / Management approval emails."""
+
+    po_pdf_base64: str | None = None
+    po_pdf_filename: str | None = None
+    remarks: str | None = None
+
+
 class ScmFinalizeApprovalResponse(BaseModel):
     """Shared Approval inbox row for SCM Accept PO / Management finalize requests."""
 
@@ -847,7 +855,7 @@ class ScmDeliveryContactResponse(BaseModel):
 
 
 class ScmDummyDeliverySendRequest(BaseModel):
-    """Mark order acknowledgement as sent without SMTP (placeholder until mail is wired)."""
+    """Send order acknowledgement to the customer over SMTP."""
 
     email: str | None = Field(default=None, max_length=255)
 
@@ -856,7 +864,8 @@ class ScmDummyDeliverySendResponse(BaseModel):
     order_id: UUID
     email: str
     customer_ack_sent_at: datetime
-    dummy: bool = True
+    dummy: bool = False
+    etd: str | None = None
     message: str
 
 

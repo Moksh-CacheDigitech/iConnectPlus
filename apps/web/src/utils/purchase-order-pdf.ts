@@ -380,8 +380,8 @@ export async function previewPurchaseOrderPdf(
 export async function downloadPurchaseOrderPdf(
   input: PurchaseOrderPdfInput,
   fileName?: string,
-  options?: { preview?: boolean; watermark?: boolean },
-): Promise<void> {
+  options?: { preview?: boolean; watermark?: boolean; asBase64?: boolean },
+): Promise<{ filename: string; base64?: string } | void> {
   const payload: PurchaseOrderPdfInput = {
     ...input,
     company: {
@@ -789,15 +789,44 @@ export async function downloadPurchaseOrderPdf(
     applyPreviewWatermark(doc);
   }
 
+  const resolvedName = fileName || `PO-${payload.poNumber || "draft"}.pdf`;
+
+  if (options?.asBase64) {
+    const dataUri = doc.output("datauristring") as string;
+    const base64 = dataUri.includes(",") ? dataUri.split(",")[1] : dataUri;
+    return { filename: resolvedName, base64 };
+  }
+
   if (options?.preview) {
     const url = doc.output("bloburl");
     const opened = window.open(url, "_blank", "noopener,noreferrer");
     if (!opened) {
       // Popup blocked - fall back to download so the user still gets the PDF.
-      doc.save(fileName || `PO-${payload.poNumber || "draft"}-preview.pdf`);
+      doc.save(resolvedName.replace(/\.pdf$/i, "-preview.pdf"));
     }
-    return;
+    return { filename: resolvedName };
   }
 
-  doc.save(fileName || `PO-${payload.poNumber || "draft"}.pdf`);
+  doc.save(resolvedName);
+  return { filename: resolvedName };
+}
+
+/** Build PO print PDF as base64 for approval email / API upload. */
+export async function buildOrderPdfBase64(
+  order: Parameters<typeof purchaseOrderPdfInputFromOrder>[0],
+  vendor: { name: string; address?: string },
+  options?: { watermark?: boolean },
+): Promise<{ filename: string; base64: string }> {
+  const input = purchaseOrderPdfInputFromOrder(order, vendor);
+  const watermark = Boolean(options?.watermark);
+  const safePo = (input.poNumber || "PO").replace(/[\\/:*?"<>|]+/g, "-");
+  const baseName = watermark ? `PO-${safePo}-draft.pdf` : `PO-${safePo}.pdf`;
+  const result = await downloadPurchaseOrderPdf(input, baseName, {
+    watermark,
+    asBase64: true,
+  });
+  if (!result?.base64) {
+    throw new Error("Failed to generate Purchase Order PDF");
+  }
+  return { filename: result.filename, base64: result.base64 };
 }
