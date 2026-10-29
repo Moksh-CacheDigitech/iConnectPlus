@@ -1,39 +1,7 @@
 import { listVendorOptions } from "@/services/procurement-service";
 
-const RAW_LEAD_DISTRIBUTOR_OPTIONS = [
-  "IN STOCK",
-  "Redington",
-  "Ingram Micro",
-  "TD SYNNEX",
-  "Tech Data",
-  "Rashi Peripherals (RP Tech)",
-  "Savex Technologies",
-  "Supertron Electronics",
-  "Iris Global Services",
-  "Compuage Infocom",
-  "e-Mall",
-  "Exclusive Networks",
-  "Westcon-Comstor",
-  "Arrow Electronics",
-  "Avnet",
-  "Synnex",
-  "ScanSource",
-  "VAD Technologies",
-  "CMS IT Services",
-  "Beetel Teletech",
-  "Creative Newtech",
-  "Iris Global",
-  "Astrum",
-  "Nuvias",
-  "Crayon",
-  "Pax8",
-  "ALSO",
-  "Exertis",
-  "D&H Distributing",
-  "SYNNEX",
-] as const;
-
-export const LEAD_DISTRIBUTOR_OPTIONS: readonly string[] = [...new Set(RAW_LEAD_DISTRIBUTOR_OPTIONS)];
+/** @deprecated Prefer loadCrmDistributorOptions — kept for any stray imports. */
+export const LEAD_DISTRIBUTOR_OPTIONS: readonly string[] = ["IN STOCK"];
 
 export const LEAD_DISTRIBUTOR_SEPARATOR = ", ";
 
@@ -65,19 +33,22 @@ function mergeDistributorNames(...groups: readonly (readonly string[])[]): strin
   return out;
 }
 
-/** Preset lead distributors plus any custom names saved on the lead (for single-select dropdowns). */
+/**
+ * Distributor dropdown options: Procurement → Vendors only (+ IN STOCK).
+ * Names already on the lead/OVF are kept so edits do not drop unknown values.
+ */
 export function buildLeadDistributorDropdownOptions(
   leadDistributorField: string | null | undefined,
   scmVendorNames: readonly string[] = [],
 ): string[] {
   return mergeDistributorNames(
-    LEAD_DISTRIBUTOR_OPTIONS,
+    ["IN STOCK"],
     scmVendorNames,
     parseLeadDistributorNames(leadDistributorField),
   );
 }
 
-/** Load SCM Vendors master list and merge with presets + any names already on the lead. */
+/** Load Procurement Vendors master list (same source as /procurement/vendors). */
 export async function loadCrmDistributorOptions(
   leadDistributorField?: string | null,
 ): Promise<string[]> {
@@ -86,7 +57,8 @@ export async function loadCrmDistributorOptions(
       rows
         .filter((vendor) => (vendor.status || "active").toLowerCase() !== "inactive")
         .map((vendor) => vendor.label.trim())
-        .filter(Boolean),
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" })),
     )
     .catch(() => [] as string[]);
   return buildLeadDistributorDropdownOptions(leadDistributorField, scmNames);

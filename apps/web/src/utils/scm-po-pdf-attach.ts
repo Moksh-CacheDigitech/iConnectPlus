@@ -19,9 +19,10 @@ function resolveVendor(
   };
 }
 
-/** Build PO print PDF for Accept PO / Management approval emails. */
+/** Build PO print PDF for approval / vendor emails. */
 export async function buildScmPoPrintPdfAttachment(
   orderId: string,
+  options?: { watermark?: boolean },
 ): Promise<{ filename: string; base64: string } | null> {
   try {
     const [order, vendors] = await Promise.all([
@@ -29,8 +30,12 @@ export async function buildScmPoPrintPdfAttachment(
       listVendorOptions().catch(() => [] as VendorOption[]),
     ]);
     const vendor = resolveVendor(vendors, order.vendor_id);
-    const draft = (order.status || "").toLowerCase() === "draft";
-    return await buildOrderPdfBase64(order, vendor, { watermark: draft });
+    // Default: DRAFT watermark only while still a draft. Issued / vendor mail
+    // callers must pass watermark: false so leftover draft prints are not reused.
+    const watermark =
+      options?.watermark ??
+      (order.status || "").toLowerCase() === "draft";
+    return await buildOrderPdfBase64(order, vendor, { watermark });
   } catch {
     return null;
   }

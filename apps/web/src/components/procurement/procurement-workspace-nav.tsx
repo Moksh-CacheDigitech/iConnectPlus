@@ -4,7 +4,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, type ComponentType } from "react";
 import {
   BadgeCheck,
-  BarChart3,
   Boxes,
   Building2,
   ClipboardList,
@@ -59,7 +58,6 @@ export const PROCUREMENT_NAV = [
 export const PROCUREMENT_INSIGHT_NAV = [
   { title: "Mails", href: "/procurement/correspondence", icon: Mail },
   { title: "Reports", href: "/procurement/reports", icon: FileBarChart },
-  { title: "Analytics", href: "/procurement/analytics", icon: BarChart3 },
   { title: "Timeline", href: "/procurement/timeline", icon: History },
 ] as const satisfies ReadonlyArray<ProcurementNavItem>;
 

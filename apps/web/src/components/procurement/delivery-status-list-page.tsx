@@ -13,12 +13,6 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { listProcurementInventory } from "@/services/procurement-service";
 import {
-  challanDeliveredQuantity,
-  deliveryBillStatusBadgeVariant,
-  formatDeliveryBillStatusLabel,
-  resolveDeliveryBillStatus,
-} from "@/utils/delivery-challan-bill";
-import {
   getDeliveryChallan,
   listDeliveryChallans,
   upsertDeliveryChallan,
@@ -44,8 +38,6 @@ import {
 import { formatUniquePoLabels } from "@/utils/format-po-labels";
 
 type DeliveryStatusListRow = DeliveryStatusRow & {
-  billStatusLabel: string;
-  billStatusKey: ReturnType<typeof resolveDeliveryBillStatus>;
   canUpdateOutcome: boolean;
 };
 
@@ -53,15 +45,9 @@ function loadDeliveryStatusRows(): DeliveryStatusListRow[] {
   return listDeliveryChallans().flatMap((challan) => {
     try {
       const row = deliveryStatusRowFromChallan(challan);
-      const billStatusKey = resolveDeliveryBillStatus(
-        row,
-        challanDeliveredQuantity(challan),
-      );
       return [
         {
           ...row,
-          billStatusLabel: formatDeliveryBillStatusLabel(billStatusKey),
-          billStatusKey,
           canUpdateOutcome: deliveryStatusUiMode(row) === "tracking",
         },
       ];
@@ -129,7 +115,6 @@ export function DeliveryStatusListPage() {
         row.cacheInvoiceNumber,
         row.billInvoiceNumber,
         row.shipmentStatus,
-        row.billStatusLabel,
         row.docketNumber,
         row.deliveryBoyName,
       ]
@@ -184,7 +169,7 @@ export function DeliveryStatusListPage() {
 
       <p className="text-sm text-muted-foreground">
         After dispatch is saved, use <span className="font-medium text-foreground">Update status</span>{" "}
-        to mark Delivered or Failed.
+        to mark Delivered, Delayed, or Failed.
       </p>
 
       {flash ? (
@@ -210,28 +195,27 @@ export function DeliveryStatusListPage() {
         <ListSearch
           value={query}
           onChange={setQuery}
-          placeholder="Search PO, GRN, invoice, or bill status…"
+          placeholder="Search PO, GRN, invoice, or status…"
           aria-label="Search delivery status"
         />
       </div>
 
       <div className={procurementUi.tableShell}>
         <div className={procurementUi.tableScroll}>
-          <table className={cn(procurementUi.table, "min-w-[980px]")}>
+          <table className={cn(procurementUi.table, "min-w-[820px]")}>
             <thead className={procurementUi.thead}>
               <tr>
                 <th className={procurementUi.th}>PO number</th>
                 <th className={procurementUi.th}>GRN number</th>
                 <th className={procurementUi.th}>Invoice</th>
                 <th className={procurementUi.th}>Delivery status</th>
-                <th className={procurementUi.th}>Bill taken</th>
                 <th className={procurementUi.th}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className={procurementUi.empty}>
+                  <td colSpan={5} className={procurementUi.empty}>
                     {rows.length === 0
                       ? "No GRNs to track yet."
                       : "No rows match your search."}
@@ -255,14 +239,6 @@ export function DeliveryStatusListPage() {
                       className={procurementUi.statusBadge}
                     >
                       {row.shipmentStatus}
-                    </Badge>
-                  </td>
-                  <td className={procurementUi.td}>
-                    <Badge
-                      variant={deliveryBillStatusBadgeVariant(row.billStatusKey)}
-                      className={procurementUi.statusBadge}
-                    >
-                      {row.billStatusLabel}
                     </Badge>
                   </td>
                   <td className={procurementUi.td}>
@@ -326,7 +302,7 @@ export function DeliveryStatusListPage() {
           setDeliveryStatusFlash({ variant: "success", message });
           load();
         }}
-    />
+      />
     </div>
   );
 }

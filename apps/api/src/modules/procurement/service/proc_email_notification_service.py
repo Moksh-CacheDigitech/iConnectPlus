@@ -47,6 +47,21 @@ PROC_EMAIL_TEMPLATES: dict[str, tuple[str, str, str]] = {
         + _SIGNATURE_HTML
         + _SHELL_CLOSE,
     ),
+    "proc.email.vendor.po_issued": (
+        "Procurement — vendor PO issued",
+        "Purchase Order {{po_number}} issued",
+        _SHELL_OPEN
+        + "<p>Dear {{vendor_name}},</p>"
+        + "<p>Please find attached Purchase Order <strong>{{po_number}}</strong>.</p>"
+        + "<ul>"
+        + "<li><strong>PO number:</strong> {{po_number}}</li>"
+        + "<li><strong>Document date:</strong> {{document_date}}</li>"
+        + "<li><strong>Customer reference:</strong> {{customer_reference}}</li>"
+        + "</ul>"
+        + "<p>Kindly acknowledge receipt and confirm expected delivery as applicable.</p>"
+        + _SIGNATURE_HTML
+        + _SHELL_CLOSE,
+    ),
 }
 
 
@@ -173,3 +188,55 @@ class ProcEmailNotificationService:
             ):
                 sent += 1
         return sent
+
+    def notify_vendor_po_issued(
+        self,
+        *,
+        tenant_id: UUID,
+        to_address: str,
+        vendor_name: str,
+        po_number: str,
+        document_date: str | None = None,
+        customer_reference: str | None = None,
+        order_id: UUID | None = None,
+        created_by: UUID | None = None,
+        attachments: list[dict] | None = None,
+    ) -> bool:
+        """Email the vendor the issued PO with PDF attachment (SMTP)."""
+        email = (to_address or "").strip()
+        if not email or "@" not in email:
+            logger.info("Vendor PO issued email skip: invalid recipient %r", to_address)
+            return False
+        try:
+            tpl = self._ensure_template(
+                tenant_id, "proc.email.vendor.po_issued", created_by
+            )
+            payload = {
+                "vendor_name": (vendor_name or "").strip() or "Vendor",
+                "po_number": (po_number or "").strip() or "PO",
+                "document_date": (document_date or "").strip() or "—",
+                "customer_reference": (customer_reference or "").strip() or "—",
+                "order_id": str(order_id) if order_id else None,
+                "kind": "vendor_po_issued",
+            }
+            subject = (
+                render_template(tpl.subject_template, payload)
+                or f"Purchase Order {payload['po_number']} issued"
+            )
+            body_html = render_template(tpl.body_template, payload) or ""
+            if attachments:
+                payload["_attachments"] = attachments
+            self._notif.send_email(
+                tenant_id=tenant_id,
+                to_address=email,
+                subject=subject,
+                body_html=body_html,
+                event_type="procurement.vendor_po_issued",
+                template_id=tpl.id,
+                payload_json=payload,
+                created_by=created_by,
+            )
+            return True
+        except Exception:  # noqa: BLE001 - never break PO issue on mail failure
+            logger.exception("Vendor PO issued email failed to=%s", email)
+            return False

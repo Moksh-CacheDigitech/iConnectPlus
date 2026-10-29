@@ -604,6 +604,7 @@ class ScmDeliveryNotificationService:
         order_id: UUID,
         *,
         email: str | None = None,
+        expected_delivery_date: date | None = None,
     ) -> dict[str, Any]:
         """Send order acknowledgement over SMTP and unlock Record GRN once delivered."""
         order = self._require_order(ctx, order_id)
@@ -617,6 +618,13 @@ class ScmDeliveryNotificationService:
             raise ValidationException(
                 "SMTP is not configured. Set SMTP_HOST and SMTP_FROM_ADDRESS before sending."
             )
+
+        # One-click Send: persist ETD (if provided) before composing the mail.
+        if expected_delivery_date is not None:
+            order.expected_delivery_date = expected_delivery_date
+            order.etd_confirmed_at = utcnow()
+            order.updated_by = ctx.user_id
+            self._db.flush()
 
         customer: dict[str, Any] = {}
         if order.source_document_id is not None:

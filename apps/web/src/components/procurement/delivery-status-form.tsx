@@ -60,6 +60,15 @@ function withDerivedStatus(value: DeliveryStatusFormValue): DeliveryStatusFormVa
       trackingNumber: value.docketNumber ?? "",
     };
   }
+  if (explicit.toLowerCase() === "delayed" || explicit.toLowerCase() === "delay") {
+    return {
+      ...value,
+      shipmentStatus: "Delayed",
+      actualDeliveryDate: "",
+      requiresInstallation: false,
+      trackingNumber: value.docketNumber ?? "",
+    };
+  }
   if (explicit === "Delivered") {
     return {
       ...value,
@@ -88,7 +97,6 @@ export function DeliveryStatusForm({
   onOpenAccountsInvoiceDocument,
 }: DeliveryStatusFormProps) {
   const dispatchDate = safeText(value.dispatchDate);
-  const expectedDeliveryDate = safeText(value.expectedDeliveryDate);
   const [customCouriers, setCustomCouriers] = useState(readCustomCourierProviders);
   const [otherCourierDraft, setOtherCourierDraft] = useState("");
   const courierOptions = useMemo(() => {
@@ -127,212 +135,218 @@ export function DeliveryStatusForm({
     });
   }
 
-  return (
-    <div className="space-y-4">
-      <DeliverySectionCard title="Cache invoice" icon={FileText}>
-        <p className="mb-3 text-xs text-muted-foreground">
-          Invoice number and document are entered by Accounts and shown here read-only.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <FinanceField label="Invoice number" error={fieldErrors.cacheInvoiceNumber}>
+  const cacheInvoiceCard = (
+    <DeliverySectionCard title="Cache invoice" icon={FileText}>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Invoice number and document are entered by Accounts and shown here read-only.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <FinanceField label="Invoice number" error={fieldErrors.cacheInvoiceNumber}>
+          <Input
+            value={safeText(value.cacheInvoiceNumber)}
+            readOnly
+            className="h-8 bg-muted/30"
+            placeholder="Waiting for Accounts…"
+          />
+        </FinanceField>
+        <FileField
+          label="Invoice document"
+          error={fieldErrors.cacheInvoiceDocument}
+        >
+          {accountsInvoiceDocument?.id ? (
+            <button
+              type="button"
+              className="min-w-0 cursor-pointer truncate text-left text-sm font-medium text-[#0369A1] transition-colors duration-200 hover:underline"
+              onClick={() => onOpenAccountsInvoiceDocument?.(accountsInvoiceDocument.id)}
+            >
+              {accountsInvoiceDocument.fileName || "Open invoice"}
+            </button>
+          ) : value.cacheInvoiceDocument?.fileName ? (
+            <button
+              type="button"
+              className="min-w-0 cursor-pointer truncate text-left text-sm font-medium text-[#0369A1] transition-colors duration-200 hover:underline"
+              onClick={() => openStoredDeliveryFile(value.cacheInvoiceDocument!)}
+            >
+              {value.cacheInvoiceDocument.fileName}
+            </button>
+          ) : (
+            <span className="text-xs text-muted-foreground">Not attached by Accounts yet</span>
+          )}
+        </FileField>
+      </div>
+    </DeliverySectionCard>
+  );
+
+  const dispatchDetailCard = showDispatchDetail ? (
+    <DeliverySectionCard
+      title="Dispatch detail"
+      icon={Truck}
+      subtitle="Choose By hand or Courier, then fill dates and shipment fields"
+    >
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <FinanceField label="Mode *" error={fieldErrors.deliveryMode}>
+          <FinanceSelect
+            value={safeText(value.deliveryMode)}
+            onChange={(e) => {
+              const next =
+                e.target.value === "courier"
+                  ? "courier"
+                  : e.target.value === "hand"
+                    ? "hand"
+                    : "";
+              patch({
+                deliveryMode: next,
+                ...(next === "courier"
+                  ? { deliveryBoyName: "", itemType: "", podDocument: null }
+                  : { docketNumber: "", courierProvider: "" }),
+              });
+            }}
+            className="h-8 cursor-pointer transition-colors duration-200"
+          >
+            <option value="">Select…</option>
+            <option value="hand">By hand</option>
+            <option value="courier">Courier</option>
+          </FinanceSelect>
+        </FinanceField>
+        <FinanceField label="Dispatch date *" error={fieldErrors.dispatchDate}>
+          <Input
+            type="date"
+            value={dispatchDate}
+            onChange={(e) => patch({ dispatchDate: e.target.value })}
+            className="h-8 cursor-pointer transition-colors duration-200"
+          />
+        </FinanceField>
+      </div>
+
+      {value.deliveryMode === "hand" ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <FinanceField label="Delivery person *" error={fieldErrors.deliveryBoyName}>
             <Input
-              value={safeText(value.cacheInvoiceNumber)}
-              readOnly
-              className="h-8 bg-muted/30"
-              placeholder="Waiting for Accounts…"
+              value={safeText(value.deliveryBoyName)}
+              onChange={(e) => patch({ deliveryBoyName: e.target.value })}
+              className="h-8"
+              placeholder="Delivery person name"
             />
           </FinanceField>
-          <FileField
-            label="Invoice document"
-            error={fieldErrors.cacheInvoiceDocument}
-          >
-            {accountsInvoiceDocument?.id ? (
-              <button
-                type="button"
-                className="min-w-0 cursor-pointer truncate text-left text-sm font-medium text-[#0369A1] transition-colors duration-200 hover:underline"
-                onClick={() => onOpenAccountsInvoiceDocument?.(accountsInvoiceDocument.id)}
-              >
-                {accountsInvoiceDocument.fileName || "Open invoice"}
-              </button>
-            ) : value.cacheInvoiceDocument?.fileName ? (
-              <button
-                type="button"
-                className="min-w-0 cursor-pointer truncate text-left text-sm font-medium text-[#0369A1] transition-colors duration-200 hover:underline"
-                onClick={() => openStoredDeliveryFile(value.cacheInvoiceDocument!)}
-              >
-                {value.cacheInvoiceDocument.fileName}
-              </button>
-            ) : (
-              <span className="text-xs text-muted-foreground">Not attached by Accounts yet</span>
-            )}
-          </FileField>
+          <FinanceField label="POD upload" error={fieldErrors.podDocument}>
+            <FilePickRow
+              file={value.podDocument}
+              inputId="delivery-status-pod"
+              onPick={(files) => void onPickFile(files, "podDocument")}
+              onClear={() => patch({ podDocument: null })}
+            />
+          </FinanceField>
         </div>
-      </DeliverySectionCard>
-
-      {showDispatchDetail ? (
-        <DeliverySectionCard title="Dispatch detail" icon={Truck}>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <FinanceField label="Status *" error={fieldErrors.deliveryMode}>
-              <FinanceSelect
-                value={safeText(value.deliveryMode)}
-                onChange={(e) => {
-                  const next = e.target.value === "courier" ? "courier" : e.target.value === "hand" ? "hand" : "";
-                  patch({
-                    deliveryMode: next,
-                    ...(next === "courier"
-                      ? { deliveryBoyName: "", itemType: "", podDocument: null }
-                      : { docketNumber: "", courierProvider: "" }),
-                  });
-                }}
-                className="h-8 cursor-pointer transition-colors duration-200"
-              >
-                <option value="">Select…</option>
-                <option value="hand">By hand</option>
-                <option value="courier">Courier</option>
-              </FinanceSelect>
-            </FinanceField>
-          </div>
-
-          {value.deliveryMode === "hand" || value.deliveryMode === "courier" ? (
-            <>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <FinanceField label="No. of boxes" error={fieldErrors.boxCount}>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    value={safeText(value.boxCount)}
-                    onChange={(e) =>
-                      patch({ boxCount: e.target.value.replace(/[^\d]/g, "") })
-                    }
-                    className="h-8"
-                    placeholder="0"
-                  />
-                </FinanceField>
-                <FinanceField label="Mode of surface" error={fieldErrors.surfaceMode}>
-                  <FinanceSelect
-                    value={safeText(value.surfaceMode)}
-                    onChange={(e) => patch({ surfaceMode: e.target.value })}
-                    className="h-8 cursor-pointer transition-colors duration-200"
-                  >
-                    <option value="">Select…</option>
-                    {SURFACE_MODE_OPTIONS.map((mode) => (
-                      <option key={mode} value={mode}>
-                        {mode}
-                      </option>
-                    ))}
-                  </FinanceSelect>
-                </FinanceField>
-              </div>
-              <FinanceField label="Remarks" error={fieldErrors.remarks} className="mt-3">
-                <FinanceTextarea
-                  value={safeText(value.remarks)}
-                  onChange={(e) => patch({ remarks: e.target.value })}
-                  rows={3}
-                  placeholder="Add remarks"
-                />
-              </FinanceField>
-            </>
-          ) : null}
-
-          {value.deliveryMode === "hand" ? (
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <FinanceField label="Delivery person *" error={fieldErrors.deliveryBoyName}>
-                <Input
-                  value={safeText(value.deliveryBoyName)}
-                  onChange={(e) => patch({ deliveryBoyName: e.target.value })}
-                  className="h-8"
-                />
-              </FinanceField>
-              <FinanceField label="Item *" error={fieldErrors.itemType}>
-                <FinanceSelect
-                  value={safeText(value.itemType)}
-                  onChange={(e) => {
-                    const next =
-                      e.target.value === "hardware"
-                        ? "hardware"
-                        : e.target.value === "software"
-                          ? "software"
-                          : "";
-                    patch({
-                      itemType: next,
-                    });
-                  }}
-                  className="h-8 cursor-pointer transition-colors duration-200"
-                >
-                  <option value="">Select…</option>
-                  <option value="hardware">Hardware</option>
-                  <option value="software">Software</option>
-                </FinanceSelect>
-              </FinanceField>
-            </div>
-          ) : null}
-
-          {value.deliveryMode === "courier" ? (
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <FinanceField label="Courier *" error={fieldErrors.courierProvider}>
-                <FinanceSelect
-                  value={courierSelectValue}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    if (next === COURIER_ADD_OTHER) {
-                      setOtherCourierDraft(safeText(value.courierProvider));
-                      patch({ courierProvider: "" });
-                      return;
-                    }
-                    patch({ courierProvider: next });
-                  }}
-                  className="h-8 cursor-pointer transition-colors duration-200"
-                >
-                  <option value="">Select…</option>
-                  {courierOptions.map((provider) => (
-                    <option key={provider} value={provider}>
-                      {provider}
-                    </option>
-                  ))}
-                  <option value={COURIER_ADD_OTHER}>Add other…</option>
-                </FinanceSelect>
-              </FinanceField>
-              {showOtherCourierInput ? (
-                <div className="flex items-end gap-2 sm:col-span-2">
-                  <FinanceField label="Other courier" className="min-w-0 flex-1">
-                    <Input
-                      value={otherCourierDraft || safeText(value.courierProvider)}
-                      onChange={(e) => setOtherCourierDraft(e.target.value)}
-                      className="h-8"
-                      placeholder="Enter courier name"
-                    />
-                  </FinanceField>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-8 shrink-0 cursor-pointer transition-colors duration-200"
-                    disabled={!otherCourierDraft.trim()}
-                    onClick={() => {
-                      const name = otherCourierDraft.trim();
-                      if (!name) return;
-                      const updated = addCustomCourierProvider(name);
-                      setCustomCouriers(updated);
-                      patch({ courierProvider: name });
-                      setOtherCourierDraft("");
-                    }}
-                  >
-                    Add
-                  </Button>
-                </div>
-              ) : null}
-              <FinanceField label="Docket number *" error={fieldErrors.docketNumber}>
-                <Input
-                  value={safeText(value.docketNumber)}
-                  onChange={(e) => patch({ docketNumber: e.target.value })}
-                  className="h-8"
-                  placeholder="Docket / AWB no."
-                />
-              </FinanceField>
-            </div>
-          ) : null}
-        </DeliverySectionCard>
       ) : null}
+
+      {value.deliveryMode === "courier" ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <FinanceField label="Courier *" error={fieldErrors.courierProvider}>
+            <FinanceSelect
+              value={courierSelectValue}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (next === COURIER_ADD_OTHER) {
+                  setOtherCourierDraft(safeText(value.courierProvider));
+                  patch({ courierProvider: "" });
+                  return;
+                }
+                patch({ courierProvider: next });
+              }}
+              className="h-8 cursor-pointer transition-colors duration-200"
+            >
+              <option value="">Select…</option>
+              {courierOptions.map((provider) => (
+                <option key={provider} value={provider}>
+                  {provider}
+                </option>
+              ))}
+              <option value={COURIER_ADD_OTHER}>Add other…</option>
+            </FinanceSelect>
+          </FinanceField>
+          {showOtherCourierInput ? (
+            <div className="flex items-end gap-2 sm:col-span-2">
+              <FinanceField label="Other courier" className="min-w-0 flex-1">
+                <Input
+                  value={otherCourierDraft || safeText(value.courierProvider)}
+                  onChange={(e) => setOtherCourierDraft(e.target.value)}
+                  className="h-8"
+                  placeholder="Enter courier name"
+                />
+              </FinanceField>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 shrink-0 cursor-pointer transition-colors duration-200"
+                disabled={!otherCourierDraft.trim()}
+                onClick={() => {
+                  const name = otherCourierDraft.trim();
+                  if (!name) return;
+                  const updated = addCustomCourierProvider(name);
+                  setCustomCouriers(updated);
+                  patch({ courierProvider: name });
+                  setOtherCourierDraft("");
+                }}
+              >
+                Add
+              </Button>
+            </div>
+          ) : null}
+          <FinanceField label="Docket number *" error={fieldErrors.docketNumber}>
+            <Input
+              value={safeText(value.docketNumber)}
+              onChange={(e) => patch({ docketNumber: e.target.value })}
+              className="h-8"
+              placeholder="Docket / AWB no."
+            />
+          </FinanceField>
+        </div>
+      ) : null}
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <FinanceField label="No. of boxes" error={fieldErrors.boxCount}>
+          <Input
+            type="text"
+            inputMode="numeric"
+            value={safeText(value.boxCount)}
+            onChange={(e) =>
+              patch({ boxCount: e.target.value.replace(/[^\d]/g, "") })
+            }
+            className="h-8"
+            placeholder="0"
+          />
+        </FinanceField>
+        <FinanceField label="Mode of surface" error={fieldErrors.surfaceMode}>
+          <FinanceSelect
+            value={safeText(value.surfaceMode)}
+            onChange={(e) => patch({ surfaceMode: e.target.value })}
+            className="h-8 cursor-pointer transition-colors duration-200"
+          >
+            <option value="">Select…</option>
+            {SURFACE_MODE_OPTIONS.map((mode) => (
+              <option key={mode} value={mode}>
+                {mode}
+              </option>
+            ))}
+          </FinanceSelect>
+        </FinanceField>
+      </div>
+      <FinanceField label="Remarks" error={fieldErrors.remarks} className="mt-3">
+        <FinanceTextarea
+          value={safeText(value.remarks)}
+          onChange={(e) => patch({ remarks: e.target.value })}
+          rows={3}
+          placeholder="Add remarks"
+        />
+      </FinanceField>
+    </DeliverySectionCard>
+  ) : null;
+
+  return (
+    <div className="space-y-4">
+      {dispatchDetailCard}
+      {cacheInvoiceCard}
     </div>
   );
 }
@@ -462,5 +476,8 @@ export function deliveryStatusToFormValue(
     billRemarks: record.billRemarks ?? "",
     billedAt: record.billedAt ?? "",
     requiresInstallation: Boolean(record.requiresInstallation),
+    outForDeliveryEmailSentAt: record.outForDeliveryEmailSentAt ?? "",
+    outcomeEmailSentAt: record.outcomeEmailSentAt ?? "",
+    outcomeEmailKind: record.outcomeEmailKind ?? "",
   };
 }

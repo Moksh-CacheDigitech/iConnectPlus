@@ -14,7 +14,6 @@ import {
   type DeliveryStatusFormValue,
 } from "@/components/procurement/delivery-status-form";
 import { DeliverySectionCard } from "@/components/procurement/delivery-section-card";
-import { DeliveryMilestoneCard } from "@/components/procurement/delivery-milestone-card";
 import { FinanceField } from "@/components/finance/journals/finance-form-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,7 +43,6 @@ import {
   isFailedShipmentStatus,
   openStoredDeliveryFile,
   resolveDeliveryStatusForChallan,
-  upsertDeliveryStatus,
   validateDeliveryStatusForm,
   type DeliveryStatusFormErrors,
 } from "@/utils/delivery-status-storage";
@@ -77,7 +75,6 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
   const [formPhase, setFormPhase] = useState<"initial" | "tracking">("initial");
   const [outcomeOpen, setOutcomeOpen] = useState(false);
   const [billTick, setBillTick] = useState(0);
-  const [orderTracking, setOrderTracking] = useState<{ milestone: string | null; awb: string | null } | null>(null);
   const [accountsInvoiceDocument, setAccountsInvoiceDocument] =
     useState<AccountsInvoiceDocumentRef | null>(null);
 
@@ -124,7 +121,6 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
             listOrderReceiptBatches(orderId).catch(() => []),
           ]);
           if (cancelled) return;
-          setOrderTracking({ milestone: order.delivery_milestone ?? null, awb: order.awb_number ?? null });
           const resolved = resolveChallanReceiptBatches(batches, order);
           const matched = matchChallanReceiptBatches(resolved, row);
           const liveRows = deliveryStatusGrnItemRowsFromBatches(matched, order);
@@ -227,14 +223,14 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
       setDeliveryStatusFlash({
         variant: result.emailWarning ? "warning" : "success",
         message: result.emailWarning
-          ? `Delivery status saved. Dispatch email failed: ${result.emailWarning}`
+          ? `Dispatch saved. Out-for-delivery email failed: ${result.emailWarning}`
           : form.shipmentStatus === "Failed delivery"
             ? "Marked as failed delivery."
             : form.shipmentStatus === "Delivered" && form.requiresInstallation
               ? "Marked delivered. Open Procurement → Installation to fill site details."
               : form.shipmentStatus === "Delivered"
                 ? "Marked delivered."
-                : "Delivery status saved. DC stays unbilled until the customer bill is taken.",
+                : "Dispatch saved. Customer notified that the order is out for delivery.",
       });
       router.replace("/procurement/delivery-status");
     } catch {
@@ -348,125 +344,13 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
         <GrnItemsTable rows={grnItems} />
       </DeliverySectionCard>
 
-      {challan.orderId && orderTracking ? (
-        <DeliveryMilestoneCard
-          orderId={challan.orderId}
-          initialMilestone={orderTracking.milestone}
-          initialAwb={orderTracking.awb}
-          initialCustomerEmail={form?.reminderEmail}
-          challan={challan}
-          deliveryStatus={form}
-          onCustomerEmailChange={(email) => {
-            setForm((prev) => (prev ? { ...prev, reminderEmail: email } : prev));
-            const existing = resolveDeliveryStatusForChallan(challan);
-            upsertDeliveryStatus({ ...existing, reminderEmail: email.trim() });
-          }}
-        />
-      ) : null}
-
-      {form && readOnly ? (
-        <DeliverySectionCard title="Cache invoice" icon={FileText}>
-          <p className="mb-3 text-xs text-muted-foreground">
-            Invoice number and document are entered by Accounts and shown here read-only.
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <ReadOnlyField label="Invoice number" value={form.cacheInvoiceNumber} />
-            <div className="space-y-0.5">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Invoice document
-              </div>
-              {accountsInvoiceDocument?.id ? (
-                <button
-                  type="button"
-                  className="cursor-pointer text-sm font-medium text-[#0369A1] underline-offset-2 transition-colors duration-150 hover:underline"
-                  onClick={() => void openReceiptBatchAttachment(accountsInvoiceDocument.id)}
-                >
-                  {accountsInvoiceDocument.fileName}
-                </button>
-              ) : form.cacheInvoiceDocument?.fileName ? (
-                <button
-                  type="button"
-                  className="cursor-pointer text-sm font-medium text-[#0369A1] underline-offset-2 transition-colors duration-150 hover:underline"
-                  onClick={() => openStoredDeliveryFile(form.cacheInvoiceDocument!)}
-                >
-                  {form.cacheInvoiceDocument.fileName}
-                </button>
-              ) : (
-                <div className="text-sm text-muted-foreground">Not attached by Accounts yet</div>
-              )}
-            </div>
-          </div>
-        </DeliverySectionCard>
-      ) : null}
-
-      {form && readOnly && !isBilling ? (
-        <DeliverySectionCard title="Dispatch detail" icon={Truck}>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <ReadOnlyField
-              label="Mode"
-              value={form.deliveryMode === "hand" ? "By hand" : form.deliveryMode === "courier" ? "Courier" : ""}
-            />
-            <ReadOnlyField label="Estimated delivery date" value={form.expectedDeliveryDate} />
-            <ReadOnlyField label="Dispatch date" value={form.dispatchDate} />
-            <ReadOnlyField
-              label="Delivery status"
-              value={
-                isFailedShipmentStatus(form.shipmentStatus)
-                  ? "Failed delivery"
-                  : form.shipmentStatus === "Delivered" || form.actualDeliveryDate?.trim()
-                    ? "Delivered"
-                    : form.shipmentStatus || "In transit"
-              }
-            />
-            <ReadOnlyField label="Delivered date" value={form.actualDeliveryDate} />
-            <ReadOnlyField
-              label="Requires installation"
-              value={form.requiresInstallation ? "Yes" : "No"}
-            />
-            {form.deliveryMode === "hand" ? (
-              <>
-                <ReadOnlyField label="Delivery person" value={form.deliveryBoyName} />
-                <ReadOnlyField label="Item" value={form.itemType} />
-                <div className="space-y-0.5">
-                  <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    POD
-                  </div>
-                  {form.podDocument ? (
-                    <button
-                      type="button"
-                      className="cursor-pointer text-sm font-medium text-[#0369A1] transition-colors duration-200 hover:underline"
-                      onClick={() => openStoredDeliveryFile(form.podDocument!)}
-                    >
-                      {form.podDocument.fileName}
-                    </button>
-                  ) : (
-                    <div className="text-sm font-medium text-foreground">-</div>
-                  )}
-                </div>
-              </>
-            ) : null}
-            {form.deliveryMode === "courier" ? (
-              <>
-                <ReadOnlyField label="Courier" value={form.courierProvider} />
-                <ReadOnlyField label="Docket number" value={form.docketNumber} />
-              </>
-            ) : null}
-            <ReadOnlyField label="No. of boxes" value={form.boxCount} />
-            <ReadOnlyField label="Mode of surface" value={form.surfaceMode} />
-            <ReadOnlyField label="Remarks" value={form.remarks} />
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Dispatch is locked after save. Use Update status to mark Delivered or Failed.
-          </p>
-        </DeliverySectionCard>
-      ) : null}
-
+      {/* Set dispatch: Dispatch detail replaces shipment milestone. */}
       {form && !readOnly ? (
         <>
           <DeliveryStatusForm
             mode="initial"
             value={form}
-            showDispatchDetail={!isBilling}
+            showDispatchDetail
             accountsInvoiceDocument={accountsInvoiceDocument}
             onOpenAccountsInvoiceDocument={(id) => {
               void openReceiptBatchAttachment(id);
@@ -497,6 +381,124 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
         </>
       ) : null}
 
+      {/* View: same sections/fields as Set dispatch (read-only). */}
+      {form && readOnly ? (
+        <>
+          <DeliverySectionCard
+            title="Dispatch detail"
+            icon={Truck}
+            subtitle="Saved dispatch details from Set dispatch"
+          >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <ReadOnlyField
+                label="Mode"
+                value={
+                  form.deliveryMode === "hand"
+                    ? "By hand"
+                    : form.deliveryMode === "courier"
+                      ? "Courier"
+                      : ""
+                }
+              />
+              <ReadOnlyField label="Dispatch date" value={form.dispatchDate} />
+            </div>
+
+            {form.deliveryMode === "hand" ? (
+              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <ReadOnlyField label="Delivery person" value={form.deliveryBoyName} />
+                <div className="space-y-0.5">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    POD
+                  </div>
+                  {form.podDocument ? (
+                    <button
+                      type="button"
+                      className="cursor-pointer text-sm font-medium text-[#0369A1] transition-colors duration-200 hover:underline"
+                      onClick={() => openStoredDeliveryFile(form.podDocument!)}
+                    >
+                      {form.podDocument.fileName}
+                    </button>
+                  ) : (
+                    <div className="text-sm font-medium text-foreground">-</div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {form.deliveryMode === "courier" ? (
+              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <ReadOnlyField label="Courier" value={form.courierProvider} />
+                <ReadOnlyField label="Docket number" value={form.docketNumber} />
+              </div>
+            ) : null}
+
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <ReadOnlyField label="No. of boxes" value={form.boxCount} />
+              <ReadOnlyField label="Mode of surface" value={form.surfaceMode} />
+            </div>
+            <div className="mt-3">
+              <ReadOnlyField label="Remarks" value={form.remarks} />
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-4 border-t border-border/60 pt-4 sm:grid-cols-2 lg:grid-cols-3">
+              <ReadOnlyField
+                label="Delivery status"
+                value={
+                  isFailedShipmentStatus(form.shipmentStatus)
+                    ? "Failed delivery"
+                    : (form.shipmentStatus || "").toLowerCase() === "delayed"
+                      ? "Delayed"
+                      : form.shipmentStatus === "Delivered" || form.actualDeliveryDate?.trim()
+                        ? "Delivered"
+                        : form.shipmentStatus || "In transit"
+                }
+              />
+              <ReadOnlyField label="Delivered date" value={form.actualDeliveryDate} />
+              <ReadOnlyField
+                label="Requires installation"
+                value={form.requiresInstallation ? "Yes" : "No"}
+              />
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Dispatch is locked after save. Use Update status to mark Delivered, Delayed, or Failed.
+            </p>
+          </DeliverySectionCard>
+
+          <DeliverySectionCard title="Cache invoice" icon={FileText}>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Invoice number and document are entered by Accounts and shown here read-only.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ReadOnlyField label="Invoice number" value={form.cacheInvoiceNumber} />
+              <div className="space-y-0.5">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Invoice document
+                </div>
+                {accountsInvoiceDocument?.id ? (
+                  <button
+                    type="button"
+                    className="cursor-pointer text-sm font-medium text-[#0369A1] underline-offset-2 transition-colors duration-150 hover:underline"
+                    onClick={() => void openReceiptBatchAttachment(accountsInvoiceDocument.id)}
+                  >
+                    {accountsInvoiceDocument.fileName}
+                  </button>
+                ) : form.cacheInvoiceDocument?.fileName ? (
+                  <button
+                    type="button"
+                    className="cursor-pointer text-sm font-medium text-[#0369A1] underline-offset-2 transition-colors duration-150 hover:underline"
+                    onClick={() => openStoredDeliveryFile(form.cacheInvoiceDocument!)}
+                  >
+                    {form.cacheInvoiceDocument.fileName}
+                  </button>
+                ) : (
+                  <div className="text-sm text-muted-foreground">Not attached by Accounts yet</div>
+                )}
+              </div>
+            </div>
+          </DeliverySectionCard>
+        </>
+      ) : null}
+
       <DeliveryStatusOutcomeDialog
         open={outcomeOpen}
         challan={challan}
@@ -520,13 +522,15 @@ function GrnItemsTable({ rows }: { rows: DeliveryStatusGrnItemRow[] }) {
   return (
     <div className={procurementUi.tableShell}>
       <div className={procurementUi.tableScroll}>
-        <table className={cn(procurementUi.table, "min-w-[560px]")}>
+        <table className={cn(procurementUi.table, "min-w-[760px]")}>
           <thead className={procurementUi.thead}>
             <tr>
               <th className={procurementUi.th}>Product name</th>
               <th className={procurementUi.th}>Description</th>
               <th className={cn(procurementUi.th, "w-24 text-right")}>GRN qty</th>
               <th className={cn(procurementUi.th, "w-28 text-right")}>Unit rate</th>
+              <th className={cn(procurementUi.th, "w-28 text-right")}>Tax</th>
+              <th className={cn(procurementUi.th, "w-32 text-right")}>Total amount</th>
             </tr>
           </thead>
           <tbody>
@@ -538,6 +542,10 @@ function GrnItemsTable({ rows }: { rows: DeliveryStatusGrnItemRow[] }) {
                   {row.grnQty}
                 </td>
                 <td className={cn(procurementUi.tdNumeric, "text-right")}>{row.unitCost}</td>
+                <td className={cn(procurementUi.tdNumeric, "text-right")}>{row.tax}</td>
+                <td className={cn(procurementUi.tdNumeric, "text-right font-medium")}>
+                  {row.totalAmount}
+                </td>
               </tr>
             ))}
           </tbody>

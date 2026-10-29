@@ -160,16 +160,26 @@ export function ovfVendorPoGroups(
   return [...groups.entries()].map(([key, value]) => ({ key, ...value }));
 }
 
-export function ovfCreatePoHref(ovfId: string, distributorName?: string | null): string {
+export function ovfCreatePoHref(
+  ovfId: string,
+  distributorName?: string | null,
+  distributorState?: string | null,
+): string {
   const params = new URLSearchParams();
   const name = (distributorName || "").trim();
   if (name) params.set("distributor", name);
+  const state = (distributorState || "").trim();
+  if (state) params.set("state", state);
   const qs = params.toString();
   return qs ? `/procurement/scm/ovf/${ovfId}/po?${qs}` : `/procurement/scm/ovf/${ovfId}/po`;
 }
 
-export function ovfCreatePoRemainderHref(ovfId: string, distributorName?: string | null): string {
-  const base = ovfCreatePoHref(ovfId, distributorName);
+export function ovfCreatePoRemainderHref(
+  ovfId: string,
+  distributorName?: string | null,
+  distributorState?: string | null,
+): string {
+  const base = ovfCreatePoHref(ovfId, distributorName, distributorState);
   return `${base}${base.includes("?") ? "&" : "?"}from=stock-remainder`;
 }
 
@@ -313,6 +323,8 @@ export type OvfItemPlanSplitRow = {
   id: string;
   product_name: string;
   distributor_name: string;
+  /** Vendor supply state used to pick the matching address entry. */
+  distributor_state?: string | null;
   source: string;
   action: string;
   /** Index in API item_plan.lines (for vendor PATCH). Copied onto remainder rows. */

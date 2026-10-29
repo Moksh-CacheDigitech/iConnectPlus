@@ -209,7 +209,14 @@ export function useProcurementApprovals() {
           if (stage === "accept_po") {
             await acceptScmPoApproval(row.orderId);
           } else {
-            await finalizeScmOrder(row.orderId);
+            // Issued vendor mail must use a clean PDF (no DRAFT watermark).
+            const poPdf = await buildScmPoPrintPdfAttachment(row.orderId, {
+              watermark: false,
+            });
+            await finalizeScmOrder(row.orderId, {
+              po_pdf_base64: poPdf?.base64 ?? null,
+              po_pdf_filename: poPdf?.filename ?? null,
+            });
           }
         } else {
           await rejectScmFinalizeApproval(row.orderId);

@@ -38,6 +38,7 @@ import {
   downloadInvoiceJobGrnPdf,
   downloadInvoiceJobPoPdf,
 } from "@/utils/invoice-job-pdf";
+import { buildScmPoPrintPdfAttachment } from "@/utils/scm-po-pdf-attach";
 
 const MODULE_ICONS: Record<string, LucideIcon> = {
   crm: Handshake,
@@ -179,7 +180,14 @@ export function PlatformMyJobsPage() {
         } else if (kind === "proc_accept_po") {
           await acceptScmPoApproval(job.orderId);
         } else {
-          await finalizeScmOrder(job.orderId);
+          // Issued vendor mail must use a clean PDF (no DRAFT watermark).
+          const poPdf = await buildScmPoPrintPdfAttachment(job.orderId, {
+            watermark: false,
+          });
+          await finalizeScmOrder(job.orderId, {
+            po_pdf_base64: poPdf?.base64 ?? null,
+            po_pdf_filename: poPdf?.filename ?? null,
+          });
         }
       } else {
         throw new Error("This job cannot be decided here");

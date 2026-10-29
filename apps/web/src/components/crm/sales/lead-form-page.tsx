@@ -31,7 +31,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  LEAD_DISTRIBUTOR_OPTIONS,
   loadCrmDistributorOptions,
 } from "@/lib/crm/lead-distributor-options";
 import { LEAD_OEM_OPTIONS } from "@/lib/crm/lead-oem-options";
@@ -198,9 +197,7 @@ export function LeadFormPage({
   const [nextDrNumber, setNextDrNumber] = useState("");
   const [oemRows, setOemRows] = useState<LeadPartnerRow[]>([emptyLeadPartnerRow()]);
   const [distributorRows, setDistributorRows] = useState<LeadPartnerRow[]>([emptyLeadPartnerRow()]);
-  const [distributorNameOptions, setDistributorNameOptions] = useState<string[]>([
-    ...LEAD_DISTRIBUTOR_OPTIONS,
-  ]);
+  const [distributorNameOptions, setDistributorNameOptions] = useState<string[]>(["IN STOCK"]);
 
   const selectedLeadSource = leadSources.find((source) => source.id === form.lead_source_id);
   const isMultiTierSource = isMultiTierLeadSourceLabel(selectedLeadSource?.label);

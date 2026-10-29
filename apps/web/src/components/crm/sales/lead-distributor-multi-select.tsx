@@ -7,10 +7,7 @@ import { ChevronDown, Plus, X } from "lucide-react";
 import { ConfirmDialog } from "@/components/finance/journals/confirm-dialog";
 import { FinanceField } from "@/components/finance/journals/finance-form-field";
 import { Input } from "@/components/ui/input";
-import {
-  LEAD_DISTRIBUTOR_OPTIONS,
-  loadCrmDistributorOptions,
-} from "@/lib/crm/lead-distributor-options";
+import { loadCrmDistributorOptions } from "@/lib/crm/lead-distributor-options";
 import { cn } from "@/lib/utils";
 
 type LeadDistributorMultiSelectProps = {
@@ -50,7 +47,7 @@ export function LeadDistributorMultiSelect({
   const [search, setSearch] = useState("");
   const [coords, setCoords] = useState<MenuCoords | null>(null);
   const [customOptions, setCustomOptions] = useState<string[]>([]);
-  const [scmOptions, setScmOptions] = useState<string[]>([...LEAD_DISTRIBUTOR_OPTIONS]);
+  const [scmOptions, setScmOptions] = useState<string[]>(["IN STOCK"]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [dialogError, setDialogError] = useState<string | null>(null);

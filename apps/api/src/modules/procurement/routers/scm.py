@@ -35,6 +35,7 @@ from modules.procurement.schemas import (
     ScmEtdUpdateResponse,
     ScmFinalizeApprovalRequest,
     ScmFinalizeApprovalResponse,
+    ScmFinalizeRequest,
     ScmFulfillFromStockRequest,
     ScmFulfillFromStockResponse,
     ScmInventoryDescriptionUpdate,
@@ -530,6 +531,7 @@ def send_scm_delivery_acknowledgement(
         ctx,
         order_id,
         email=body.email,
+        expected_delivery_date=body.expected_delivery_date,
     )
     db.commit()
     return APIResponse(
@@ -876,8 +878,15 @@ def finalize_scm_order(
     order_id: UUID,
     ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:send"))],
     db: Annotated[Session, Depends(get_db)],
+    body: ScmFinalizeRequest | None = None,
 ) -> APIResponse[OrderResponse]:
-    row = ScmHandoffService(db).finalize_scm_po(ctx, order_id)
+    payload = body.model_dump() if body is not None else {}
+    row = ScmHandoffService(db).finalize_scm_po(
+        ctx,
+        order_id,
+        po_pdf_base64=payload.get("po_pdf_base64"),
+        po_pdf_filename=payload.get("po_pdf_filename"),
+    )
     db.commit()
     return APIResponse(message="SCM purchase order finalized", data=OrderResponse.model_validate(row))
 

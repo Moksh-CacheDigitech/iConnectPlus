@@ -17,7 +17,6 @@ import { ApiClientError } from "@/services/api-client";
 import {
   getScmDeliveryContact,
   sendScmDeliveryAcknowledgement,
-  updateScmExpectedDeliveryDate,
   type ProcOrder,
 } from "@/services/procurement-service";
 
@@ -62,7 +61,6 @@ export function DeliveryTrackingCard({
   const [correspondenceKey, setCorrespondenceKey] = useState(0);
 
   const ackSent = Boolean(order.customer_ack_sent_at);
-  const savedEtd = dateOnly(order.expected_delivery_date);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,40 +86,15 @@ export function DeliveryTrackingCard({
     setEtd(dateOnly(order.expected_delivery_date));
   }, [order.expected_delivery_date]);
 
-  async function saveEtdIfChanged(nextEtd: string) {
-    if (nextEtd === savedEtd) return;
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      await updateScmExpectedDeliveryDate(order.id, {
-        expected_delivery_date: nextEtd || null,
-        notify_customer: false,
-      });
-      setNotice("Delivery date saved.");
-      setCorrespondenceKey((k) => k + 1);
-      onSaved();
-    } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : "Failed to save delivery date");
-      setEtd(savedEtd);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function sendDummyAck() {
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      if (etd !== savedEtd) {
-        await updateScmExpectedDeliveryDate(order.id, {
-          expected_delivery_date: etd || null,
-          notify_customer: false,
-        });
-      }
+      // One click: persist ETD (when set) and email acknowledgement together.
       const row = await sendScmDeliveryAcknowledgement(order.id, {
         email: email.trim() || null,
+        expected_delivery_date: etd || null,
       });
       setNotice(row.message);
       setCorrespondenceKey((k) => k + 1);
@@ -237,7 +210,7 @@ export function DeliveryTrackingCard({
                 Customer acknowledgement
               </h3>
               <p className="text-[11px] text-muted-foreground">
-                Email + send unlocks Record GRN once. Set ETD when the distributor confirms.
+                Set ETD and email, then Send once — saves the date and emails the customer together.
               </p>
             </div>
           </div>
@@ -265,8 +238,7 @@ export function DeliveryTrackingCard({
                 type="date"
                 value={etd}
                 onChange={(e) => setEtd(e.target.value)}
-                onBlur={() => void saveEtdIfChanged(etd)}
-                disabled={busy}
+                disabled={busy || ackSent}
                 className="h-9 w-full max-w-[11.5rem] cursor-pointer text-[13px] transition-colors duration-200"
               />
             </label>

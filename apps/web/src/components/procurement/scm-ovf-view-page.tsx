@@ -786,12 +786,6 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
     }
   }
 
-  const vendorLabel = useMemo(() => {
-    if (!preview) return "-";
-    // Only CRM lead distributor / vendor field - never matched master vendor or PO vendor.
-    return preview.distributor_name?.trim() || "-";
-  }, [preview]);
-
   const marginSummary = useMemo(() => {
     if (!preview) {
       return { customerTotal: 0, vendorTotal: 0, margin: 0, marginPct: 0 };
@@ -1143,7 +1137,6 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
                     ? `Net ${preview.customer_payment_days} days`
                     : "-"}
                 </DetailItem>
-                <DetailItem label="Vendor name">{vendorLabel}</DetailItem>
                 <DetailItem label="Vendor pay terms">
                   {preview.vendor_payment_days
                     ? `Net ${preview.vendor_payment_days} days`

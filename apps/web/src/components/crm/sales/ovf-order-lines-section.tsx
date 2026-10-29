@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { LeadDistributorMultiSelect } from "@/components/crm/sales/lead-distributor-multi-select";
 import {
   formatLeadDistributorNames,
-  LEAD_DISTRIBUTOR_OPTIONS,
   parseLeadDistributorNames,
 } from "@/lib/crm/lead-distributor-options";
 import { cn } from "@/lib/utils";
@@ -1027,10 +1026,11 @@ export function OvfOrderLinesSection({
   const distributorLocked = disabled || !onVendorRowsChange;
   const totalSaleValue = sumLineTotals(customerRows);
   const totalPurchaseValue = sumLineTotals(vendorRows);
+  // Options come from Procurement → Vendors (via vendorNameOptions); keep row values for edits.
   const vendorOptions = Array.from(
     new Set(
       [
-        ...LEAD_DISTRIBUTOR_OPTIONS,
+        "IN STOCK",
         ...vendorNameOptions.map((name) => name.trim()).filter(Boolean),
         ...vendorRows.flatMap((row) => parseLeadDistributorNames(row.vendor_name)),
       ]

@@ -715,6 +715,13 @@ class ScmFinalizeApprovalRequest(BaseModel):
     remarks: str | None = None
 
 
+class ScmFinalizeRequest(BaseModel):
+    """Optional final (non-draft) PO PDF attached to the vendor issue email."""
+
+    po_pdf_base64: str | None = None
+    po_pdf_filename: str | None = None
+
+
 class ScmFinalizeApprovalResponse(BaseModel):
     """Shared Approval inbox row for SCM Accept PO / Management finalize requests."""
 
@@ -858,6 +865,8 @@ class ScmDummyDeliverySendRequest(BaseModel):
     """Send order acknowledgement to the customer over SMTP."""
 
     email: str | None = Field(default=None, max_length=255)
+    # Persist ETD in the same request so Send saves date + emails once.
+    expected_delivery_date: date | None = None
 
 
 class ScmDummyDeliverySendResponse(BaseModel):

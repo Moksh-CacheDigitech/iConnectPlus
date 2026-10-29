@@ -918,11 +918,17 @@ export type ScmDummyDeliverySend = {
 /** Send order acknowledgement over SMTP (includes ETD) and unlock Record GRN. */
 export async function sendScmDeliveryAcknowledgement(
   orderId: string,
-  body?: { email?: string | null },
+  body?: { email?: string | null; expected_delivery_date?: string | null },
 ): Promise<ScmDummyDeliverySend> {
   const res = await apiClient<ScmDummyDeliverySend>(
     `${SCM_API}/orders/${orderId}/delivery-acknowledgement/send`,
-    { method: "POST", body: { email: body?.email ?? null } },
+    {
+      method: "POST",
+      body: {
+        email: body?.email ?? null,
+        expected_delivery_date: body?.expected_delivery_date ?? null,
+      },
+    },
   );
   invalidateProcurementListCache();
   return unwrapData(res);
@@ -1239,10 +1245,16 @@ export async function rejectScmFinalizeApproval(orderId: string): Promise<ProcOr
   return unwrapData(res);
 }
 
-export async function finalizeScmOrder(orderId: string): Promise<ProcOrder> {
+export async function finalizeScmOrder(
+  orderId: string,
+  body?: { po_pdf_base64?: string | null; po_pdf_filename?: string | null },
+): Promise<ProcOrder> {
   const res = await apiClient<ProcOrder>(`${SCM_API}/orders/${orderId}/finalize`, {
     method: "POST",
-    body: {},
+    body: {
+      po_pdf_base64: body?.po_pdf_base64 ?? null,
+      po_pdf_filename: body?.po_pdf_filename ?? null,
+    },
   });
   invalidateProcurementListCache();
   return unwrapData(res);

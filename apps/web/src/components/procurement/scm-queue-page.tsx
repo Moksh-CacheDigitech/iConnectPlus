@@ -33,7 +33,6 @@ import {
   peekScmQueueFromCache,
   type ScmQueueItem,
 } from "@/services/procurement-service";
-import { resolveVendorDisplayName } from "@/utils/vendor-oem-match";
 import { textTokenMatch } from "@/utils/procurement-search";
 import { getUnseenScmOvfIds, markScmQueueSeen } from "@/utils/scm-queue-seen";
 import {
@@ -414,7 +413,7 @@ export function ScmQueuePage() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search PO # or customer / vendor name…"
+            placeholder="Search PO # or customer name…"
             aria-label="Search SCM queue"
             className="h-8 bg-card pl-8 shadow-none transition-colors duration-200"
           />
@@ -431,9 +430,6 @@ export function ScmQueuePage() {
                 <th className="px-3 py-2 font-bold">PO number</th>
                 <th className="px-3 py-2 font-bold">Customer name</th>
                 <th className="px-3 py-2 font-bold">Customer pay terms</th>
-                <th className="px-3 py-2 font-bold" title="From CRM lead distributor name(s)">
-                  Vendor name
-                </th>
                 <th className="px-3 py-2 font-bold">Vendor pay terms</th>
                 <th className="px-3 py-2 font-bold">OVF date</th>
                 <th className="px-3 py-2 font-bold text-right">Customer amt</th>
@@ -445,14 +441,14 @@ export function ScmQueuePage() {
             <tbody>
               {loading && filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-3 py-8 text-center text-muted-foreground">
+                  <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
                     Loading SCM queue…
                   </td>
                 </tr>
               ) : null}
               {!loading && filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-3 py-8 text-center text-muted-foreground">
+                  <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
                     {query.trim()
                       ? "No queue rows match your search."
                       : filter === "open"
@@ -513,9 +509,6 @@ export function ScmQueuePage() {
                     <td className="px-3 py-2">{row.customer_name || "-"}</td>
                     <td className="px-3 py-2 text-muted-foreground">
                       {payTermsLabel(row.customer_payment_days)}
-                    </td>
-                    <td className="px-3 py-2">
-                      {resolveVendorDisplayName(row)}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">
                       {payTermsLabel(row.vendor_payment_days)}

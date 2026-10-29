@@ -1947,6 +1947,7 @@ class ScmHandoffService:
         *,
         po_pdf_base64: str | None = None,
         po_pdf_filename: str | None = None,
+        exclude_draft: bool = False,
     ) -> list[dict]:
         """Prefer freshly supplied PDF, else stored po_pdf / first PO PDF attachment."""
         import base64
@@ -1957,6 +1958,10 @@ class ScmHandoffService:
             filename = (po_pdf_filename or "").strip() or f"PO_{self._po_label(order)}.pdf"
             if not filename.lower().endswith(".pdf"):
                 filename = f"{filename}.pdf"
+            if exclude_draft:
+                lowered = filename.lower()
+                if lowered.endswith("-draft.pdf"):
+                    filename = f"{filename[: -len('-draft.pdf')]}.pdf"
             return [
                 {
                     "filename": filename,
@@ -1980,6 +1985,9 @@ class ScmHandoffService:
             name = (row.file_name or "").lower()
             ctype = (row.content_type or "").lower()
             if "pdf" not in ctype and not name.endswith(".pdf"):
+                continue
+            # Vendor issue mail must never reuse a draft-watermark print.
+            if exclude_draft and "-draft" in name:
                 continue
             try:
                 download = attachment_svc.resolve_download(ctx, row.id)
@@ -2273,6 +2281,8 @@ class ScmHandoffService:
         order: ProcOrderHeader | None = None,
         *,
         require_management_stage: bool = True,
+        po_pdf_base64: str | None = None,
+        po_pdf_filename: str | None = None,
     ) -> ProcOrderHeader:
         """Issue vendor PO - submitted (management stage) → sent."""
         if order is None or order.id != order_id:
@@ -2326,6 +2336,13 @@ class ScmHandoffService:
         order.updated_by = ctx.user_id
         order.version = int(getattr(order, "version", 0) or 0) + 1
         self._db.flush()
+        # Prefer the issued (non-draft) PDF for vendor mail; replace any draft print.
+        self._store_po_print_pdf(
+            ctx,
+            order,
+            po_pdf_base64=po_pdf_base64,
+            po_pdf_filename=po_pdf_filename,
+        )
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,
             entity_name="proc_order_header",
@@ -2334,7 +2351,63 @@ class ScmHandoffService:
             performed_by=ctx.user_id,
             new_value={"company_po_number": order.company_po_number},
         )
+        self._notify_vendor_po_issued(
+            ctx,
+            order,
+            po_pdf_base64=po_pdf_base64,
+            po_pdf_filename=po_pdf_filename,
+        )
         return order
+
+    def _notify_vendor_po_issued(
+        self,
+        ctx: TenantContext,
+        order: ProcOrderHeader,
+        *,
+        po_pdf_base64: str | None = None,
+        po_pdf_filename: str | None = None,
+    ) -> None:
+        """Email the vendor master contact with the issued PO PDF (best-effort)."""
+        try:
+            vendor = self._master.get_vendor(ctx, order.vendor_id)
+        except Exception:  # noqa: BLE001
+            return
+        to_address = (getattr(vendor, "email", None) or "").strip()
+        if not to_address:
+            return
+        vendor_name = (getattr(vendor, "vendor_name", None) or "").strip() or "Vendor"
+        attachments = self._po_print_email_attachments(
+            ctx,
+            order.id,
+            po_pdf_base64=po_pdf_base64,
+            po_pdf_filename=po_pdf_filename,
+            exclude_draft=True,
+        )
+        customer_ref = None
+        if self._is_ovf_sourced(order) and order.source_document_id is not None:
+            try:
+                meta = self._crm.get_ovf_display_meta(ctx, [order.source_document_id])
+                customer_ref = (meta.get(order.source_document_id) or {}).get("customer_name")
+            except Exception:  # noqa: BLE001
+                customer_ref = None
+        try:
+            from modules.procurement.service.proc_email_notification_service import (
+                ProcEmailNotificationService,
+            )
+
+            ProcEmailNotificationService(self._db).notify_vendor_po_issued(
+                tenant_id=ctx.tenant_id,
+                to_address=to_address,
+                vendor_name=str(vendor_name),
+                po_number=self._po_label(order),
+                document_date=str(order.document_date or "") or None,
+                customer_reference=customer_ref,
+                order_id=order.id,
+                created_by=ctx.user_id,
+                attachments=attachments or None,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def list_vendor_pos(self, ctx: TenantContext, company_id: UUID | None = None) -> list[dict]:
         cid = self._scope.resolve_list_company_id(ctx, company_id)

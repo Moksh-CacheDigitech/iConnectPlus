@@ -351,6 +351,7 @@ class SiteInstallationService:
                 self._notify_admins_stage_saved(
                     ctx, project, row, updated, fields, stage_key
                 )
+                self._notify_assignees_on_assign(ctx, project, row, updated, fields)
         except Exception:  # noqa: BLE001 - alerts must not roll back the save
             pass
         return updated
@@ -691,6 +692,168 @@ class SiteInstallationService:
             or "Project Manager",
             employee_id=employee.id,
         )
+
+    def _notify_assignees_on_assign(
+        self,
+        ctx: TenantContext,
+        project: PrjProject,
+        before: PrjSiteInstallation,
+        after: PrjSiteInstallation,
+        fields: dict,
+    ) -> None:
+        """In-app + email when a stage owner is newly assigned or reassigned."""
+        for stage_key, assignee_field in engine.STAGE_ASSIGNEE_FIELDS.items():
+            if assignee_field not in fields:
+                continue
+            new_id = fields.get(assignee_field)
+            if not new_id:
+                continue
+            try:
+                new_uuid = new_id if isinstance(new_id, UUID) else UUID(str(new_id))
+            except (TypeError, ValueError):
+                continue
+            old_id = getattr(before, assignee_field, None)
+            if old_id is not None and old_id == new_uuid:
+                continue
+            self._notify_one_assignee_assigned(
+                ctx,
+                project,
+                after,
+                stage_key=stage_key,
+                recipient_employee_id=new_uuid,
+            )
+
+    def _stage_label_for_site(self, site: PrjSiteInstallation, stage_key: str) -> str:
+        stage_label = engine.STAGE_LABELS.get(stage_key, stage_key)
+        if stage_key == SiteWorkflowStage.INSTALLATION.value and delivery_is_rack_only(
+            site.delivery_type
+        ):
+            return "Installation"
+        return stage_label
+
+    def _employee_email(self, ctx: TenantContext, employee_id: UUID) -> str:
+        employee = self._db.scalar(
+            select(EmployeeRead).where(
+                EmployeeRead.id == employee_id,
+                EmployeeRead.tenant_id == ctx.tenant_id,
+                EmployeeRead.is_deleted.is_(False),
+            )
+        )
+        if employee is None:
+            return ""
+        return (employee.email or "").strip().lower()
+
+    def _notify_one_assignee_assigned(
+        self,
+        ctx: TenantContext,
+        project: PrjProject,
+        site: PrjSiteInstallation,
+        *,
+        stage_key: str,
+        recipient_employee_id: UUID,
+    ) -> None:
+        stage_label = self._stage_label_for_site(site, stage_key)
+        site_name = site.site_name or site.document_number
+        actor = self._actor_display_name(ctx)
+        segment = engine.STAGE_FORM_SEGMENTS.get(stage_key, "")
+        form_path = (
+            f"/projects/projects/{site.project_id}/{segment}"
+            if segment
+            else f"/projects/projects/{site.project_id}"
+        )
+        jobs_path = "/projects"
+        message = (
+            f"You have been assigned as {stage_label} owner for site {site_name}."
+        )
+        payload = {
+            "kind": "site_stage_assigned",
+            "stage": stage_key,
+            "stage_label": stage_label,
+            "site_installation_id": str(site.id),
+            "document_number": site.document_number,
+            "site_name": site.site_name,
+            "project_id": str(site.project_id),
+            "project_name": project.project_name,
+            "form_path": form_path,
+            "jobs_path": jobs_path,
+            "message": message,
+            "actor_user_id": str(ctx.user_id) if ctx.user_id else None,
+            "actor_name": actor,
+            "assigned_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        recipient = self._resolve_employee_recipient(ctx, recipient_employee_id)
+        NotificationService(self._db).create(
+            ctx,
+            company_id=site.company_id,
+            branch_id=site.branch_id,
+            project_id=site.project_id,
+            notification_type="other",
+            recipient_user_id=recipient.user_id if recipient else None,
+            recipient_employee_id=recipient_employee_id,
+            payload_json=dict(payload),
+            delivery_status="sent",
+            sent_at=datetime.now(timezone.utc),
+            status="active",
+        )
+
+        to_email = (recipient.email if recipient else "") or self._employee_email(
+            ctx, recipient_employee_id
+        )
+        self._maybe_email_stage_assigned(ctx, to_email, payload)
+
+        self._audit.log_entity_change(
+            tenant_id=ctx.tenant_id,
+            entity_name="prj_site_installation",
+            entity_id=site.id,
+            operation=f"stage_assigned_alert:{stage_key}",
+            performed_by=ctx.user_id,
+            new_value={"recipient_employee_id": str(recipient_employee_id)},
+        )
+
+    def _maybe_email_stage_assigned(
+        self, ctx: TenantContext, to_email: str, payload: dict
+    ) -> None:
+        from core.config import settings
+
+        if not settings.project_stage_email_notifications_enabled:
+            return
+        to = (to_email or "").strip()
+        if not to:
+            return
+        stage_label = str(payload.get("stage_label") or "Stage")
+        site_name = str(payload.get("site_name") or payload.get("document_number") or "site")
+        project_name = str(payload.get("project_name") or "")
+        actor = str(payload.get("actor_name") or "Admin")
+        form_path = str(payload.get("form_path") or payload.get("jobs_path") or "/projects")
+        deep_link = f"{settings.frontend_url.rstrip('/')}{form_path}"
+        jobs_link = f"{settings.frontend_url.rstrip('/')}{payload.get('jobs_path') or '/projects'}"
+
+        body_html = "\n".join(
+            [
+                f"<p>You have been assigned as <strong>{stage_label}</strong> owner.</p>",
+                f"<p>Site: {site_name}<br/>Project: {project_name}<br/>Assigned by: {actor}</p>",
+                f'<p><a href="{deep_link}">Open stage form</a> · <a href="{jobs_link}">My Projects jobs</a></p>',
+            ]
+        )
+        subject = f"[Projects] Assigned: {stage_label} ({site_name})"
+
+        try:
+            from modules.foundation.service.notification_service import (
+                NotificationService as FoundationNotificationService,
+            )
+
+            FoundationNotificationService(self._db).send_email(
+                tenant_id=ctx.tenant_id,
+                to_address=to,
+                subject=subject,
+                body_html=body_html,
+                event_type="project.site_stage_assigned",
+                payload_json=dict(payload),
+                created_by=ctx.user_id,
+            )
+        except Exception:  # noqa: BLE001 - email is best-effort
+            pass
 
     def _maybe_email_stage_saved(
         self, ctx: TenantContext, to_email: str, payload: dict

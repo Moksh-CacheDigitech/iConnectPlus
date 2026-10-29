@@ -72,7 +72,10 @@ import {
 } from "@/utils/purchase-order-pdf";
 import { ensureScmOvfPdfAttached } from "@/utils/scm-ovf-pdf-attach";
 import { buildScmPoPrintPdfAttachment } from "@/utils/scm-po-pdf-attach";
-import { matchVendorByDistributor } from "@/utils/vendor-oem-match";
+import {
+  findVendorAddressEntryByState,
+  matchVendorByDistributor,
+} from "@/utils/vendor-oem-match";
 import {
   bindOvfItemPlanRowsToPo,
   clearOvfPoLineQtyOverrides,
@@ -708,6 +711,7 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
   const { isAdmin } = useProcurementRole();
   const remainderFromStock = searchParams.get("from") === "stock-remainder";
   const distributorParam = searchParams.get("distributor");
+  const distributorStateParam = (searchParams.get("state") || "").trim();
   const shippingMenuRef = useRef<HTMLDivElement>(null);
   const paymentTermsMenuRef = useRef<HTMLDivElement>(null);
   const paymentTermsInputRef = useRef<HTMLInputElement>(null);
@@ -821,9 +825,14 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
   }, [selectedVendor, selectedVendorAddressIndex, form.vendorAddress]);
 
   useEffect(() => {
-    setSelectedVendorAddressIndex(0);
     setVendorAddressMenuOpen(false);
-  }, [form.vendorId]);
+    if (!selectedVendor) {
+      setSelectedVendorAddressIndex(0);
+      return;
+    }
+    const matched = findVendorAddressEntryByState(selectedVendor, distributorStateParam);
+    setSelectedVendorAddressIndex(matched?.index ?? 0);
+  }, [form.vendorId, selectedVendor, distributorStateParam]);
 
   const lockedVendorDisplayName = useMemo(() => {
     return (
@@ -1006,7 +1015,10 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
         const matched = keepVendor
           ? null
           : matchVendorByDistributor(vendorRows, selectedDistributor);
-        const matchedEntry = matched?.addressEntries?.[0];
+        const matchedEntry =
+          (matched
+            ? findVendorAddressEntryByState(matched, distributorStateParam)?.entry
+            : null) || matched?.addressEntries?.[0];
         const addressFields = keepVendor
           ? {
             vendorAddress: current.vendorAddress || "",
@@ -1016,7 +1028,10 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
           : matched
             ? {
               ...applyVendorAddressFields(matchedEntry, matched.taxNumber || ""),
-              sourceOfSupply: matchedEntry?.sourceOfSupply || "",
+              sourceOfSupply:
+                matchedEntry?.sourceOfSupply ||
+                distributorStateParam ||
+                "",
             }
             : {
               vendorAddress: "",
@@ -1024,11 +1039,13 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
               sourceOfSupply: "",
             };
         const pendingItemPlanRows = peekOvfPendingItemPlanPoRows(ovfId);
-        // Same-distributor item-plan groups reuse the vendor draft (one PO).
+        const fromItemPlan = pendingItemPlanRows.length > 0;
+        // Item-plan / remainder Create PO always starts a new series (never reuse
+        // the prior draft for leftover qty or a different distributor state).
         const draftTarget =
-          pendingItemPlanRows.length > 0 || !remainderFromStock
-            ? resolveCreatePoDraftTarget(ovf, selectedDistributor)
-            : null;
+          fromItemPlan || remainderFromStock
+            ? null
+            : resolveCreatePoDraftTarget(ovf, selectedDistributor);
         const entityFromDraftPo = companyLocationFromPoNumber(draftTarget?.companyPoNumber);
         const selectedLocation = companyLocationById(
           current.companyLocationId ||
@@ -1146,10 +1163,12 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
       });
 
       const pendingItemPlanRows = peekOvfPendingItemPlanPoRows(ovfId);
+      const fromItemPlan = pendingItemPlanRows.length > 0;
+      // Item-plan / remainder Create PO always starts a new series.
       const draftTarget =
-        pendingItemPlanRows.length > 0 || !remainderFromStock
-          ? resolveCreatePoDraftTarget(ovf, selectedDistributor)
-          : null;
+        fromItemPlan || remainderFromStock
+          ? null
+          : resolveCreatePoDraftTarget(ovf, selectedDistributor);
       if (draftTarget) {
         setBanner(
           `Editing draft ${draftTarget.companyPoNumber || ovf.purchase_order_number || "PO"}.`,
@@ -1192,7 +1211,9 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
         void peekNextCompanyPoNumber(peekEntity, ovf.company_id)
           .then((next) => {
             setForm((current) => {
-              if (resolveCreatePoDraftTarget(ovf, selectedDistributor)?.companyPoNumber) {
+              // Keep peeked number when intentionally starting a new series
+              // (item-plan / remainder). Only bail if still editing a draft.
+              if (draftTarget?.companyPoNumber) {
                 return current;
               }
               const currentEntity = companyLocationById(current.companyLocationId).entityCode;
@@ -1231,7 +1252,7 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
     } finally {
       setLoading(false);
     }
-  }, [ovfId, remainderFromStock, distributorParam]);
+  }, [ovfId, remainderFromStock, distributorParam, distributorStateParam]);
 
   useEffect(() => {
     void load();
@@ -1848,10 +1869,11 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
         // acceptance from the Approval workspace may issue it.
         finalize: false,
         distributor_name: distributorParam || null,
-        // Same distributor → one PO (reuse draft). Only force a new series when
-        // coming from stock-remainder without an item-plan distributor group.
+        // Item-plan Create PO and stock-remainder always get a new PO number
+        // (leftover qty must not reuse / merge into the prior draft).
         force_new:
-          remainderFromStock && peekOvfPendingItemPlanPoRows(ovfId).length === 0,
+          remainderFromStock ||
+          peekOvfPendingItemPlanPoRows(ovfId).length > 0,
         lines: poLines,
       });
       for (const document of scmDocuments) {
@@ -2007,7 +2029,8 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
     if (!preview) return null;
     const pendingItemPlan =
       typeof window !== "undefined" && peekOvfPendingItemPlanPoRows(ovfId).length > 0;
-    if (remainderFromStock && !pendingItemPlan) return null;
+    // Item-plan and remainder flows always mint a new PO (no draft reuse).
+    if (pendingItemPlan || remainderFromStock) return null;
     return resolveCreatePoDraftTarget(preview, activeDistributorName);
   }, [preview, activeDistributorName, remainderFromStock, ovfId]);
   const editingDraft = Boolean(createPoDraftTarget);
