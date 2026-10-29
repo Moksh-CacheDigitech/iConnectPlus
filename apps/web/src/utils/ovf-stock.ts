@@ -489,18 +489,54 @@ type OvfPoLinkCandidate = {
   vendor_name?: string | null;
   company_po_number?: string | null;
   document_number?: string | null;
+  status?: string | null;
+  total_qty?: number | null;
 };
 
+function isCancelledPoStatus(status?: string | null): boolean {
+  const value = (status || "").trim().toLowerCase();
+  return value === "cancelled" || value === "canceled";
+}
+
+function newItemPlanRowId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `row-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 /**
- * Attach PO refs to started rows. Rows that share a distributor share one PO.
+ * Attach PO refs to item-plan rows from server purchase orders / po_groups.
+ * Does not require local `po_started` — after a PO is saved (and approved),
+ * Create PO is replaced by a clickable PO number. Partial cover splits a
+ * remainder row that still offers Create PO.
  */
 export function assignUniquePosToItemPlanRows(
   rows: OvfItemPlanSplitRow[],
   purchaseOrders: OvfPoLinkCandidate[] | null | undefined,
+  poGroups?: ScmPoGroup[] | null,
 ): OvfItemPlanSplitRow[] {
-  const unused = [...(purchaseOrders || [])].filter((row) => Boolean(row?.id));
+  const unused = [...(purchaseOrders || [])].filter(
+    (row) => Boolean(row?.id) && !isCancelledPoStatus(row.status),
+  );
   const claimed = new Set<string>();
   const poByDistributor = new Map<string, { id: string; label: string }>();
+  const coverLeft = new Map<string, number>();
+
+  for (const group of poGroups || []) {
+    const key = ovfDistributorKey(group.distributor_name);
+    if (!key || isCancelledPoStatus(group.status)) continue;
+    const ordered = Number(group.ordered_qty);
+    if (Number.isFinite(ordered) && ordered > 0) {
+      coverLeft.set(key, (coverLeft.get(key) || 0) + ordered);
+    }
+  }
+  for (const po of unused) {
+    const key = ovfDistributorKey(po.vendor_name || "");
+    if (!key || coverLeft.has(key)) continue;
+    const qty = Number(po.total_qty);
+    if (Number.isFinite(qty) && qty > 0) coverLeft.set(key, qty);
+  }
 
   for (const row of rows) {
     if (!row.linked_po_id) continue;
@@ -515,12 +551,30 @@ export function assignUniquePosToItemPlanRows(
         label: (row.linked_po_label || "").trim() || id,
       });
     }
+    if (distKey && coverLeft.has(distKey)) {
+      const left = Math.max(0, (coverLeft.get(distKey) || 0) - (Number(row.qty) || 0));
+      coverLeft.set(distKey, Number(left.toFixed(4)));
+    }
   }
 
   const takeMatch = (distributorName: string): { id: string; label: string } | null => {
     const needle = ovfDistributorKey(distributorName);
     if (needle && poByDistributor.has(needle)) {
       return poByDistributor.get(needle) || null;
+    }
+    const group = findPoGroupForDistributor(poGroups || undefined, distributorName);
+    if (group?.purchase_order_id && !isCancelledPoStatus(group.status)) {
+      const linked = {
+        id: String(group.purchase_order_id),
+        label:
+          (group.company_po_number || group.document_number || "").trim() ||
+          String(group.purchase_order_id),
+      };
+      claimed.add(linked.id);
+      const still = unused.findIndex((po) => String(po.id) === linked.id);
+      if (still >= 0) unused.splice(still, 1);
+      if (needle) poByDistributor.set(needle, linked);
+      return linked;
     }
     const matchIdx = unused.findIndex((po) => {
       const id = String(po.id);
@@ -544,17 +598,57 @@ export function assignUniquePosToItemPlanRows(
     return linked;
   };
 
-  return rows.map((row) => {
-    if (!row.po_started) return row;
-    if (row.linked_po_id) return row;
+  const out: OvfItemPlanSplitRow[] = [];
+  for (const row of rows) {
+    if (row.linked_po_id) {
+      out.push({ ...row, po_started: true });
+      continue;
+    }
+    if (isInStockDistributor(row.distributor_name)) {
+      out.push(row);
+      continue;
+    }
     const matched = takeMatch(row.distributor_name);
-    if (!matched) return row;
-    return {
+    if (!matched) {
+      out.push(row);
+      continue;
+    }
+    const distKey = ovfDistributorKey(row.distributor_name);
+    const rowQty = Math.max(0, Number(row.qty) || 0);
+    const available =
+      distKey && coverLeft.has(distKey)
+        ? Math.max(0, coverLeft.get(distKey) || 0)
+        : rowQty;
+    if (available <= 1e-9) {
+      out.push(row);
+      continue;
+    }
+    const coveredQty = Math.min(rowQty, available);
+    const remainderQty = Math.max(0, Number((rowQty - coveredQty).toFixed(4)));
+    if (distKey) {
+      coverLeft.set(distKey, Number(Math.max(0, available - coveredQty).toFixed(4)));
+    }
+    out.push({
       ...row,
+      qty: coveredQty,
+      create_qty: coveredQty,
+      po_started: true,
       linked_po_id: matched.id,
       linked_po_label: matched.label,
-    };
-  });
+    });
+    if (remainderQty > 1e-9) {
+      out.push({
+        ...row,
+        id: newItemPlanRowId(),
+        qty: remainderQty,
+        create_qty: remainderQty,
+        po_started: false,
+        linked_po_id: null,
+        linked_po_label: null,
+      });
+    }
+  }
+  return out;
 }
 
 export function ovfPoSeedVendorLines(
@@ -653,7 +747,8 @@ export function resolvePoForDistributor(
   distributorName: string,
 ): OvfLinkedPoRef | null {
   const group = findPoGroupForDistributor(preview.po_groups, distributorName);
-  if (group?.has_po && group.purchase_order_id) {
+  // Return the PO even when ordered qty is only partial (has_po=false).
+  if (group?.purchase_order_id && !isCancelledPoStatus(group.status)) {
     return {
       id: String(group.purchase_order_id),
       label: group.company_po_number || group.document_number || "PO",
@@ -663,6 +758,7 @@ export function resolvePoForDistributor(
 
   const needle = ovfDistributorKey(distributorName);
   const linked = preview.purchase_orders?.find((row) => {
+    if (isCancelledPoStatus(row.status)) return false;
     const vendorName = ovfDistributorKey(row.vendor_name);
     return vendorName && (vendorName === needle || vendorName.includes(needle) || needle.includes(vendorName));
   });

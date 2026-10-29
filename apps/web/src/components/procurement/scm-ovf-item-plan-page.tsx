@@ -213,18 +213,17 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
       setVendors(vendorRows);
       const apiLines = ovf.item_plan?.lines || [];
       const saved = loadOvfItemPlanSplits(ovfId);
-      if (saved && saved.length > 0) {
-        const normalized = assignUniquePosToItemPlanRows(
-          normalizeSavedRows(saved, vendorRows),
-          ovf.purchase_orders,
-        );
-        setPlanRows(normalized);
-        saveOvfItemPlanSplits(ovfId, normalized);
-      } else {
-        const next = rowsFromApiLines(apiLines, vendorRows);
-        setPlanRows(next);
-        saveOvfItemPlanSplits(ovfId, next);
-      }
+      const baseRows =
+        saved && saved.length > 0
+          ? normalizeSavedRows(saved, vendorRows)
+          : rowsFromApiLines(apiLines, vendorRows);
+      const normalized = assignUniquePosToItemPlanRows(
+        baseRows,
+        ovf.purchase_orders,
+        ovf.po_groups,
+      );
+      setPlanRows(normalized);
+      saveOvfItemPlanSplits(ovfId, normalized);
       const recommended = ovf.item_plan?.delivery === "separate" ? "separate" : "together";
       const stored =
         typeof window !== "undefined"
@@ -520,6 +519,7 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
                           status: null as string | null,
                         }
                         : null;
+                      // Linked rows never offer Create PO again; remainder rows stay eligible.
                       const canCreatePo =
                         needsPo && !hasCreatedPo && row.create_qty > 0;
                       const qtyEditable =

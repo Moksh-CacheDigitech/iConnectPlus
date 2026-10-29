@@ -900,6 +900,9 @@ class QuoteService:
             )
         current_rev = max(1, int(quote.quote_revision or 1))
         if current_rev not in seen:
+            # Live draft stub — do NOT stamp snapshotted_at. The quote detail UI
+            # treats a V1 snapshotted_at as "already sent for approval" and would
+            # hide Send for Approval on brand-new drafts.
             rows.append(
                 {
                     "revision_no": current_rev,
@@ -907,7 +910,7 @@ class QuoteService:
                     "grand_total": quote.grand_total,
                     "total_margin_amount": quote.total_margin_amount,
                     "is_current": True,
-                    "snapshotted_at": quote.updated_at,
+                    "snapshotted_at": None,
                     "remark": None,
                     "has_print_payload": True,
                 }

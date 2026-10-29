@@ -325,10 +325,13 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
 
   // V1 already sent/approved must not re-offer Send for Approval. After
   // negotiate, quote_revision >= 2 and draft correctly shows the action again.
+  // Frozen snapshots set snapshotted_at; the live draft stub must leave it null
+  // so brand-new V1 drafts still show Send for Approval.
   const v1AlreadyApproved =
     revisionNo <= 1 &&
     (quote.approval_status === "approved" ||
-      ["approved_internal", "sent_to_customer", "negotiation", "follow_up", "accepted"].includes(
+      quote.approval_status === "pending" ||
+      ["internal_approval", "approved_internal", "sent_to_customer", "negotiation", "follow_up", "accepted"].includes(
         quote.quote_stage,
       ) ||
       revisions.some((row) => row.revision_no === 1 && Boolean(row.snapshotted_at)));
