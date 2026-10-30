@@ -65,6 +65,12 @@ export type DeliveryStatusRecord = {
   itemType: DeliveryItemType | "";
   podDocument: DeliveryStatusAttachment | null;
   docketNumber: string;
+  /** Shared across By hand and Courier. */
+  transporterName: string;
+  /** Lorry receipt / goods receipt number — shared across modes. */
+  lrGrNumber: string;
+  customerTaxInvoiceDocument: DeliveryStatusAttachment | null;
+  packingListDocument: DeliveryStatusAttachment | null;
   boxCount: string;
   surfaceMode: string;
   remarks: string;
@@ -211,6 +217,8 @@ function normalizeBillStatus(value: unknown): DeliveryBillStatus {
 function normalize(raw: Partial<DeliveryStatusRecord> & { challanId: string }): DeliveryStatusRecord {
   const cacheInvoiceDocument = normalizeAttachment(raw.cacheInvoiceDocument);
   const podDocument = normalizeAttachment(raw.podDocument);
+  const customerTaxInvoiceDocument = normalizeAttachment(raw.customerTaxInvoiceDocument);
+  const packingListDocument = normalizeAttachment(raw.packingListDocument);
   const billDocument = normalizeAttachment(raw.billDocument);
   const deliveryMode = normalizeMode(raw.deliveryMode);
   const itemType = normalizeItemType(raw.itemType);
@@ -237,6 +245,10 @@ function normalize(raw: Partial<DeliveryStatusRecord> & { challanId: string }): 
     itemType,
     podDocument,
     docketNumber: raw.docketNumber ?? raw.trackingNumber ?? "",
+    transporterName: asText(raw.transporterName).trim(),
+    lrGrNumber: asText(raw.lrGrNumber).trim(),
+    customerTaxInvoiceDocument,
+    packingListDocument,
     boxCount: raw.boxCount ?? "",
     surfaceMode: normalizeSurfaceMode(raw.surfaceMode),
     remarks: raw.remarks ?? "",
@@ -377,6 +389,10 @@ export function defaultStatusFromChallan(challan: DeliveryChallanRecord): Delive
     itemType: "",
     podDocument: null,
     docketNumber: "",
+    transporterName: "",
+    lrGrNumber: "",
+    customerTaxInvoiceDocument: null,
+    packingListDocument: null,
     boxCount: "",
     surfaceMode: "",
     remarks: "",
@@ -471,6 +487,10 @@ export type DeliveryStatusFormErrors = Partial<
     | "podDocument"
     | "docketNumber"
     | "courierProvider"
+    | "transporterName"
+    | "lrGrNumber"
+    | "customerTaxInvoiceDocument"
+    | "packingListDocument"
     | "reminderEmail"
     | "expectedDeliveryDate"
     | "boxCount"

@@ -35,15 +35,18 @@ import {
   getInvoiceGenerationTaskForBatch,
   getPurchaseOrder,
   getScmOvfPreview,
+  listInvoiceGenerationTasksForOrder,
   listOrderReceiptBatches,
   listProcurementInventory,
   listVendorOptions,
+  type ProcInvoiceGenerationTask,
   type ProcOrder,
   type ScmOvfPreview,
   type ScmReceiptBatch,
   type VendorOption,
 } from "@/services/procurement-service";
 import {
+  expandGrnNumberList,
   fullPoChallanLines,
   mergeGrnInventoryStockToChallanLines,
   mergeInventoryAndPoChallanLines,
@@ -85,10 +88,33 @@ import { patchPendingGrnChallan, upsertPendingGrnChallan } from "@/utils/grn-cha
 import { deliveryStatusUpdateHref } from "@/utils/delivery-status-routes";
 import { ensureDeliveryStatusForChallan, getDeliveryStatus } from "@/utils/delivery-status-storage";
 import { syncOvfTimelineForChallan, syncOvfTimelineForDeliveryStatus } from "@/utils/ovf-timeline-sync";
-import { ovfGrnStockSourceKey, ovfStockSourceKey, takeOvfInventoryShipSelection } from "@/utils/ovf-stock";
+import {
+  ovfGrnStockSourceKey,
+  ovfStockSourceKey,
+  poGrnStockSourceKey,
+  takeOvfInventoryShipSelection,
+  clearPoGrnPendingShipSelection,
+  takePoGrnPendingShipSelection,
+  takePoGrnStockShipSelection,
+} from "@/utils/ovf-stock";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+const READ_ONLY_INPUT =
+  "h-8 cursor-default bg-muted/40 text-foreground read-only:opacity-100";
+
+function pickBillingInvoiceTask(
+  tasks: ProcInvoiceGenerationTask[],
+): ProcInvoiceGenerationTask | null {
+  if (tasks.length === 0) return null;
+  const completed = tasks.find(
+    (task) => task.status === "completed" && Boolean(task.invoice_number?.trim()),
+  );
+  if (completed) return completed;
+  const pending = tasks.find((task) => task.status === "pending");
+  return pending || tasks[0] || null;
 }
 
 const NO_SPINNER =
@@ -139,6 +165,7 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
   const router = useRouter();
   const orderIdParam = embedded?.orderId ?? searchParams.get("orderId");
   const grnKeyParam = searchParams.get("grnKey");
+  const batchKeyParam = searchParams.get("batchKey");
   const kindParam = searchParams.get("kind") as GrnChallanKind | null;
   const ovfIdParam = searchParams.get("ovfId");
   const ovfShipSource = searchParams.get("source");
@@ -150,7 +177,9 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
       ovfShipSource === "ovf_combined");
   const isOvfStock = Boolean(ovfIdParam?.trim()) && ovfShipSource === "ovf_stock";
   const isOvfGrnStock = Boolean(ovfIdParam?.trim()) && ovfShipSource === "ovf_grn_stock";
-  const isOvfPrefilledLines = isOvfStock || isOvfGrnStock;
+  const isPoGrnStock =
+    ovfShipSource === "po_grn_stock" && Boolean(orderIdParam?.trim());
+  const isOvfPrefilledLines = isOvfStock || isOvfGrnStock || isPoGrnStock;
   const returnToParam = searchParams.get("returnTo");
   const fromInventory = searchParams.get("from") === "inventory";
   const returnTo = useMemo(() => safeProcurementReturnTo(returnToParam), [returnToParam]);
@@ -217,6 +246,15 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
   >([]);
   const skipAutoApplyLinesRef = useRef(Boolean(challanId));
   const linesLockedFromSaveRef = useRef(Boolean(challanId));
+
+  /** Challan/PO header, customer identity, and lines come from PO/stock — not free-edit. */
+  const lockSourceFields =
+    isLocked ||
+    hasSaved ||
+    grnKind === "billing" ||
+    isOvfPrefilledLines ||
+    Boolean(orderIdParam?.trim()) ||
+    Boolean(loadedOrder);
 
   const defaultShipTo = "";
 
@@ -578,6 +616,102 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
       return;
     }
 
+    if (isPoGrnStock && orderIdParam) {
+      let cancelled = false;
+      setPrefillBusy(true);
+      setLoadError(null);
+      void (async () => {
+        try {
+          const shipSelection =
+            takePoGrnStockShipSelection(orderIdParam) ||
+            (batchKeyParam ? takePoGrnPendingShipSelection(batchKeyParam) : null);
+          const [{ order, vendor, batches, ovf, poNumber }, inventory] = await Promise.all([
+            loadOrderContext(orderIdParam),
+            listProcurementInventory(),
+          ]);
+          if (cancelled) return;
+          setOrderId(orderIdParam);
+          setLoadedOrder(order);
+          setOvfContext(ovf);
+          setGrnBatches(batches);
+          skipAutoApplyLinesRef.current = true;
+          linesLockedFromSaveRef.current = true;
+          setGrnKind(
+            kindParam === "billing" || kindParam === "delivery_challan"
+              ? kindParam
+              : "delivery_challan",
+          );
+          applyPrefillHeader(order, ovf, poNumber, vendor?.label || "");
+          setItemsSourceMode("selected_grns");
+          setSelectedGrnKeys([]);
+          const grnNumsFromSelection = expandGrnNumberList(
+            (shipSelection?.lines || []).map((line) => {
+              const fromLine = (line.grn_number || "").trim();
+              if (fromLine) return fromLine;
+              if (!line.stock_unit_id) return "";
+              const inv = inventory.find(
+                (row) => String(row.stock_unit_id) === String(line.stock_unit_id),
+              );
+              return (inv?.grn_number || "").trim();
+            }),
+          );
+          const grnNumsFromInventory = expandGrnNumberList(
+            inventory
+              .filter(
+                (row) =>
+                  row.source === "grn" &&
+                  row.order_id === orderIdParam &&
+                  (Number(row.received_quantity) || 0) > 0,
+              )
+              .map((row) => (row.grn_number || "").trim()),
+          );
+          setLinkedGrnNumbers(
+            grnNumsFromSelection.length > 0 ? grnNumsFromSelection : grnNumsFromInventory,
+          );
+          if (kindParam === "billing") {
+            try {
+              const invoiceTask = pickBillingInvoiceTask(
+                await listInvoiceGenerationTasksForOrder(orderIdParam),
+              );
+              if (invoiceTask?.invoice_number) {
+                setInvoiceNumber(String(invoiceTask.invoice_number).trim());
+              }
+              if (invoiceTask?.invoice_date) {
+                setInvoiceDate(String(invoiceTask.invoice_date).slice(0, 10));
+              }
+            } catch {
+              /* optional prefill from Accounts My Jobs */
+            }
+          }
+          const selectionAsOvf = shipSelection
+            ? {
+              ovf_id: ovf?.ovf_id || order.source_document_id || "",
+              order_id: shipSelection.order_id,
+              lines: shipSelection.lines,
+            }
+            : null;
+          const grnStockLines = selectionAsOvf
+            ? ovfInventorySelectionToChallanLines(selectionAsOvf, ovf, inventory)
+            : mergeGrnInventoryStockToChallanLines(inventory, orderIdParam, ovf, order);
+          setLines(grnStockLines.length > 0 ? grnStockLines : [emptyChallanLine()]);
+          if (grnStockLines.length === 0) {
+            setLoadError("No GRN warehouse stock found for this purchase order.");
+          }
+        } catch (err) {
+          if (!cancelled) {
+            setLoadError(
+              formatApiError(err, "Failed to load purchase order GRN stock for challan."),
+            );
+          }
+        } finally {
+          if (!cancelled) setPrefillBusy(false);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
     if (isOvfShip && ovfIdParam) {
       let cancelled = false;
       setPrefillBusy(true);
@@ -599,8 +733,8 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
           setCustomerBillTo((ovf.billing_address || "").trim() || customer);
           setCustomerShipTo(
             (ovf.shipping_address || "").trim() ||
-              (ovf.billing_address || "").trim() ||
-              customer,
+            (ovf.billing_address || "").trim() ||
+            customer,
           );
           setCustomerGstNo((ovf.customer_gst || "").trim());
           const attn = [ovf.shipping_contact_person, ovf.billing_contact_person]
@@ -652,34 +786,27 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
             setPoDate(customerPo.poDate || (ovf.po_date || "").slice(0, 10));
             setItemsSourceMode("selected_grns");
             setSelectedGrnKeys([]);
-            const grnNumsFromSelection = [
-              ...new Set(
-                (shipSelection?.lines || [])
-                  .map((line) => {
-                    const fromLine = (line.grn_number || "").trim();
-                    if (fromLine) return fromLine;
-                    if (!line.stock_unit_id) return "";
-                    const inv = inventory.find(
-                      (row) => String(row.stock_unit_id) === String(line.stock_unit_id),
-                    );
-                    return (inv?.grn_number || "").trim();
-                  })
-                  .filter(Boolean),
-              ),
-            ];
-            const grnNumsFromInventory = [
-              ...new Set(
-                inventory
-                  .filter(
-                    (row) =>
-                      row.source === "grn" &&
-                      row.order_id === orderIdForGrn &&
-                      (Number(row.received_quantity) || 0) > 0,
-                  )
-                  .map((row) => (row.grn_number || "").trim())
-                  .filter(Boolean),
-              ),
-            ];
+            const grnNumsFromSelection = expandGrnNumberList(
+              (shipSelection?.lines || []).map((line) => {
+                const fromLine = (line.grn_number || "").trim();
+                if (fromLine) return fromLine;
+                if (!line.stock_unit_id) return "";
+                const inv = inventory.find(
+                  (row) => String(row.stock_unit_id) === String(line.stock_unit_id),
+                );
+                return (inv?.grn_number || "").trim();
+              }),
+            );
+            const grnNumsFromInventory = expandGrnNumberList(
+              inventory
+                .filter(
+                  (row) =>
+                    row.source === "grn" &&
+                    row.order_id === orderIdForGrn &&
+                    (Number(row.received_quantity) || 0) > 0,
+                )
+                .map((row) => (row.grn_number || "").trim()),
+            );
             setLinkedGrnNumbers(
               grnNumsFromSelection.length > 0 ? grnNumsFromSelection : grnNumsFromInventory,
             );
@@ -784,26 +911,35 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
           const matchedBatch = resolvedBatches.find(
             (batch) => receiptBatchKey(batch) === fromGrn,
           );
-          if (kind === "billing" && matchedBatch?.id) {
+          if (kind === "billing") {
             try {
-              const invoiceTask = await getInvoiceGenerationTaskForBatch(
-                String(matchedBatch.id),
-              );
+              let invoiceTask: ProcInvoiceGenerationTask | null = null;
+              if (matchedBatch?.id) {
+                invoiceTask = await getInvoiceGenerationTaskForBatch(String(matchedBatch.id));
+              }
+              if (!invoiceTask?.invoice_number) {
+                invoiceTask = pickBillingInvoiceTask(
+                  await listInvoiceGenerationTasksForOrder(orderIdParam),
+                );
+              }
               if (invoiceTask?.invoice_number) {
                 setInvoiceNumber(String(invoiceTask.invoice_number).trim());
               }
               if (invoiceTask?.invoice_date) {
                 setInvoiceDate(String(invoiceTask.invoice_date).slice(0, 10));
+              } else if (matchedBatch?.vendor_invoice_date) {
+                setInvoiceDate(String(matchedBatch.vendor_invoice_date).slice(0, 10));
+              }
+              if (!invoiceTask?.invoice_number && matchedBatch?.vendor_invoice_number) {
+                setInvoiceNumber(String(matchedBatch.vendor_invoice_number).trim());
               }
             } catch {
-              /* optional prefill */
-            }
-          } else {
-            if (matchedBatch?.vendor_invoice_number) {
-              setInvoiceNumber(String(matchedBatch.vendor_invoice_number).trim());
-            }
-            if (matchedBatch?.vendor_invoice_date) {
-              setInvoiceDate(String(matchedBatch.vendor_invoice_date).slice(0, 10));
+              if (matchedBatch?.vendor_invoice_number) {
+                setInvoiceNumber(String(matchedBatch.vendor_invoice_number).trim());
+              }
+              if (matchedBatch?.vendor_invoice_date) {
+                setInvoiceDate(String(matchedBatch.vendor_invoice_date).slice(0, 10));
+              }
             }
           }
           const merged = mergeSelectedGrnChallanLines(
@@ -838,7 +974,17 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
     return () => {
       cancelled = true;
     };
-  }, [challanId, grnKeyParam, kindParam, orderIdParam, isOvfShip, ovfIdParam, ovfShipSource]);
+  }, [
+    challanId,
+    grnKeyParam,
+    batchKeyParam,
+    kindParam,
+    orderIdParam,
+    isOvfShip,
+    isPoGrnStock,
+    ovfIdParam,
+    ovfShipSource,
+  ]);
 
   const setLineField = useCallback(
     (id: string, key: keyof Omit<DeliveryChallanLine, "id">, value: string) => {
@@ -864,6 +1010,11 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
     if (selectedGrnKeys.length > 0) return selectedGrnKeys;
     if (isOvfGrnStock && ovfIdParam?.trim()) {
       return [ovfGrnStockSourceKey(ovfIdParam.trim(), recordId)];
+    }
+    if (isPoGrnStock && orderIdParam?.trim()) {
+      return [
+        (batchKeyParam || "").trim() || poGrnStockSourceKey(orderIdParam.trim(), recordId),
+      ];
     }
     return selectedGrnKeys;
   }
@@ -965,13 +1116,13 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
       saved,
       grnKind === "billing" && invoiceNumber.trim()
         ? {
-            billStatus: "fully_billed",
-            billInvoiceNumber: invoiceNumber.trim(),
-            billInvoiceDate: invoiceDate.trim(),
-            billedQuantity: String(
-              saved.lines.reduce((sum, line) => sum + (Number(line.quantitySent) || 0), 0),
-            ),
-          }
+          billStatus: "fully_billed",
+          billInvoiceNumber: invoiceNumber.trim(),
+          billInvoiceDate: invoiceDate.trim(),
+          billedQuantity: String(
+            saved.lines.reduce((sum, line) => sum + (Number(line.quantitySent) || 0), 0),
+          ),
+        }
         : { billStatus: "unbilled" },
     );
     if (grnKind === "billing" && invoiceNumber.trim()) {
@@ -985,12 +1136,14 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
     const saveKeys = resolveSaveGrnKeys();
     const batchKey = saveKeys[0] || `saved:${saved.id}`;
     let pendingOrderId = orderId || saved.orderId || saved.id;
-    let source: "grn" | "ovf_stock" | "ovf_grn_stock" = "grn";
+    let source: "grn" | "ovf_stock" | "ovf_grn_stock" | "po_grn_stock" = "grn";
     if (batchKey.startsWith("ovf-stock:")) {
       source = "ovf_stock";
       pendingOrderId = ovfIdParam?.trim() || pendingOrderId;
     } else if (batchKey.startsWith("ovf-grn-stock:")) {
       source = "ovf_grn_stock";
+    } else if (batchKey.startsWith("po-grn-stock:")) {
+      source = "po_grn_stock";
     }
     upsertPendingGrnChallan({
       orderId: pendingOrderId,
@@ -1021,6 +1174,9 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
       savedRecordId: saved.id,
       source,
     });
+    if (source === "po_grn_stock" || batchKey.startsWith("po-grn-stock:")) {
+      clearPoGrnPendingShipSelection(batchKey);
+    }
     // Keep stored challan kind aligned with the tab it belongs to.
     if (saved.grnKind !== resolvedKind) {
       upsertDeliveryChallan({ ...saved, grnKind: resolvedKind });
@@ -1174,355 +1330,415 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
         disabled={isLocked || hasSaved}
         className="m-0 min-w-0 space-y-4 border-0 p-0 disabled:opacity-100"
       >
-      <DeliverySectionCard
-        title={grnKind === "billing" ? "Invoice details" : "Challan & purchase order"}
-        icon={FileText}
-      >
-        {loadedOrder ? (
-          <p className="mb-3 text-sm font-medium text-foreground">{entityPdf.entityName}</p>
-        ) : null}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {grnKind === "billing" ? (
-            <>
-              <FinanceField label="Invoice number *">
-                <Input
-                  value={invoiceNumber}
-                  onChange={(e) => setInvoiceNumber(e.target.value)}
-                  className="h-8"
-                  placeholder="Customer / cache invoice no."
-                />
-              </FinanceField>
-              <FinanceField label="Invoice date *">
-                <Input
-                  type="date"
-                  value={invoiceDate}
-                  onChange={(e) => setInvoiceDate(e.target.value)}
-                  className="h-8"
-                />
-              </FinanceField>
-            </>
-          ) : (
-            <>
-              <FinanceField label="Challan number">
-                <Input
-                  value={challanNumber}
-                  onChange={(e) => setChallanNumber(e.target.value)}
-                  className="h-8"
-                />
-              </FinanceField>
-              <FinanceField label="Challan date">
-                <Input
-                  type="date"
-                  value={challanDate}
-                  onChange={(e) => setChallanDate(e.target.value)}
-                  className="h-8"
-                />
-              </FinanceField>
-            </>
-          )}
-          <FinanceField label="Customer PO number">
-            <Input
-              value={purchaseOrderNumber}
-              onChange={(e) => setPurchaseOrderNumber(e.target.value)}
-              className="h-8"
-            />
-          </FinanceField>
-          <FinanceField label="Customer PO date">
-            <Input
-              type="date"
-              value={poDate}
-              onChange={(e) => setPoDate(e.target.value)}
-              className="h-8"
-            />
-          </FinanceField>
-        </div>
-      </DeliverySectionCard>
-
-      <DeliverySectionCard title="Customer" icon={FileText}>
-        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
-          <FinanceField label="Customer name">
-            <Input
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              className="h-8"
-            />
-          </FinanceField>
-          <FinanceField label="Customer GST no.">
-            <Input
-              value={customerGstNo}
-              onChange={(e) => setCustomerGstNo(e.target.value)}
-              className="h-8"
-            />
-          </FinanceField>
-          <FinanceField label="Customer bill to">
-            <FinanceTextarea
-              value={customerBillTo}
-              onChange={(e) => setCustomerBillTo(e.target.value)}
-              rows={4}
-            />
-          </FinanceField>
-          <FinanceField label="Customer ship to">
-            <FinanceTextarea
-              value={customerShipTo}
-              onChange={(e) => setCustomerShipTo(e.target.value)}
-              rows={4}
-            />
-          </FinanceField>
-          <FinanceField label="Kind attn / site contact">
-            <Input
-              value={kindAttn}
-              onChange={(e) => setKindAttn(e.target.value)}
-              className="h-8"
-            />
-          </FinanceField>
-          <FinanceField label="Remarks">
-            <Input value={remarks} onChange={(e) => setRemarks(e.target.value)} className="h-8" />
-          </FinanceField>
-          <FinanceField label="Prepared by">
-            <Input
-              value={preparedBy}
-              onChange={(e) => setPreparedBy(e.target.value)}
-              className="h-8"
-            />
-          </FinanceField>
-          <FinanceField label="Delivered by">
-            <Input
-              value={deliveredBy}
-              onChange={(e) => setDeliveredBy(e.target.value)}
-              className="h-8"
-            />
-          </FinanceField>
-        </div>
-      </DeliverySectionCard>
-
-      {null /* Items on challan / Source section hidden */}
-
-      <DeliverySectionCard title="Line items" icon={Package}>
-        <div className="erp-scroll overflow-x-auto rounded-md border border-border">
-          <table className="w-full min-w-[980px] text-left text-sm">
-            <thead className="border-b border-border bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="w-12 px-2 py-2 font-medium">S.No</th>
-                <th className="min-w-[260px] px-2 py-2 font-medium">Product</th>
-                <th className="min-w-[200px] px-2 py-2 font-medium">Description</th>
-                <th className="w-24 px-2 py-2 font-medium">HSN/SAC</th>
-                <th className="w-20 px-2 py-2 font-medium">Asset</th>
-                <th className="w-20 px-2 py-2 font-medium">Qty</th>
-                <th className="w-24 px-2 py-2 font-medium">Rate</th>
-                <th className="w-16 px-2 py-2 font-medium"> </th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((row, index) => (
-                <tr key={row.id} className="border-b border-border/70 align-top">
-                  <td className="px-2 py-2 tabular-nums text-muted-foreground">{index + 1}</td>
-                  <td className="px-2 py-2">
-                    {fromInventory && isNew ? (
-                      <FinanceSelect
-                        value={row.product}
-                        onChange={(e) => applyInventoryProductToLine(row.id, e.target.value)}
-                        className="h-8 min-w-[240px]"
-                        aria-label={`Inventory product for line ${index + 1}`}
-                        disabled={isLocked || isOvfPrefilledLines}
-                      >
-                        <option value="">Select inventory item…</option>
-                        {inventoryProductOptions.map((opt) => (
-                          <option key={opt.name} value={opt.name}>
-                            {opt.name}
-                            {opt.availableQty > 0 ? ` (${opt.availableQty} avail.)` : ""}
-                          </option>
-                        ))}
-                        {row.product &&
-                        !inventoryProductOptions.some((opt) => opt.name === row.product) ? (
-                          <option value={row.product}>{row.product}</option>
-                        ) : null}
-                      </FinanceSelect>
-                    ) : (
-                      <Input
-                        value={row.product}
-                        onChange={(e) => setLineField(row.id, "product", e.target.value)}
-                        className="h-8 min-w-[240px]"
-                        placeholder="Product name"
-                        title={row.product || undefined}
-                      />
-                    )}
-                  </td>
-                  <td className="px-2 py-2">
-                    <Input
-                      value={row.itemName}
-                      onChange={(e) => setLineField(row.id, "itemName", e.target.value)}
-                      className="h-8 min-w-[180px]"
-                      placeholder="Description"
-                      title={row.itemName || undefined}
-                    />
-                  </td>
-                  <td className="px-2 py-2">
-                    <Input
-                      value={row.hsnSac}
-                      onChange={(e) => setLineField(row.id, "hsnSac", e.target.value)}
-                      className="h-8"
-                    />
-                  </td>
-                  <td className="px-2 py-2">
-                    <Input
-                      value={row.assetNo}
-                      onChange={(e) => setLineField(row.id, "assetNo", e.target.value)}
-                      className="h-8"
-                    />
-                  </td>
-                  <td className="px-2 py-2">
-                    <Input
-                      type="number"
-                      min={0}
-                      step="any"
-                      value={row.quantitySent}
-                      onChange={(e) => setLineField(row.id, "quantitySent", e.target.value)}
-                      className={cn("h-8", NO_SPINNER)}
-                    />
-                  </td>
-                  <td className="px-2 py-2">
-                    <Input
-                      type="number"
-                      min={0}
-                      step="any"
-                      value={row.rate}
-                      onChange={(e) => setLineField(row.id, "rate", e.target.value)}
-                      className={cn("h-8", NO_SPINNER)}
-                    />
-                  </td>
-                  <td className="px-2 py-2">
-                    <button
-                      type="button"
-                      aria-label="Remove line"
-                      title="Remove"
-                      className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-destructive transition-colors duration-200 hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
-                      onClick={() => removeLine(row.id)}
-                      disabled={isOvfPrefilledLines}
-                    >
-                      <Trash2 className="size-4" aria-hidden />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="mt-2 h-7 cursor-pointer px-2 text-xs"
-          onClick={addLine}
-          disabled={isOvfPrefilledLines}
+        <DeliverySectionCard
+          title={grnKind === "billing" ? "Invoice details" : "Challan & purchase order"}
+          icon={FileText}
         >
-          Add item
-        </Button>
+          {loadedOrder ? (
+            <p className="mb-3 text-sm font-medium text-foreground">{entityPdf.entityName}</p>
+          ) : null}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {grnKind === "billing" ? (
+              <>
+                <FinanceField label="Invoice number *">
+                  <Input
+                    value={invoiceNumber}
+                    readOnly
+                    className={READ_ONLY_INPUT}
+                    placeholder="From Accounts My Jobs"
+                    title="Fetched from Accounts invoice generation"
+                  />
+                </FinanceField>
+                <FinanceField label="Invoice date *">
+                  <Input
+                    type="date"
+                    value={invoiceDate}
+                    readOnly
+                    className={READ_ONLY_INPUT}
+                    title="Fetched from Accounts invoice generation"
+                  />
+                </FinanceField>
+              </>
+            ) : (
+              <>
+                <FinanceField label="Challan number">
+                  <Input
+                    value={challanNumber}
+                    onChange={
+                      lockSourceFields ? undefined : (e) => setChallanNumber(e.target.value)
+                    }
+                    readOnly={lockSourceFields}
+                    className={lockSourceFields ? READ_ONLY_INPUT : "h-8"}
+                  />
+                </FinanceField>
+                <FinanceField label="Challan date">
+                  <Input
+                    type="date"
+                    value={challanDate}
+                    onChange={
+                      lockSourceFields ? undefined : (e) => setChallanDate(e.target.value)
+                    }
+                    readOnly={lockSourceFields}
+                    className={lockSourceFields ? READ_ONLY_INPUT : "h-8"}
+                  />
+                </FinanceField>
+              </>
+            )}
+            <FinanceField label="Customer PO number">
+              <Input
+                value={purchaseOrderNumber}
+                onChange={
+                  lockSourceFields ? undefined : (e) => setPurchaseOrderNumber(e.target.value)
+                }
+                readOnly={lockSourceFields}
+                className={lockSourceFields ? READ_ONLY_INPUT : "h-8"}
+              />
+            </FinanceField>
+            <FinanceField label="Customer PO date">
+              <Input
+                type="date"
+                value={poDate}
+                onChange={lockSourceFields ? undefined : (e) => setPoDate(e.target.value)}
+                readOnly={lockSourceFields}
+                className={lockSourceFields ? READ_ONLY_INPUT : "h-8"}
+              />
+            </FinanceField>
+          </div>
+        </DeliverySectionCard>
 
-        <div className="mt-4 flex justify-end">
-          <div className="w-full max-w-md overflow-hidden rounded-md border border-border text-sm">
-            <table className="w-full">
+        <DeliverySectionCard title="Customer" icon={FileText}>
+          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
+            <FinanceField label="Customer name">
+              <Input
+                value={customerName}
+                onChange={
+                  lockSourceFields ? undefined : (e) => setCustomerName(e.target.value)
+                }
+                readOnly={lockSourceFields}
+                className={lockSourceFields ? READ_ONLY_INPUT : "h-8"}
+              />
+            </FinanceField>
+            <FinanceField label="Customer GST no.">
+              <Input
+                value={customerGstNo}
+                onChange={
+                  lockSourceFields ? undefined : (e) => setCustomerGstNo(e.target.value)
+                }
+                readOnly={lockSourceFields}
+                className={lockSourceFields ? READ_ONLY_INPUT : "h-8"}
+              />
+            </FinanceField>
+            <FinanceField label="Customer bill to">
+              <FinanceTextarea
+                value={customerBillTo}
+                onChange={
+                  lockSourceFields ? undefined : (e) => setCustomerBillTo(e.target.value)
+                }
+                readOnly={lockSourceFields}
+                rows={4}
+                className={lockSourceFields ? "cursor-default bg-muted/40" : undefined}
+              />
+            </FinanceField>
+            <FinanceField label="Customer ship to">
+              <FinanceTextarea
+                value={customerShipTo}
+                onChange={
+                  lockSourceFields ? undefined : (e) => setCustomerShipTo(e.target.value)
+                }
+                readOnly={lockSourceFields}
+                rows={4}
+                className={lockSourceFields ? "cursor-default bg-muted/40" : undefined}
+              />
+            </FinanceField>
+            <FinanceField label="Kind attn / site contact">
+              <Input
+                value={kindAttn}
+                onChange={(e) => setKindAttn(e.target.value)}
+                className="h-8"
+              />
+            </FinanceField>
+            <FinanceField label="Remarks">
+              <Input value={remarks} onChange={(e) => setRemarks(e.target.value)} className="h-8" />
+            </FinanceField>
+          </div>
+        </DeliverySectionCard>
+
+        {null /* Items on challan / Source section hidden */}
+
+        <DeliverySectionCard title="Line items" icon={Package}>
+          <div className="erp-scroll overflow-x-auto rounded-md border border-border">
+            <table className="w-full min-w-[980px] text-left text-sm">
+              <thead className="border-b border-border bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="w-12 px-2 py-2 font-medium">S.No</th>
+                  <th className="min-w-[260px] px-2 py-2 font-medium">Product</th>
+                  <th className="min-w-[200px] px-2 py-2 font-medium">Description</th>
+                  <th className="w-24 px-2 py-2 font-medium">HSN/SAC</th>
+                  <th className="w-20 px-2 py-2 font-medium">Asset</th>
+                  <th className="w-20 px-2 py-2 font-medium">Qty</th>
+                  <th className="w-24 px-2 py-2 font-medium">Rate</th>
+                  {lockSourceFields ? null : (
+                    <th className="w-16 px-2 py-2 font-medium"> </th>
+                  )}
+                </tr>
+              </thead>
               <tbody>
-                {taxSummary.rows.map((row) => (
-                  <tr
-                    key={row.label}
-                    className="border-b border-border/70 last:border-b-0"
-                  >
-                    <td
-                      className={cn(
-                        "px-3 py-2 text-foreground",
-                        row.emphasis && "font-semibold",
+                {lines.map((row, index) => (
+                  <tr key={row.id} className="border-b border-border/70 align-top">
+                    <td className="px-2 py-2 tabular-nums text-muted-foreground">{index + 1}</td>
+                    <td className="px-2 py-2">
+                      {fromInventory && isNew && !lockSourceFields ? (
+                        <FinanceSelect
+                          value={row.product}
+                          onChange={(e) => applyInventoryProductToLine(row.id, e.target.value)}
+                          className="h-8 min-w-[240px]"
+                          aria-label={`Inventory product for line ${index + 1}`}
+                          disabled={isLocked || isOvfPrefilledLines}
+                        >
+                          <option value="">Select inventory item…</option>
+                          {inventoryProductOptions.map((opt) => (
+                            <option key={opt.name} value={opt.name}>
+                              {opt.name}
+                              {opt.availableQty > 0 ? ` (${opt.availableQty} avail.)` : ""}
+                            </option>
+                          ))}
+                          {row.product &&
+                            !inventoryProductOptions.some((opt) => opt.name === row.product) ? (
+                            <option value={row.product}>{row.product}</option>
+                          ) : null}
+                        </FinanceSelect>
+                      ) : (
+                        <Input
+                          value={row.product}
+                          onChange={
+                            lockSourceFields
+                              ? undefined
+                              : (e) => setLineField(row.id, "product", e.target.value)
+                          }
+                          readOnly={lockSourceFields}
+                          className={cn(
+                            "min-w-[240px]",
+                            lockSourceFields ? READ_ONLY_INPUT : "h-8",
+                          )}
+                          placeholder="Product name"
+                          title={row.product || undefined}
+                        />
                       )}
-                    >
-                      {row.rateLabel ? `${row.label} (${row.rateLabel})` : row.label}
                     </td>
-                    <td
-                      className={cn(
-                        "px-3 py-2 text-right tabular-nums",
-                        row.emphasis && "font-semibold",
-                      )}
-                    >
-                      {row.amount}
+                    <td className="px-2 py-2">
+                      <Input
+                        value={row.itemName}
+                        onChange={
+                          lockSourceFields
+                            ? undefined
+                            : (e) => setLineField(row.id, "itemName", e.target.value)
+                        }
+                        readOnly={lockSourceFields}
+                        className={cn(
+                          "min-w-[180px]",
+                          lockSourceFields ? READ_ONLY_INPUT : "h-8",
+                        )}
+                        placeholder="Description"
+                        title={row.itemName || undefined}
+                      />
                     </td>
+                    <td className="px-2 py-2">
+                      <Input
+                        value={row.hsnSac}
+                        onChange={
+                          lockSourceFields
+                            ? undefined
+                            : (e) => setLineField(row.id, "hsnSac", e.target.value)
+                        }
+                        readOnly={lockSourceFields}
+                        className={lockSourceFields ? READ_ONLY_INPUT : "h-8"}
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <Input
+                        value={row.assetNo}
+                        onChange={
+                          lockSourceFields
+                            ? undefined
+                            : (e) => setLineField(row.id, "assetNo", e.target.value)
+                        }
+                        readOnly={lockSourceFields}
+                        className={lockSourceFields ? READ_ONLY_INPUT : "h-8"}
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        step="any"
+                        value={row.quantitySent}
+                        onChange={
+                          lockSourceFields
+                            ? undefined
+                            : (e) => setLineField(row.id, "quantitySent", e.target.value)
+                        }
+                        readOnly={lockSourceFields}
+                        className={cn(
+                          NO_SPINNER,
+                          lockSourceFields ? READ_ONLY_INPUT : "h-8",
+                        )}
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        step="any"
+                        value={row.rate}
+                        onChange={
+                          lockSourceFields
+                            ? undefined
+                            : (e) => setLineField(row.id, "rate", e.target.value)
+                        }
+                        readOnly={lockSourceFields}
+                        className={cn(
+                          NO_SPINNER,
+                          lockSourceFields ? READ_ONLY_INPUT : "h-8",
+                        )}
+                      />
+                    </td>
+                    {lockSourceFields ? null : (
+                      <td className="px-2 py-2">
+                        <button
+                          type="button"
+                          aria-label="Remove line"
+                          title="Remove"
+                          className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-destructive transition-colors duration-200 hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() => removeLine(row.id)}
+                          disabled={isOvfPrefilledLines}
+                        >
+                          <Trash2 className="size-4" aria-hidden />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
-      </DeliverySectionCard>
+          {lockSourceFields ? null : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2 h-7 cursor-pointer px-2 text-xs"
+              onClick={addLine}
+              disabled={isOvfPrefilledLines}
+            >
+              Add item
+            </Button>
+          )}
 
-      <DeliverySectionCard title="Transport" icon={Truck}>
-        <fieldset className="mb-4 space-y-2">
-          <legend className="text-xs font-medium text-muted-foreground">Mode of delivery</legend>
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-6">
-            <label className="flex cursor-pointer items-start gap-2 text-sm">
-              <input
-                type="radio"
-                name="challan-delivery-mode"
-                className="mt-0.5 size-4 cursor-pointer accent-primary"
-                checked={deliveryMode === "NRGP"}
-                onChange={() => setDeliveryMode("NRGP")}
-              />
-              <span>
-                <span className="font-medium text-foreground">NRGP</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  Non-returnable gate pass
-                </span>
-              </span>
-            </label>
-            <label className="flex cursor-pointer items-start gap-2 text-sm">
-              <input
-                type="radio"
-                name="challan-delivery-mode"
-                className="mt-0.5 size-4 cursor-pointer accent-primary"
-                checked={deliveryMode === "RGP"}
-                onChange={() => setDeliveryMode("RGP")}
-              />
-              <span>
-                <span className="font-medium text-foreground">RGP</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  Returnable gate pass
-                </span>
-              </span>
-            </label>
+          <div className="mt-4 flex justify-end">
+            <div className="w-full max-w-md overflow-hidden rounded-md border border-border text-sm">
+              <table className="w-full">
+                <tbody>
+                  {taxSummary.rows.map((row) => (
+                    <tr
+                      key={row.label}
+                      className="border-b border-border/70 last:border-b-0"
+                    >
+                      <td
+                        className={cn(
+                          "px-3 py-2 text-foreground",
+                          row.emphasis && "font-semibold",
+                        )}
+                      >
+                        {row.rateLabel ? `${row.label} (${row.rateLabel})` : row.label}
+                      </td>
+                      <td
+                        className={cn(
+                          "px-3 py-2 text-right tabular-nums",
+                          row.emphasis && "font-semibold",
+                        )}
+                      >
+                        {row.amount}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </fieldset>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <FinanceField label="Transport details">
-            <FinanceTextarea
-              value={transportDetails}
-              onChange={(e) => setTransportDetails(e.target.value)}
-              rows={3}
-            />
-          </FinanceField>
-          <FinanceField label="Driver / vehicle details">
-            <FinanceTextarea
-              value={driverVehicleDetails}
-              onChange={(e) => setDriverVehicleDetails(e.target.value)}
-              rows={3}
-            />
-          </FinanceField>
-        </div>
-      </DeliverySectionCard>
+        </DeliverySectionCard>
 
-      <DeliverySectionCard title="Signatures" icon={PenLine}>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <FinanceField label="Signature of sender">
-            <FinanceTextarea
-              value={senderSignature}
-              onChange={(e) => setSenderSignature(e.target.value)}
-              rows={2}
-            />
-          </FinanceField>
-          <FinanceField label="Signature of receiver">
-            <FinanceTextarea
-              value={receiverSignature}
-              onChange={(e) => setReceiverSignature(e.target.value)}
-              rows={2}
-            />
-          </FinanceField>
-        </div>
-      </DeliverySectionCard>
+        <DeliverySectionCard title="Transport" icon={Truck}>
+          <fieldset className="mb-4 space-y-2">
+            <legend className="text-xs font-medium text-muted-foreground">Mode of delivery</legend>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-6">
+              <label className="flex cursor-pointer items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="challan-delivery-mode"
+                  className="mt-0.5 size-4 cursor-pointer accent-primary"
+                  checked={deliveryMode === "NRGP"}
+                  onChange={() => setDeliveryMode("NRGP")}
+                />
+                <span>
+                  <span className="font-medium text-foreground">NRGP</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Non-returnable gate pass
+                  </span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="challan-delivery-mode"
+                  className="mt-0.5 size-4 cursor-pointer accent-primary"
+                  checked={deliveryMode === "RGP"}
+                  onChange={() => setDeliveryMode("RGP")}
+                />
+                <span>
+                  <span className="font-medium text-foreground">RGP</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Returnable gate pass
+                  </span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FinanceField label="Transport details">
+              <FinanceTextarea
+                value={transportDetails}
+                onChange={(e) => setTransportDetails(e.target.value)}
+                rows={3}
+              />
+            </FinanceField>
+            <FinanceField label="Driver / vehicle details">
+              <FinanceTextarea
+                value={driverVehicleDetails}
+                onChange={(e) => setDriverVehicleDetails(e.target.value)}
+                rows={3}
+              />
+            </FinanceField>
+          </div>
+        </DeliverySectionCard>
+
+        <DeliverySectionCard title="Signatures" icon={PenLine}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FinanceField label="Signature of sender">
+              <FinanceTextarea
+                value={senderSignature}
+                onChange={(e) => setSenderSignature(e.target.value)}
+                rows={2}
+              />
+            </FinanceField>
+            <FinanceField label="Signature of receiver">
+              <FinanceTextarea
+                value={receiverSignature}
+                onChange={(e) => setReceiverSignature(e.target.value)}
+                rows={2}
+              />
+            </FinanceField>
+          </div>
+        </DeliverySectionCard>
       </fieldset>
 
       <div className="border-t border-border/60 pt-4">{footerActions}</div>

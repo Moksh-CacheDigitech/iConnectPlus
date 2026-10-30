@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { CircleDot, Eye, FileSpreadsheet, PackageCheck, RefreshCw } from "lucide-react";
 
 import { FinanceKpiCard } from "@/components/finance/finance-kpi-card";
@@ -62,9 +61,9 @@ function buildGrnPdfContext(row: ScmVendorPo, vendor?: VendorOption): GrnReceipt
   const vendorAddressRaw = vendorEntry?.address || vendor?.address || "";
   const vendorAddressLines = vendorAddressRaw.includes("\n")
     ? vendorAddressRaw
-        .split(/\r?\n/)
-        .map((part) => part.trim())
-        .filter(Boolean)
+      .split(/\r?\n/)
+      .map((part) => part.trim())
+      .filter(Boolean)
     : vendorAddressRaw.trim()
       ? [vendorAddressRaw.trim()]
       : [];
@@ -84,7 +83,6 @@ function grnReceiptRowsFromVendorPos(pos: ScmVendorPo[]): ScmVendorPo[] {
 }
 
 export function GrnsListPage() {
-  const router = useRouter();
   const cachedPosOnMount = peekVendorPosFromCache();
   const initialGrnRows = cachedPosOnMount ? grnReceiptRowsFromVendorPos(cachedPosOnMount) : [];
   const [rows, setRows] = useState<ScmVendorPo[]>(() => initialGrnRows);
@@ -126,7 +124,7 @@ export function GrnsListPage() {
         /sign in|session expired|unauthorized|missing authentication/i.test(message)
           ? ""
           : /failed to fetch|network|load failed|unreachable|web page instead/i.test(message) ||
-              message === "Failed to load GRN status"
+            message === "Failed to load GRN status"
             ? " Start the API on port 8000 and sign in, then refresh."
             : "";
       setError(`${message}${hint}`);
@@ -261,11 +259,10 @@ export function GrnsListPage() {
               key={key}
               type="button"
               onClick={() => setFilter(key)}
-              className={`cursor-pointer rounded-md border px-2.5 py-1 text-xs font-medium transition-colors duration-200 ${
-                filter === key
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-card text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-              }`}
+              className={`cursor-pointer rounded-md border px-2.5 py-1 text-xs font-medium transition-colors duration-200 ${filter === key
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-card text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                }`}
             >
               {key === "all" ? "All" : key === "closed" ? "Delivered" : "Partial"}
             </button>
@@ -331,16 +328,8 @@ export function GrnsListPage() {
                   Number(row.margin_amount) ||
                   (customerAmt > 0 ? customerAmt - vendorAmt : 0);
                 const grnLabel = formatGrnStatusBadgeLabel(row.grn_status);
-                const orderHref = `/procurement/orders/${row.id}?tab=grn&from=grns`;
                 return (
-                  <tr
-                    key={row.id}
-                    className={cn(
-                      "border-b border-border/70 cursor-pointer transition-colors duration-150",
-                      "hover:bg-muted/40 active:bg-muted/55",
-                    )}
-                    onClick={() => router.push(orderHref)}
-                  >
+                  <tr key={row.id} className="border-b border-border/70">
                     <td className="px-3 py-2 font-medium tabular-nums">
                       {row.company_po_number || row.document_number || "-"}
                     </td>
@@ -361,9 +350,14 @@ export function GrnsListPage() {
                       </Badge>
                     </td>
                     <td className="px-3 py-2 tabular-nums text-muted-foreground">
-                      {receivedQty} / {orderedQty}
+                      <div>{receivedQty} / {orderedQty}</div>
+                      {row.current_grn_number ? (
+                        <div className="text-[11px] text-muted-foreground/80">
+                          Latest {row.current_grn_number}
+                        </div>
+                      ) : null}
                     </td>
-                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-3 py-2">
                       <div className="flex justify-center">
                         <Button
                           type="button"

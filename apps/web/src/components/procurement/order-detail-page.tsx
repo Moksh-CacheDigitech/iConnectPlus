@@ -6,15 +6,13 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Eye,
   FileDown,
-  PackageCheck,
   RefreshCw,
 } from "lucide-react";
 
 import { DeliveryChallanFormPage } from "@/components/procurement/delivery-challan-form-page";
 import { GrnPdfPickDialog } from "@/components/procurement/grn-pdf-pick-dialog";
-import { DeliveryTrackingCard } from "@/components/procurement/delivery-tracking-card";
 import { NegotiationApprovalCard } from "@/components/procurement/negotiation-approval-card";
-import { PoFulfillmentCharts } from "@/components/procurement/po-fulfillment-charts";
+import { PoFulfillmentPanel } from "@/components/procurement/po-fulfillment-panel";
 import {
   ReceiptSerialsDialog,
   type ReceiptSerialDialogLine,
@@ -38,6 +36,7 @@ import {
   formatInr,
   formatUsd,
   getPurchaseOrder,
+  getScmOrderFulfillment,
   listOrderReceiptBatches,
   listVendorOptions,
   requestScmFinalizeApproval,
@@ -46,6 +45,7 @@ import {
   createInvoiceGenerationTasks,
   type ProcOrder,
   type ScmReceiptBatch,
+  type ScmVendorDispatch,
 } from "@/services/procurement-service";
 import type { GrnReceiptPdfContext } from "@/utils/grn-batch-pdf-download";
 import { resolveReceiptBatchId } from "@/utils/resolve-receipt-batch-id";
@@ -328,12 +328,18 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
     setViewMode(searchParams.get("tab") === "grn" ? "grn" : "po");
   }, [searchParams]);
 
+  const activeDispatchId = (searchParams.get("dispatch") || "").trim() || null;
+  const [activeDispatch, setActiveDispatch] = useState<ScmVendorDispatch | null>(null);
+
   const setPoView = useCallback(
     (next: PoDetailView) => {
       setViewMode(next);
       const params = new URLSearchParams(searchParams.toString());
       if (next === "grn") params.set("tab", "grn");
-      else params.delete("tab");
+      else {
+        params.delete("tab");
+        params.delete("dispatch");
+      }
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
@@ -550,6 +556,7 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
           billing: item.billingQuantity > 0,
           billing_quantity: item.billingQuantity,
           delivery_challan_quantity: item.deliveryChallanQuantity,
+          vendor_dispatch_id: activeDispatchId,
         });
       }
       const refreshed = await loadOrderWithCommercial(latest.id);
@@ -686,12 +693,18 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
     if (!order) return { ok: false, message: "Purchase order not loaded." };
 
     const lines: ReceiptSerialDialogLine[] = [];
-    for (const line of order.lines || []) {
+    const sourceLines =
+      showGrnWorkspace && activeDispatchId ? orderLinesForGrn : order.lines || [];
+    for (const line of sourceLines) {
       const orderedQty = Number(line.quantity) || 0;
       const savedReceived = Number(line.quantity_received ?? 0);
       if (isReceiptLocked(orderedQty, savedReceived)) continue;
 
-      const remaining = Math.max(0, orderedQty - savedReceived);
+      const orderRemaining = Math.max(0, orderedQty - savedReceived);
+      const waveRemaining = activeDispatchId
+        ? waveRemainingByLineId.get(line.id) ?? 0
+        : orderRemaining;
+      const remaining = Math.min(orderRemaining, waveRemaining);
       const raw = (qtyDraft[line.id] ?? "").trim();
       if (raw === "" || raw === ".") continue;
 
@@ -711,7 +724,12 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
           ...prev,
           [line.id]: formatCostDraftValue(Number(line.unit_cost) || 0),
         }));
-        return { ok: false, message: `You can receive at most ${remaining} more for ${label}.` };
+        return {
+          ok: false,
+          message: activeDispatchId
+            ? `This dispatch wave allows at most ${remaining} more for ${label}.`
+            : `You can receive at most ${remaining} more for ${label}.`,
+        };
       }
 
       lines.push({
@@ -787,32 +805,28 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
   const negotiationApplies = Boolean(
     order && order.status === "draft" && order.source_module === "crm",
   );
-  // Delivery correspondence only matters once the PO is live with the distributor.
-  const deliveryTrackingApplies = Boolean(
+  // Fulfillment wizard only matters once the CRM PO is live with the distributor.
+  const fulfillmentApplies = Boolean(
     order &&
-      order.source_module === "crm" &&
-      !["draft", "submitted", "cancelled"].includes((order.status || "").toLowerCase()),
+    order.source_module === "crm" &&
+    !["draft", "submitted", "cancelled"].includes((order.status || "").toLowerCase()),
   );
-  /** Any prior receipt means acknowledgement was already satisfied for this PO. */
-  const hasStartedGrn = Boolean(
-    order &&
-      ((order.lines || []).some((ln) => Number(ln.quantity_received ?? 0) > 1e-9) ||
-        Number(order.received_amount ?? 0) > 1e-9 ||
-        receiptBatches.some((batch) =>
-          (batch.lines || []).some((ln) => Number(ln.quantity) > 1e-9),
-        )),
-  );
-  /**
-   * CRM POs: ask for acknowledgement only once before the first GRN.
-   * After ack is sent — or GRN has already started — do not block again.
-   */
-  const deliveryAckRequired =
-    deliveryTrackingApplies && !order?.customer_ack_sent_at && !hasStartedGrn;
-  /** GRN / receipt / challan only after issue (+ delivery ack for CRM POs). */
+  const GRN_UNLOCK_STAGES = new Set([
+    "vendor_dispatch_recorded",
+    "grn_in_stock",
+    "customer_delivery_ready",
+    "customer_dispatched",
+    "delivered",
+  ]);
+  /** CRM POs: GRN unlocks after customer order-processed mail + vendor dispatch. */
+  const fulfillmentBlocksGrn =
+    fulfillmentApplies &&
+    !GRN_UNLOCK_STAGES.has((order?.fulfillment_stage || "").toLowerCase());
+  /** GRN / receipt / challan only after issue (+ fulfillment gate for CRM POs). */
   const canReceipt = Boolean(
     order &&
-      !["draft", "submitted", "cancelled"].includes((order.status || "").toLowerCase()) &&
-      !deliveryAckRequired,
+    !["draft", "submitted", "cancelled"].includes((order.status || "").toLowerCase()) &&
+    !fulfillmentBlocksGrn,
   );
   const showGrnWorkspace = canReceipt && viewMode === "grn";
   const negotiationBlocksIssue =
@@ -839,6 +853,22 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
     rows.sort((a, b) => (Number(a.line_number) || 0) - (Number(b.line_number) || 0));
     return rows;
   }, [order?.lines]);
+  const waveRemainingByLineId = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!activeDispatch) return map;
+    for (const ln of activeDispatch.lines || []) {
+      map.set(
+        ln.order_line_id,
+        Math.max(0, Number(ln.grn_remaining_qty ?? ln.dispatch_qty) || 0),
+      );
+    }
+    return map;
+  }, [activeDispatch]);
+  const orderLinesForGrn = useMemo(() => {
+    if (!showGrnWorkspace || !activeDispatchId || !activeDispatch) return orderLines;
+    const allowed = new Set((activeDispatch.lines || []).map((ln) => ln.order_line_id));
+    return orderLines.filter((ln) => allowed.has(ln.id));
+  }, [orderLines, showGrnWorkspace, activeDispatchId, activeDispatch]);
   const allLinesDelivered =
     lineCount > 0 &&
     orderLines.every((ln) =>
@@ -846,6 +876,28 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
     );
   /** Hide receive / GRN columns until the PO is issued and user opens GRN workspace. */
   const showReceiptColumns = showGrnWorkspace && !allLinesDelivered;
+
+  useEffect(() => {
+    if (!showGrnWorkspace || !activeDispatchId || !orderId) {
+      setActiveDispatch(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const fulfillment = await getScmOrderFulfillment(orderId);
+        if (cancelled) return;
+        const wave =
+          (fulfillment.dispatches || []).find((d) => d.id === activeDispatchId) || null;
+        setActiveDispatch(wave);
+      } catch {
+        if (!cancelled) setActiveDispatch(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showGrnWorkspace, activeDispatchId, orderId, order?.version, receiptBatches]);
 
   useEffect(() => {
     // Wait until the PO has loaded - otherwise tab=grn is cleared while order is still null.
@@ -940,9 +992,9 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
     if (!order) return null;
     const vendorAddressLines = vendorAddress.includes("\n")
       ? vendorAddress
-          .split(/\r?\n/)
-          .map((part) => part.trim())
-          .filter(Boolean)
+        .split(/\r?\n/)
+        .map((part) => part.trim())
+        .filter(Boolean)
       : vendorAddress.trim()
         ? [vendorAddress.trim()]
         : [];
@@ -977,9 +1029,9 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
             ? { backHref: "/procurement/grns", backLabel: "GRNs" }
             : showGrnWorkspace
               ? {
-                  onBack: () => setPoView("po"),
-                  backLabel: "Purchase order",
-                }
+                onBack: () => setPoView("po"),
+                backLabel: "Purchase order",
+              }
               : backToScm
                 ? { backHref: "/procurement/scm", backLabel: "SCM queue" }
                 : backToGrns
@@ -988,9 +1040,16 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
         title={
           challanOpen
             ? "Create delivery challan"
-            : order
-              ? order.company_po_number?.trim() || order.document_number
-              : "Purchase order"
+            : showGrnWorkspace && activeDispatch
+              ? `GRN · Dispatch wave #${activeDispatch.sequence}`
+              : order
+                ? order.company_po_number?.trim() || order.document_number
+                : "Purchase order"
+        }
+        description={
+          showGrnWorkspace && activeDispatch
+            ? `Receive only this wave (${Number(activeDispatch.grn_received_qty || 0)} / ${Number(activeDispatch.grn_dispatch_qty || 0)}). DC ${activeDispatch.dc_number || "—"} · Inv ${activeDispatch.invoice_number || "—"}.`
+            : undefined
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -1016,30 +1075,6 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
               >
                 <FileDown className="mr-1.5 size-3.5" />
                 {pdfBusy ? "Preparing…" : "Download PO PDF"}
-              </Button>
-            ) : null}
-            {canReceipt && !challanOpen && !showGrnWorkspace ? (
-              <Button
-                type="button"
-                size="sm"
-                className="cursor-pointer transition-colors duration-200"
-                onClick={() => setPoView("grn")}
-              >
-                <PackageCheck className="mr-1.5 size-3.5" />
-                Record GRN
-              </Button>
-            ) : null}
-            {deliveryAckRequired && !challanOpen && !showGrnWorkspace ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled
-                title="Send Delivery Tracking acknowledgement first"
-                className="cursor-not-allowed transition-colors duration-200"
-              >
-                <PackageCheck className="mr-1.5 size-3.5" />
-                Record GRN (send ack first)
               </Button>
             ) : null}
             {canFinalize && !showGrnWorkspace ? (
@@ -1182,12 +1217,10 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
                 onDecided={() => void load()}
               />
 
-              {deliveryTrackingApplies ? (
-                <DeliveryTrackingCard
+              {fulfillmentApplies ? (
+                <PoFulfillmentPanel
                   order={order}
                   isAdmin={isAdmin}
-                  grnStarted={hasStartedGrn}
-                  lockGrnUntilAck={deliveryAckRequired}
                   onSaved={() => void load()}
                 />
               ) : null}
@@ -1321,13 +1354,6 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
                 </div>
               </div>
 
-              <PoFulfillmentCharts
-                poLabel={order.company_po_number?.trim() || order.document_number}
-                lines={orderLines}
-                batches={receiptBatches}
-                loading={loading}
-              />
-
               <PoOrderDocumentsCard
                 orderId={order.id}
                 branchId={order.branch_id}
@@ -1335,287 +1361,287 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
                 receiptBatches={receiptBatches}
                 allowUpload={(order.status || "").toLowerCase() !== "cancelled"}
                 onChanged={() => {
-                  void listOrderReceiptBatches(orderId).then(setReceiptBatches).catch(() => {});
+                  void listOrderReceiptBatches(orderId).then(setReceiptBatches).catch(() => { });
                 }}
               />
             </>
           ) : (
-          <>
-          {savedChallans.length > 0 ? (
-            <div className="overflow-hidden rounded-lg border border-border bg-card">
-              <div className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Delivery challans ({savedChallans.length})
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[520px] text-left text-sm">
-                  <thead className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
-                    <tr>
-                      <th className="px-3 py-2 font-medium">Challan no.</th>
-                      <th className="px-3 py-2 font-medium">Date</th>
-                      <th className="px-3 py-2 font-medium">GRN</th>
-                      <th className="px-3 py-2 font-medium">Status</th>
-                      <th className="px-3 py-2 font-medium">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {savedChallans.map((challan) => {
-                      const statusLabel =
-                        getDeliveryStatus(challan.id)?.shipmentStatus || "Pending dispatch";
-                      return (
-                      <tr key={challan.id} className="border-b border-border/70 last:border-0">
-                        <td className="px-3 py-2 font-medium tabular-nums">{challan.challanNumber}</td>
-                        <td className="px-3 py-2 tabular-nums">{challan.challanDate}</td>
-                        <td className="px-3 py-2 font-medium tabular-nums">
-                          {formatChallanGrnSummary(challan)}
-                        </td>
-                        <td className="px-3 py-2">
-                          <Badge
-                            variant={shipmentStatusBadgeVariant(statusLabel)}
-                            className="text-[10px] uppercase tracking-wide"
-                          >
-                            {statusLabel}
-                          </Badge>
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex flex-wrap gap-1.5">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-7 cursor-pointer px-2 text-xs transition-colors duration-200"
-                              disabled={challanPdfBusyId === challan.id}
-                              onClick={() => void onDownloadChallanPdf(challan)}
-                            >
-                              <FileDown className="size-3.5" />
-                              PDF
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : null}
-          <div className="overflow-hidden rounded-lg border border-border bg-card">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
-              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Lines & receipt
-              </div>
-              {showReceiptColumns ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8 cursor-pointer transition-colors duration-200"
-                  disabled={savingReceipts || busy || !hasDraftReceiptQty}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    openReceiptSerialModal();
-                  }}
-                >
-                  Update
-                </Button>
+            <>
+              {savedChallans.length > 0 ? (
+                <div className="overflow-hidden rounded-lg border border-border bg-card">
+                  <div className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Delivery challans ({savedChallans.length})
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[520px] text-left text-sm">
+                      <thead className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2 font-medium">Challan no.</th>
+                          <th className="px-3 py-2 font-medium">Date</th>
+                          <th className="px-3 py-2 font-medium">GRN</th>
+                          <th className="px-3 py-2 font-medium">Status</th>
+                          <th className="px-3 py-2 font-medium">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {savedChallans.map((challan) => {
+                          const statusLabel =
+                            getDeliveryStatus(challan.id)?.shipmentStatus || "Pending dispatch";
+                          return (
+                            <tr key={challan.id} className="border-b border-border/70 last:border-0">
+                              <td className="px-3 py-2 font-medium tabular-nums">{challan.challanNumber}</td>
+                              <td className="px-3 py-2 tabular-nums">{challan.challanDate}</td>
+                              <td className="px-3 py-2 font-medium tabular-nums">
+                                {formatChallanGrnSummary(challan)}
+                              </td>
+                              <td className="px-3 py-2">
+                                <Badge
+                                  variant={shipmentStatusBadgeVariant(statusLabel)}
+                                  className="text-[10px] uppercase tracking-wide"
+                                >
+                                  {statusLabel}
+                                </Badge>
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex flex-wrap gap-1.5">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 cursor-pointer px-2 text-xs transition-colors duration-200"
+                                    disabled={challanPdfBusyId === challan.id}
+                                    onClick={() => void onDownloadChallanPdf(challan)}
+                                  >
+                                    <FileDown className="size-3.5" />
+                                    PDF
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               ) : null}
-            </div>
-            <div className="overflow-x-auto">
-              <table className={cn("w-full text-left text-sm", tableMinWidth)}>
-                <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2 font-bold">S No.</th>
-                    <th className="px-3 py-2 font-bold">Product</th>
-                    <th className="px-3 py-2 font-bold">Description</th>
-                    <th className="px-3 py-2 font-bold">HSN/SAC</th>
-                    <th className="px-3 py-2 font-bold">Ordered</th>
-                    <th className="px-3 py-2 text-center font-bold">GRN qty</th>
-                    {showReceiptColumns ? (
-                      <th className="px-3 py-2 font-bold">Remaining</th>
-                    ) : null}
-                    <th className="px-3 py-2 font-bold">Unit cost</th>
-                    <th className="px-3 py-2 font-bold">Status</th>
-                    <th className="px-3 py-2 text-center font-bold">GRN details</th>
-                    <th className="px-3 py-2 text-center font-bold">PO PDF</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orderLines.map((ln, index) => {
-                    const orderedQty = Number(ln.quantity) || 0;
-                    const savedReceived = Number(ln.quantity_received ?? 0);
-                    const remainingSaved = Math.max(0, orderedQty - savedReceived);
-                    const locked = isReceiptLocked(orderedQty, savedReceived);
-                    const additional = Number(qtyDraft[ln.id] || 0);
-                    const remainingAfterDraft = Math.max(
-                      0,
-                      remainingSaved - (Number.isFinite(additional) ? additional : 0),
-                    );
-                    const projectedReceived = Math.min(
-                      orderedQty,
-                      savedReceived + (Number.isFinite(additional) ? additional : 0),
-                    );
-                    const status = receiptStatusFromQty(orderedQty, projectedReceived);
-                    const fields = splitPoProductFields(ln);
-
-                    return (
-                      <tr key={ln.id} className="border-b border-border/70 align-top">
-                        <td className="px-3 py-2 tabular-nums">{index + 1}</td>
-                        <td className="px-3 py-2 font-medium">
-                          {fields.productName || ln.product_code || "-"}
-                        </td>
-                        <td className="px-3 py-2 text-muted-foreground">
-                          {fields.description || "-"}
-                        </td>
-                        <td className="px-3 py-2 tabular-nums text-muted-foreground">
-                          {fields.hsnSac || "-"}
-                        </td>
-                        <td className="px-3 py-2 tabular-nums">{orderedQty}</td>
-                        <td className="px-3 py-2 text-center">
-                          {locked ? (
-                            <span className="font-medium tabular-nums">{savedReceived}</span>
-                          ) : (
-                            <Input
-                              className="mx-auto block h-8 w-24"
-                              type="text"
-                              inputMode="decimal"
-                              value={qtyDraft[ln.id] ?? ""}
-                              disabled={
-                                !showGrnWorkspace ||
-                                savingReceipts ||
-                                busy ||
-                                remainingSaved <= 0
-                              }
-                              onFocus={(e) => e.currentTarget.select()}
-                              onChange={(e) =>
-                                onQtyDraftChange(
-                                  ln.id,
-                                  e.target.value,
-                                  remainingSaved,
-                                  Number(ln.unit_cost) || 0,
-                                )
-                              }
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  openReceiptSerialModal();
-                                }
-                              }}
-                            />
-                          )}
-                        </td>
-                        {showReceiptColumns ? (
-                          <td className="px-3 py-2">
-                            {remainingAfterDraft > 0 ? (
-                              <span className="font-medium tabular-nums text-amber-700">
-                                {remainingAfterDraft}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">0</span>
-                            )}
-                          </td>
-                        ) : null}
-                        <td className="px-3 py-2">
-                          {locked || !showReceiptColumns ? (
-                            <span className="tabular-nums">
-                              {formatOrderLineMoney(ln.unit_cost, ln.rate_currency)}
-                            </span>
-                          ) : (
-                            <Input
-                              className="h-8 w-28 font-mono text-sm tabular-nums"
-                              type="text"
-                              inputMode="decimal"
-                              aria-label={`Unit cost for ${ln.product_name || ln.product_code || "line"}`}
-                              title={`Max ${formatOrderLineMoney(Number(ln.unit_cost) || 0, ln.rate_currency)} (PO unit cost)`}
-                              value={costDraft[ln.id] ?? ""}
-                              disabled={
-                                !showGrnWorkspace ||
-                                savingReceipts ||
-                                busy ||
-                                remainingSaved <= 0
-                              }
-                              onFocus={(e) => e.currentTarget.select()}
-                              onChange={(e) =>
-                                onCostDraftChange(
-                                  ln.id,
-                                  e.target.value,
-                                  remainingSaved,
-                                  Number(ln.unit_cost) || 0,
-                                )
-                              }
-                            />
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          <Badge variant={receiptBadgeVariant(status)} className="uppercase">
-                            {status}
-                          </Badge>
-                        </td>
-                        {index === 0 ? (
-                          <>
-                            <td
-                              rowSpan={Math.max(lineCount, 1)}
-                              className="border-l border-border/60 px-3 py-2 align-middle"
-                            >
-                              <div className="flex justify-center">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-8 w-8 cursor-pointer border-border p-0 text-[#0369A1] transition-colors duration-200 hover:bg-sky-50 hover:text-[#0369A1]"
-                                  disabled={!hasReceivedQty}
-                                  title="View GRN details"
-                                  aria-label="View GRN details"
-                                  onClick={() => setGrnPdfPickOpen(true)}
-                                >
-                                  <Eye className="size-4 stroke-[2]" />
-                                </Button>
-                              </div>
-                            </td>
-                            <td
-                              rowSpan={Math.max(lineCount, 1)}
-                              className="border-l border-border/60 px-3 py-2 align-middle"
-                            >
-                              <div className="flex justify-center">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-8 w-8 cursor-pointer border-border p-0 text-[#0369A1] transition-colors duration-200 hover:bg-sky-50 hover:text-[#0369A1]"
-                                  disabled={pdfBusy || lineCount === 0}
-                                  title="Download PO PDF"
-                                  aria-label="Download PO PDF"
-                                  onClick={() => void onDownloadPdf()}
-                                >
-                                  <FileDown className="size-4 stroke-[2]" />
-                                </Button>
-                              </div>
-                            </td>
-                          </>
-                        ) : null}
-                      </tr>
-                    );
-                  })}
-                  {lineCount === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={emptyColSpan}
-                        className="px-3 py-8 text-center text-muted-foreground"
-                      >
-                        No lines on this purchase order.
-                      </td>
-                    </tr>
+              <div className="overflow-hidden rounded-lg border border-border bg-card">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
+                  <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Lines & receipt
+                  </div>
+                  {showReceiptColumns ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 cursor-pointer transition-colors duration-200"
+                      disabled={savingReceipts || busy || !hasDraftReceiptQty}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openReceiptSerialModal();
+                      }}
+                    >
+                      Update
+                    </Button>
                   ) : null}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <PoFulfillmentCharts
-            poLabel={order.company_po_number?.trim() || order.document_number}
-            lines={orderLines}
-            batches={receiptBatches}
-            loading={loading}
-          />
-          </>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className={cn("w-full text-left text-sm", tableMinWidth)}>
+                    <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2 font-bold">S No.</th>
+                        <th className="px-3 py-2 font-bold">Product</th>
+                        <th className="px-3 py-2 font-bold">Description</th>
+                        <th className="px-3 py-2 font-bold">HSN/SAC</th>
+                        <th className="px-3 py-2 font-bold">Ordered</th>
+                        <th className="px-3 py-2 text-center font-bold">GRN qty</th>
+                        {showReceiptColumns ? (
+                          <th className="px-3 py-2 font-bold">Remaining</th>
+                        ) : null}
+                        <th className="px-3 py-2 font-bold">Unit cost</th>
+                        <th className="px-3 py-2 font-bold">Status</th>
+                        <th className="px-3 py-2 text-center font-bold">GRN details</th>
+                        <th className="px-3 py-2 text-center font-bold">PO PDF</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(showGrnWorkspace ? orderLinesForGrn : orderLines).map((ln, index) => {
+                        const orderedQty = Number(ln.quantity) || 0;
+                        const savedReceived = Number(ln.quantity_received ?? 0);
+                        const orderRemaining = Math.max(0, orderedQty - savedReceived);
+                        const waveCap = activeDispatchId
+                          ? waveRemainingByLineId.get(ln.id) ?? 0
+                          : orderRemaining;
+                        const remainingSaved = Math.min(orderRemaining, waveCap);
+                        const locked =
+                          isReceiptLocked(orderedQty, savedReceived) ||
+                          (Boolean(activeDispatchId) && remainingSaved <= 0);
+                        const additional = Number(qtyDraft[ln.id] || 0);
+                        const remainingAfterDraft = Math.max(
+                          0,
+                          remainingSaved - (Number.isFinite(additional) ? additional : 0),
+                        );
+                        const projectedReceived = Math.min(
+                          orderedQty,
+                          savedReceived + (Number.isFinite(additional) ? additional : 0),
+                        );
+                        const status = receiptStatusFromQty(orderedQty, projectedReceived);
+                        const fields = splitPoProductFields(ln);
+
+                        return (
+                          <tr key={ln.id} className="border-b border-border/70 align-top">
+                            <td className="px-3 py-2 tabular-nums">{index + 1}</td>
+                            <td className="px-3 py-2 font-medium">
+                              {fields.productName || ln.product_code || "-"}
+                            </td>
+                            <td className="px-3 py-2 text-muted-foreground">
+                              {fields.description || "-"}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                              {fields.hsnSac || "-"}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums">{orderedQty}</td>
+                            <td className="px-3 py-2 text-center">
+                              {locked ? (
+                                <span className="font-medium tabular-nums">{savedReceived}</span>
+                              ) : (
+                                <Input
+                                  className="mx-auto block h-8 w-24"
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={qtyDraft[ln.id] ?? ""}
+                                  disabled={
+                                    !showGrnWorkspace ||
+                                    savingReceipts ||
+                                    busy ||
+                                    remainingSaved <= 0
+                                  }
+                                  onFocus={(e) => e.currentTarget.select()}
+                                  onChange={(e) =>
+                                    onQtyDraftChange(
+                                      ln.id,
+                                      e.target.value,
+                                      remainingSaved,
+                                      Number(ln.unit_cost) || 0,
+                                    )
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      openReceiptSerialModal();
+                                    }
+                                  }}
+                                />
+                              )}
+                            </td>
+                            {showReceiptColumns ? (
+                              <td className="px-3 py-2">
+                                {remainingAfterDraft > 0 ? (
+                                  <span className="font-medium tabular-nums text-amber-700">
+                                    {remainingAfterDraft}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">0</span>
+                                )}
+                              </td>
+                            ) : null}
+                            <td className="px-3 py-2">
+                              {locked || !showReceiptColumns ? (
+                                <span className="tabular-nums">
+                                  {formatOrderLineMoney(ln.unit_cost, ln.rate_currency)}
+                                </span>
+                              ) : (
+                                <Input
+                                  className="h-8 w-28 font-mono text-sm tabular-nums"
+                                  type="text"
+                                  inputMode="decimal"
+                                  aria-label={`Unit cost for ${ln.product_name || ln.product_code || "line"}`}
+                                  title={`Max ${formatOrderLineMoney(Number(ln.unit_cost) || 0, ln.rate_currency)} (PO unit cost)`}
+                                  value={costDraft[ln.id] ?? ""}
+                                  disabled={
+                                    !showGrnWorkspace ||
+                                    savingReceipts ||
+                                    busy ||
+                                    remainingSaved <= 0
+                                  }
+                                  onFocus={(e) => e.currentTarget.select()}
+                                  onChange={(e) =>
+                                    onCostDraftChange(
+                                      ln.id,
+                                      e.target.value,
+                                      remainingSaved,
+                                      Number(ln.unit_cost) || 0,
+                                    )
+                                  }
+                                />
+                              )}
+                            </td>
+                            <td className="px-3 py-2">
+                              <Badge variant={receiptBadgeVariant(status)} className="uppercase">
+                                {status}
+                              </Badge>
+                            </td>
+                            {index === 0 ? (
+                              <>
+                                <td
+                                  rowSpan={Math.max(lineCount, 1)}
+                                  className="border-l border-border/60 px-3 py-2 align-middle"
+                                >
+                                  <div className="flex justify-center">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 w-8 cursor-pointer border-border p-0 text-[#0369A1] transition-colors duration-200 hover:bg-sky-50 hover:text-[#0369A1]"
+                                      disabled={!hasReceivedQty}
+                                      title="View GRN details"
+                                      aria-label="View GRN details"
+                                      onClick={() => setGrnPdfPickOpen(true)}
+                                    >
+                                      <Eye className="size-4 stroke-[2]" />
+                                    </Button>
+                                  </div>
+                                </td>
+                                <td
+                                  rowSpan={Math.max(lineCount, 1)}
+                                  className="border-l border-border/60 px-3 py-2 align-middle"
+                                >
+                                  <div className="flex justify-center">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 w-8 cursor-pointer border-border p-0 text-[#0369A1] transition-colors duration-200 hover:bg-sky-50 hover:text-[#0369A1]"
+                                      disabled={pdfBusy || lineCount === 0}
+                                      title="Download PO PDF"
+                                      aria-label="Download PO PDF"
+                                      onClick={() => void onDownloadPdf()}
+                                    >
+                                      <FileDown className="size-4 stroke-[2]" />
+                                    </Button>
+                                  </div>
+                                </td>
+                              </>
+                            ) : null}
+                          </tr>
+                        );
+                      })}
+                      {lineCount === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={emptyColSpan}
+                            className="px-3 py-8 text-center text-muted-foreground"
+                          >
+                            No lines on this purchase order.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
         </>
       ) : null}

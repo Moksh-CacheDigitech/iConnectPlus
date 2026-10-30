@@ -134,25 +134,31 @@ function projectRows(jobs: ProjectMyJob[]): PlatformMyJobRow[] {
 }
 
 function invoiceGenerationRows(tasks: ProcInvoiceGenerationTask[]): PlatformMyJobRow[] {
-  return tasks.map((task) => ({
-    id: `proc-inv-${task.id}`,
-    title: task.title || task.task_code,
-    reference:
-      [task.grn_number, task.purchase_order_number].filter(Boolean).join(" · ") ||
-      task.task_code,
-    detail:
-      [task.vendor_name, task.items_summary].filter(Boolean).join(" · ") ||
-      "Invoice generation",
-    status: task.status,
-    href: "/procurement/my-jobs",
-    openMode: "invoice_generation_dialog" as const,
-    invoiceTaskId: task.id,
-    orderId: task.order_header_id,
-    receiptBatchId: task.receipt_batch_id,
-    showPoDownload: true,
-    actionKind: "proc_invoice" as const,
-    approveLabel: "Complete invoice",
-  }));
+  return tasks.map((task) => {
+    const po = (task.purchase_order_number || "").trim();
+    const grn = (task.grn_number || "").trim();
+    // Prefer PO in the list title/reference — GRNs are secondary detail.
+    const title = po
+      ? `Invoice generation · ${po}`
+      : task.title || task.task_code;
+    return {
+      id: `proc-inv-${task.id}`,
+      title,
+      reference: [po, grn].filter(Boolean).join(" · ") || task.task_code,
+      detail:
+        [task.vendor_name, task.items_summary].filter(Boolean).join(" · ") ||
+        "Invoice generation",
+      status: task.status,
+      href: "/procurement/my-jobs",
+      openMode: "invoice_generation_dialog" as const,
+      invoiceTaskId: task.id,
+      orderId: task.order_header_id,
+      receiptBatchId: task.receipt_batch_id,
+      showPoDownload: true,
+      actionKind: "proc_invoice" as const,
+      approveLabel: "Generate invoice",
+    };
+  });
 }
 
 function finalizeApprovalRows(

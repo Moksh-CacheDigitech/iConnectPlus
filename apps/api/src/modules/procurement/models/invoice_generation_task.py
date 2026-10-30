@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Date, DateTime, Numeric, String, UniqueConstraint
+from sqlalchemy import Date, DateTime, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,15 +13,9 @@ from modules.procurement.models.mixins import ProcTransactionMixin
 
 class ProcInvoiceGenerationTask(Base, *ProcTransactionMixin):
     __tablename__ = "proc_invoice_generation_task"
-    __table_args__ = (
-        UniqueConstraint(
-            "tenant_id",
-            "receipt_batch_id",
-            "assigned_user_id",
-            name="uk_proc_igt_tenant_batch_assignee",
-        ),
-        {"schema": "procurement"},
-    )
+    # Active-row uniqueness is enforced by partial index
+    # uk_proc_igt_tenant_batch_assignee (WHERE is_deleted = false).
+    __table_args__ = ({"schema": "procurement"},)
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     task_code: Mapped[str] = mapped_column(String(50), nullable=False)

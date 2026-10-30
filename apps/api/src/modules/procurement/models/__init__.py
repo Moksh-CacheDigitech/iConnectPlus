@@ -31,6 +31,10 @@ from modules.procurement.models.vendor_quotation import (
     ProcVendorQuotationHeader,
     ProcVendorQuotationLine,
 )
+from modules.procurement.models.vendor_dispatch import (
+    ProcVendorDispatch,
+    ProcVendorDispatchLine,
+)
 
 __all__ = [
     "ProcApprovalStepOwner",
@@ -67,4 +71,6 @@ __all__ = [
     "ProcVendorComparison",
     "ProcVendorQuotationHeader",
     "ProcVendorQuotationLine",
+    "ProcVendorDispatch",
+    "ProcVendorDispatchLine",
 ]

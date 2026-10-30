@@ -216,12 +216,19 @@ export function InvoiceGenerationTaskDialog({
               id="invoice-generation-dialog-title"
               className="text-sm font-semibold tracking-tight text-foreground"
             >
-              {task?.title || "Invoice generation"}
+              {task?.purchase_order_number
+                ? `Invoice generation · ${task.purchase_order_number}`
+                : task?.title || "Invoice generation"}
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {[task?.grn_number, task?.purchase_order_number, task?.vendor_name]
+              {[
+                task?.purchase_order_number,
+                task?.grn_number,
+                task?.vendor_name,
+                task?.items_summary,
+              ]
                 .filter(Boolean)
-                .join(" · ") || "Fill invoice number and date. Qty/amount come from SCM Billing."}
+                .join(" · ") || "Fill invoice number and date. Qty/amount come from the billed selection."}
             </p>
           </div>
           <Button
@@ -286,7 +293,7 @@ export function InvoiceGenerationTaskDialog({
                     disabled
                     readOnly
                     value={formatScmQuantity(totals.qty)}
-                    title="Auto-fetched from SCM Billing GRN"
+                    title="From the billed selection / SCM Billing"
                     aria-describedby="inv-dialog-scm-hint"
                   />
                 </div>
@@ -306,7 +313,7 @@ export function InvoiceGenerationTaskDialog({
                 </div>
               </div>
               <p id="inv-dialog-scm-hint" className="text-[11px] text-muted-foreground">
-                Quantity and amount are auto-fetched from the SCM Billing GRN.
+                Quantity and amount come from the billed stock selection (or SCM Billing totals).
               </p>
 
               <div className="space-y-1.5">

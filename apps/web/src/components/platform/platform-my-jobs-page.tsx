@@ -99,7 +99,12 @@ export function PlatformMyJobsPage() {
     setPdfBusyKey(key);
     setPdfError(null);
     try {
-      await downloadInvoiceJobPoPdf(job.orderId);
+      // Admin / management PO approval: always Draft PO with watermark.
+      const approvalDownload =
+        job.actionKind === "proc_accept_po" || job.actionKind === "proc_issue_po";
+      await downloadInvoiceJobPoPdf(job.orderId, {
+        watermark: approvalDownload ? true : undefined,
+      });
     } catch (err) {
       setPdfError(
         err instanceof Error && err.message.trim()
@@ -324,7 +329,7 @@ export function PlatformMyJobsPage() {
               if (id) setInvoiceTaskId(id);
             }}
           >
-            {job.approveLabel || "Complete invoice"}
+            {job.approveLabel || "Generate invoice"}
           </Button>
         </div>
       );
@@ -524,8 +529,18 @@ export function PlatformMyJobsPage() {
                                       variant="outline"
                                       className="h-7 cursor-pointer gap-1 px-2 text-xs transition-colors duration-200"
                                       disabled={Boolean(pdfBusyKey)}
-                                      title="Download PO print PDF"
-                                      aria-label="Download PO print PDF"
+                                      title={
+                                        job.actionKind === "proc_accept_po" ||
+                                          job.actionKind === "proc_issue_po"
+                                          ? "Download Draft PO PDF with watermark"
+                                          : "Download PO print PDF"
+                                      }
+                                      aria-label={
+                                        job.actionKind === "proc_accept_po" ||
+                                          job.actionKind === "proc_issue_po"
+                                          ? "Download Draft PO PDF with watermark"
+                                          : "Download PO print PDF"
+                                      }
                                       onClick={() => void onDownloadPo(job)}
                                     >
                                       <FileDown className="size-3.5" aria-hidden />

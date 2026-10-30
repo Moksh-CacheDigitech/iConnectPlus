@@ -317,7 +317,8 @@ export function ProcurementApprovalsPage() {
     setDownloadingPoId(row.id);
     setError(null);
     try {
-      await downloadInvoiceJobPoPdf(row.orderId);
+      // Admin / management review: Draft PO with watermark until issued to vendor.
+      await downloadInvoiceJobPoPdf(row.orderId, { watermark: true });
     } catch (err) {
       setError(formatApiError(err, "Failed to download PO PDF"));
     } finally {
@@ -538,11 +539,11 @@ export function ProcurementApprovalsPage() {
                           {row.kind === "create_po_in_stock" ? "Open OVF" : "Open PO"}
                         </Link>
                         {row.kind === "finalize" &&
-                        !isOvfCreatePoApprovalOrderKey(row.orderId) ? (
+                          !isOvfCreatePoApprovalOrderKey(row.orderId) ? (
                           <button
                             type="button"
                             disabled={downloadingPoId === row.id}
-                            title="Download PO print PDF"
+                            title="Download Draft PO PDF with watermark"
                             onClick={(event) => void onDownloadPo(row, event)}
                             className={cn(
                               "inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground",

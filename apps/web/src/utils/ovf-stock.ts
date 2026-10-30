@@ -131,6 +131,30 @@ export function ovfGrnStockChallanHref(
   return `/procurement/delivery-challan/new?${params.toString()}`;
 }
 
+/** Billing / DC from PO GRN warehouse stock (fulfillment panel — no OVF required). */
+export function poGrnStockSourceKey(orderId: string, recordId?: string): string {
+  const base = `po-grn-stock:${orderId}`;
+  return recordId ? `${base}:${recordId}` : base;
+}
+
+export function poGrnStockChallanHref(
+  orderId: string,
+  kind: OvfShipDocumentKind = "delivery_challan",
+  returnTo?: string | null,
+  ovfId?: string | null,
+  batchKey?: string | null,
+): string {
+  const params = new URLSearchParams({
+    orderId,
+    source: "po_grn_stock",
+    kind,
+  });
+  if (returnTo?.trim()) params.set("returnTo", returnTo.trim());
+  if (ovfId?.trim()) params.set("ovfId", ovfId.trim());
+  if (batchKey?.trim()) params.set("batchKey", batchKey.trim());
+  return `/procurement/delivery-challan/new?${params.toString()}`;
+}
+
 export function ovfStockChallanHref(ovfId: string): string {
   return ovfChallanHref(ovfId, "inventory");
 }
@@ -465,11 +489,11 @@ export function bindOvfItemPlanRowsToPo(
   const next = rows.map((row) =>
     targets.has(row.id)
       ? {
-          ...row,
-          po_started: true,
-          linked_po_id: poId,
-          linked_po_label: label || poId,
-        }
+        ...row,
+        po_started: true,
+        linked_po_id: poId,
+        linked_po_label: label || poId,
+      }
       : row,
   );
   saveOvfItemPlanSplits(ovfId, next);
@@ -938,17 +962,34 @@ export type OvfInventoryShipLine = {
   detail: string | null;
   order_id?: string | null;
   stock_unit_id?: string | null;
+  /** All unit ids behind an aggregated product row (GRN stock). */
+  stock_unit_ids?: string[];
   serial_number?: string | null;
   grn_number?: string | null;
   unit_cost?: number;
 };
 
+/**
+ * GRN warehouse stock for linked PO(s), aggregated by product name so the
+ * picker shows one row + qty box (not one row per serial unit).
+ */
 export function buildGrnPoInventoryShipLines(
   inventory: ProcurementInventoryRow[],
   linkedOrderIds: string[],
 ): OvfInventoryShipLine[] {
   const orders = new Set(linkedOrderIds.filter(Boolean));
-  const lines: OvfInventoryShipLine[] = [];
+  type Agg = {
+    product_name: string;
+    order_id: string;
+    max_qty: number;
+    stock_unit_ids: string[];
+    serials: string[];
+    grns: string[];
+    po: string;
+    unit_cost: number;
+  };
+  const byKey = new Map<string, Agg>();
+
   for (const row of inventory) {
     if (row.source !== "grn") continue;
     if (!row.order_id || !orders.has(row.order_id)) continue;
@@ -956,34 +997,67 @@ export function buildGrnPoInventoryShipLines(
     if (qty <= 0) continue;
     const product = (row.product_name || "").trim();
     if (!product) continue;
+    const productKey = product.toLowerCase().replace(/\s+/g, " ");
+    const key = `${row.order_id}:${productKey}`;
     const serial = (row.serial_number || "").trim();
     const grn = (row.grn_number || "").trim();
     const po = (row.company_po_number || "").trim();
-    lines.push({
-      id:
-        row.stock_unit_id ||
-        `${row.order_id}:${row.line_number}:${row.unit_index}:${product}`,
-      source: "grn",
-      product_name: product,
-      max_qty: qty,
-      detail:
-        [
-          grn ? `GRN ${grn}` : null,
-          po ? `PO ${po}` : null,
-          serial && serial !== "-" && serial !== "-"
-            ? `Serial: ${serial}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" · ") || "In warehouse from PO GRN",
-      order_id: row.order_id,
-      stock_unit_id: row.stock_unit_id,
-      serial_number: serial,
-      grn_number: grn,
-      unit_cost: Number(row.unit_cost) || 0,
-    });
+    const unitId = (row.stock_unit_id || "").trim();
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.max_qty += qty;
+      if (unitId && !existing.stock_unit_ids.includes(unitId)) {
+        existing.stock_unit_ids.push(unitId);
+      }
+      if (serial && serial !== "-" && !existing.serials.includes(serial)) {
+        existing.serials.push(serial);
+      }
+      if (grn && !existing.grns.includes(grn)) existing.grns.push(grn);
+      if (!existing.po && po) existing.po = po;
+      if (!existing.unit_cost && Number(row.unit_cost) > 0) {
+        existing.unit_cost = Number(row.unit_cost) || 0;
+      }
+    } else {
+      byKey.set(key, {
+        product_name: product,
+        order_id: row.order_id,
+        max_qty: qty,
+        stock_unit_ids: unitId ? [unitId] : [],
+        serials: serial && serial !== "-" ? [serial] : [],
+        grns: grn ? [grn] : [],
+        po,
+        unit_cost: Number(row.unit_cost) || 0,
+      });
+    }
   }
-  return lines.sort((a, b) => a.product_name.localeCompare(b.product_name));
+
+  return Array.from(byKey.values())
+    .map((agg) => {
+      const grnLabel =
+        agg.grns.length === 0
+          ? null
+          : agg.grns.length === 1
+            ? `GRN ${agg.grns[0]}`
+            : `GRN ${agg.grns.join(", ")}`;
+      const qtyLabel = `${agg.max_qty} available`;
+      return {
+        id: `grn-agg:${agg.order_id}:${agg.product_name.toLowerCase().replace(/\s+/g, " ")}`,
+        source: "grn" as const,
+        product_name: agg.product_name,
+        max_qty: agg.max_qty,
+        detail:
+          [grnLabel, agg.po ? `PO ${agg.po}` : null, qtyLabel]
+            .filter(Boolean)
+            .join(" · ") || "In warehouse from PO GRN",
+        order_id: agg.order_id,
+        stock_unit_id: agg.stock_unit_ids[0] || null,
+        stock_unit_ids: agg.stock_unit_ids,
+        serial_number: null,
+        grn_number: agg.grns.join(", ") || null,
+        unit_cost: agg.unit_cost,
+      };
+    })
+    .sort((a, b) => a.product_name.localeCompare(b.product_name));
 }
 
 export function buildOvfBookedInventoryShipLines(
@@ -1025,8 +1099,90 @@ export type OvfInventoryShipSelection = {
   lines: OvfInventoryShipSelectionLine[];
 };
 
+export type PoGrnStockShipSelection = {
+  order_id: string;
+  lines: OvfInventoryShipSelectionLine[];
+};
+
 const OVF_INVENTORY_SHIP_SELECTION_KEY = (ovfId: string) =>
   `erp.scm.ovf-inventory-ship-selection:${ovfId}`;
+
+const PO_GRN_STOCK_SHIP_SELECTION_KEY = (orderId: string) =>
+  `erp.scm.po-grn-stock-ship-selection:${orderId}`;
+
+export function setPoGrnStockShipSelection(payload: PoGrnStockShipSelection): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(
+      PO_GRN_STOCK_SHIP_SELECTION_KEY(payload.order_id),
+      JSON.stringify(payload),
+    );
+  } catch {
+    /* ignore quota */
+  }
+}
+
+export function takePoGrnStockShipSelection(
+  orderId: string,
+): PoGrnStockShipSelection | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(PO_GRN_STOCK_SHIP_SELECTION_KEY(orderId));
+    window.sessionStorage.removeItem(PO_GRN_STOCK_SHIP_SELECTION_KEY(orderId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PoGrnStockShipSelection;
+    if (!parsed?.lines?.length) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+const PO_GRN_PENDING_SELECTION_KEY = (batchKey: string) =>
+  `erp.scm.po-grn-pending-selection:${batchKey}`;
+
+/** Persist selection with Billing/DC queue row so reopen from list keeps lines. */
+export function setPoGrnPendingShipSelection(
+  batchKey: string,
+  payload: PoGrnStockShipSelection,
+): void {
+  if (typeof window === "undefined" || !batchKey.trim()) return;
+  try {
+    window.sessionStorage.setItem(
+      PO_GRN_PENDING_SELECTION_KEY(batchKey.trim()),
+      JSON.stringify(payload),
+    );
+  } catch {
+    /* ignore quota */
+  }
+}
+
+/** Peek only — keep until Billing/DC form is saved so list reopen still works. */
+export function takePoGrnPendingShipSelection(
+  batchKey: string,
+): PoGrnStockShipSelection | null {
+  if (typeof window === "undefined" || !batchKey.trim()) return null;
+  try {
+    const raw = window.sessionStorage.getItem(
+      PO_GRN_PENDING_SELECTION_KEY(batchKey.trim()),
+    );
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PoGrnStockShipSelection;
+    if (!parsed?.lines?.length) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearPoGrnPendingShipSelection(batchKey: string): void {
+  if (typeof window === "undefined" || !batchKey.trim()) return;
+  try {
+    window.sessionStorage.removeItem(PO_GRN_PENDING_SELECTION_KEY(batchKey.trim()));
+  } catch {
+    /* ignore */
+  }
+}
 
 export function setOvfInventoryShipSelection(payload: OvfInventoryShipSelection): void {
   if (typeof window === "undefined") return;

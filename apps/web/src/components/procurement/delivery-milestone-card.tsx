@@ -85,6 +85,11 @@ export function DeliveryMilestoneCard({
           itemType: deliveryStatus?.itemType || "",
           docketNumber: awb.trim() || deliveryStatus?.docketNumber || "",
           podDocument: deliveryStatus?.podDocument ?? null,
+          transporterName: deliveryStatus?.transporterName || "",
+          lrGrNumber: deliveryStatus?.lrGrNumber || "",
+          customerTaxInvoiceDocument:
+            deliveryStatus?.customerTaxInvoiceDocument ?? null,
+          packingListDocument: deliveryStatus?.packingListDocument ?? null,
           boxCount: deliveryStatus?.boxCount || "",
           surfaceMode: deliveryStatus?.surfaceMode || "",
           remarks: note.trim() || deliveryStatus?.remarks || "",
@@ -96,6 +101,10 @@ export function DeliveryMilestoneCard({
           billDocument: deliveryStatus?.billDocument ?? null,
           billRemarks: deliveryStatus?.billRemarks || "",
           billedAt: deliveryStatus?.billedAt || "",
+          outForDeliveryEmailSentAt:
+            deliveryStatus?.outForDeliveryEmailSentAt || "",
+          outcomeEmailSentAt: deliveryStatus?.outcomeEmailSentAt || "",
+          outcomeEmailKind: deliveryStatus?.outcomeEmailKind || "",
         };
         const emailResult = await sendDeliveryDispatchNotification(challan, statusForEmail);
         if (!emailResult.ok) {
@@ -201,11 +210,10 @@ export function DeliveryMilestoneCard({
       </div>
       {message ? (
         <p
-          className={`mt-2 text-xs ${
-            message.tone === "ok"
+          className={`mt-2 text-xs ${message.tone === "ok"
               ? "text-emerald-700 dark:text-emerald-400"
               : "text-destructive"
-          }`}
+            }`}
         >
           {message.text}
         </p>

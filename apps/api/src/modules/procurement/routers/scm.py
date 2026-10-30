@@ -36,8 +36,16 @@ from modules.procurement.schemas import (
     ScmFinalizeApprovalRequest,
     ScmFinalizeApprovalResponse,
     ScmFinalizeRequest,
+    ScmCustomerDeliveryUpsertRequest,
+    ScmCustomerPodUploadRequest,
     ScmFulfillFromStockRequest,
     ScmFulfillFromStockResponse,
+    ScmFulfillmentCustomerMailRequest,
+    ScmFulfillmentSendToVendorRequest,
+    ScmFulfillmentStateResponse,
+    ScmFulfillmentVendorResponseRequest,
+    ScmVendorDispatchCreateRequest,
+    ScmInventoryConsumeUnitsRequest,
     ScmInventoryDescriptionUpdate,
     ScmInventoryImportRequest,
     ScmInventorySerialUpdate,
@@ -73,6 +81,7 @@ from modules.procurement.service.ovf_timeline_service import OvfTimelineService
 from modules.procurement.service.scm_delivery_notification_service import (
     ScmDeliveryNotificationService,
 )
+from modules.procurement.service.scm_fulfillment_service import ScmFulfillmentService
 from modules.procurement.service.scm_handoff_service import ScmHandoffService
 from shared.schemas import APIResponse
 
@@ -555,6 +564,188 @@ def dummy_send_scm_delivery_acknowledgement(
     return send_scm_delivery_acknowledgement(order_id, body, ctx, db)
 
 
+@scm_router.get(
+    "/orders/{order_id}/fulfillment",
+    response_model=APIResponse[ScmFulfillmentStateResponse],
+)
+def get_scm_order_fulfillment(
+    order_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmFulfillmentStateResponse]:
+    row = ScmFulfillmentService(db).get_fulfillment(ctx, order_id)
+    db.commit()
+    return APIResponse(
+        message="Fulfillment state retrieved",
+        data=ScmFulfillmentStateResponse.model_validate(row),
+    )
+
+
+@scm_router.post(
+    "/orders/{order_id}/fulfillment/send-to-vendor",
+    response_model=APIResponse[ScmFulfillmentStateResponse],
+)
+def send_scm_po_to_vendor(
+    order_id: UUID,
+    body: ScmFulfillmentSendToVendorRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmFulfillmentStateResponse]:
+    row = ScmFulfillmentService(db).send_to_vendor(
+        ctx,
+        order_id,
+        email=body.email,
+        po_pdf_base64=body.po_pdf_base64,
+        po_pdf_filename=body.po_pdf_filename,
+    )
+    db.commit()
+    return APIResponse(
+        message="Purchase order sent to vendor",
+        data=ScmFulfillmentStateResponse.model_validate(row),
+    )
+
+
+@scm_router.post(
+    "/orders/{order_id}/fulfillment/vendor-response",
+    response_model=APIResponse[ScmFulfillmentStateResponse],
+)
+def record_scm_vendor_response(
+    order_id: UUID,
+    body: ScmFulfillmentVendorResponseRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmFulfillmentStateResponse]:
+    row = ScmFulfillmentService(db).record_vendor_response(
+        ctx,
+        order_id,
+        status=body.status,
+        remark=body.remark,
+        expected_delivery_date=body.expected_delivery_date,
+    )
+    db.commit()
+    return APIResponse(
+        message=f"Vendor response recorded: {body.status}",
+        data=ScmFulfillmentStateResponse.model_validate(row),
+    )
+
+
+@scm_router.post(
+    "/orders/{order_id}/fulfillment/send-customer-order-processed",
+    response_model=APIResponse[ScmFulfillmentStateResponse],
+)
+def send_scm_customer_order_processed(
+    order_id: UUID,
+    body: ScmFulfillmentCustomerMailRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmFulfillmentStateResponse]:
+    row = ScmFulfillmentService(db).send_customer_order_processed(
+        ctx, order_id, email=body.email
+    )
+    db.commit()
+    return APIResponse(
+        message="Customer order-processed mail sent",
+        data=ScmFulfillmentStateResponse.model_validate(row),
+    )
+
+
+@scm_router.post(
+    "/orders/{order_id}/fulfillment/vendor-dispatches",
+    response_model=APIResponse[ScmFulfillmentStateResponse],
+)
+def create_scm_vendor_dispatch(
+    order_id: UUID,
+    body: ScmVendorDispatchCreateRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmFulfillmentStateResponse]:
+    row = ScmFulfillmentService(db).create_vendor_dispatch(
+        ctx,
+        order_id,
+        dc_number=body.dc_number,
+        invoice_number=body.invoice_number,
+        lr_awb_number=body.lr_awb_number,
+        dispatch_date=body.dispatch_date,
+        eway_notes=body.eway_notes,
+        transport_notes=body.transport_notes,
+        attachment_refs=body.attachment_refs,
+        lines=[ln.model_dump() for ln in body.lines],
+    )
+    db.commit()
+    return APIResponse(
+        message="Vendor dispatch recorded",
+        data=ScmFulfillmentStateResponse.model_validate(row),
+    )
+
+
+@scm_router.post(
+    "/orders/{order_id}/fulfillment/customer-delivery",
+    response_model=APIResponse[ScmFulfillmentStateResponse],
+)
+def upsert_scm_customer_delivery(
+    order_id: UUID,
+    body: ScmCustomerDeliveryUpsertRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmFulfillmentStateResponse]:
+    meta = body.model_dump(exclude={"mark_ready"}, exclude_none=True)
+    row = ScmFulfillmentService(db).upsert_customer_delivery(
+        ctx, order_id, meta=meta, mark_ready=body.mark_ready
+    )
+    db.commit()
+    return APIResponse(
+        message="Customer delivery details saved",
+        data=ScmFulfillmentStateResponse.model_validate(row),
+    )
+
+
+@scm_router.post(
+    "/orders/{order_id}/fulfillment/share-customer-dispatch",
+    response_model=APIResponse[ScmFulfillmentStateResponse],
+)
+def share_scm_customer_dispatch(
+    order_id: UUID,
+    body: ScmFulfillmentCustomerMailRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmFulfillmentStateResponse]:
+    row = ScmFulfillmentService(db).share_customer_dispatch(
+        ctx, order_id, email=body.email
+    )
+    db.commit()
+    return APIResponse(
+        message="Customer dispatch details shared",
+        data=ScmFulfillmentStateResponse.model_validate(row),
+    )
+
+
+@scm_router.post(
+    "/orders/{order_id}/fulfillment/customer-pod",
+    response_model=APIResponse[ScmFulfillmentStateResponse],
+)
+def upload_scm_customer_pod(
+    order_id: UUID,
+    body: ScmCustomerPodUploadRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmFulfillmentStateResponse]:
+    pod_ref = None
+    if body.pod_file_name or body.pod_content_base64:
+        pod_ref = {
+            "file_name": body.pod_file_name,
+            "content_base64": body.pod_content_base64,
+            "uploaded_at": None,
+        }
+    row = ScmFulfillmentService(db).upload_customer_pod(
+        ctx, order_id, pod_ref=pod_ref, note=body.note
+    )
+    db.commit()
+    return APIResponse(
+        message="Customer POD recorded",
+        data=ScmFulfillmentStateResponse.model_validate(row),
+    )
+
+
 @scm_router.post(
     "/delivery-notifications/run",
     response_model=APIResponse[ScmDeliveryNotificationRunResponse],
@@ -717,6 +908,9 @@ def create_invoice_generation_tasks(
         items_summary=body.items_summary,
         vendor_name=body.vendor_name,
         customer_name=body.customer_name,
+        grn_number=body.grn_number,
+        billing_quantity=body.billing_quantity,
+        billing_amount=body.billing_amount,
     )
     db.commit()
     return APIResponse(
@@ -766,6 +960,26 @@ def get_invoice_generation_task_for_batch(
             if row
             else None
         ),
+    )
+
+
+@scm_router.get(
+    "/invoice-generation-tasks/by-order/{order_id}",
+    response_model=APIResponse[list[ProcInvoiceGenerationTaskResponse]],
+)
+def list_invoice_generation_tasks_for_order(
+    order_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[list[ProcInvoiceGenerationTaskResponse]]:
+    service = ProcInvoiceGenerationTaskService(db)
+    rows = service.list_for_order(ctx, order_id=order_id)
+    return APIResponse(
+        message="Invoice generation tasks retrieved",
+        data=[
+            ProcInvoiceGenerationTaskResponse.model_validate(payload)
+            for payload in service.serialize_many(ctx, rows)
+        ],
     )
 
 
@@ -933,6 +1147,27 @@ def clear_procurement_inventory_stock(
     db.commit()
     return APIResponse(
         message="Procurement stock cleared",
+        data={"removed": removed},
+    )
+
+
+@scm_router.post(
+    "/inventory/consume-units",
+    response_model=APIResponse[dict],
+)
+def consume_procurement_inventory_units(
+    body: ScmInventoryConsumeUnitsRequest,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:update"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[dict]:
+    removed = ScmHandoffService(db).consume_inventory_stock_units_for_document(
+        ctx,
+        list(body.stock_unit_ids),
+        company_id=body.company_id,
+    )
+    db.commit()
+    return APIResponse(
+        message="Inventory units consumed for billing / delivery challan",
         data={"removed": removed},
     )
 
@@ -1115,6 +1350,7 @@ def update_line_receipt(
         billing=body.billing,
         billing_quantity=body.billing_quantity,
         delivery_challan_quantity=body.delivery_challan_quantity,
+        vendor_dispatch_id=body.vendor_dispatch_id,
     )
     db.commit()
     data = OrderService(db).get_order_response(ctx, order_id, enrich_commercial=True)

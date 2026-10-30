@@ -13,6 +13,7 @@ import { DeliverySectionCard } from "@/components/procurement/delivery-section-c
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { fileToBase64 } from "@/services/sales-crm-service";
+import type { GrnChallanKind } from "@/utils/delivery-challan-storage";
 import {
   addCustomCourierProvider,
   allCourierProviderOptions,
@@ -42,6 +43,11 @@ type DeliveryStatusFormProps = {
   showLocationSection?: boolean;
   /** Hide By hand / Courier dispatch block (e.g. Billing GRNs). */
   showDispatchDetail?: boolean;
+  /** When delivery_challan, show DC number + DC PDF instead of Cache invoice. */
+  challanKind?: GrnChallanKind | "";
+  dcNumber?: string;
+  onDownloadDcPdf?: () => void;
+  dcPdfBusy?: boolean;
   /** Invoice PDF attached by Accounts (read-only; open via API). */
   accountsInvoiceDocument?: AccountsInvoiceDocumentRef | null;
   onOpenAccountsInvoiceDocument?: (attachmentId: string) => void;
@@ -93,9 +99,14 @@ export function DeliveryStatusForm({
   fieldErrors = {},
   mode: _mode = "initial",
   showDispatchDetail = true,
+  challanKind = "",
+  dcNumber = "",
+  onDownloadDcPdf,
+  dcPdfBusy = false,
   accountsInvoiceDocument = null,
   onOpenAccountsInvoiceDocument,
 }: DeliveryStatusFormProps) {
+  const isDcDocument = challanKind !== "billing";
   const dispatchDate = safeText(value.dispatchDate);
   const [customCouriers, setCustomCouriers] = useState(readCustomCourierProviders);
   const [otherCourierDraft, setOtherCourierDraft] = useState("");
@@ -121,7 +132,11 @@ export function DeliveryStatusForm({
 
   async function onPickFile(
     fileList: FileList | null,
-    field: "cacheInvoiceDocument" | "podDocument",
+    field:
+      | "cacheInvoiceDocument"
+      | "podDocument"
+      | "customerTaxInvoiceDocument"
+      | "packingListDocument",
   ) {
     const file = fileList?.[0];
     if (!file) return;
@@ -135,7 +150,39 @@ export function DeliveryStatusForm({
     });
   }
 
-  const cacheInvoiceCard = (
+  const cacheInvoiceCard = isDcDocument ? (
+    <DeliverySectionCard title="Delivery challan" icon={FileText}>
+      <p className="mb-3 text-xs text-muted-foreground">
+        DC number and PDF from the saved delivery challan.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <FinanceField label="DC number">
+          <Input
+            value={safeText(dcNumber) || safeText(value.cacheInvoiceNumber)}
+            readOnly
+            className="h-8 bg-muted/30"
+            placeholder="—"
+          />
+        </FinanceField>
+        <FileField label="DC PDF">
+          {onDownloadDcPdf && (safeText(dcNumber) || safeText(value.cacheInvoiceNumber)) ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={dcPdfBusy}
+              className="h-8 cursor-pointer gap-1.5 text-[#0369A1] transition-colors duration-200 hover:text-[#0369A1]"
+              onClick={() => onDownloadDcPdf()}
+            >
+              {dcPdfBusy ? "Preparing…" : "Download PDF"}
+            </Button>
+          ) : (
+            <span className="text-xs text-muted-foreground">DC PDF not available yet</span>
+          )}
+        </FileField>
+      </div>
+    </DeliverySectionCard>
+  ) : (
     <DeliverySectionCard title="Cache invoice" icon={FileText}>
       <p className="mb-3 text-xs text-muted-foreground">
         Invoice number and document are entered by Accounts and shown here read-only.
@@ -305,6 +352,22 @@ export function DeliveryStatusForm({
       ) : null}
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <FinanceField label="Transporter name" error={fieldErrors.transporterName}>
+          <Input
+            value={safeText(value.transporterName)}
+            onChange={(e) => patch({ transporterName: e.target.value })}
+            className="h-8"
+            placeholder="Transporter name"
+          />
+        </FinanceField>
+        <FinanceField label="LR / GR number" error={fieldErrors.lrGrNumber}>
+          <Input
+            value={safeText(value.lrGrNumber)}
+            onChange={(e) => patch({ lrGrNumber: e.target.value })}
+            className="h-8"
+            placeholder="LR / GR number"
+          />
+        </FinanceField>
         <FinanceField label="No. of boxes" error={fieldErrors.boxCount}>
           <Input
             type="text"
@@ -330,6 +393,25 @@ export function DeliveryStatusForm({
               </option>
             ))}
           </FinanceSelect>
+        </FinanceField>
+        <FinanceField
+          label="Customer tax invoice"
+          error={fieldErrors.customerTaxInvoiceDocument}
+        >
+          <FilePickRow
+            file={value.customerTaxInvoiceDocument}
+            inputId="delivery-status-customer-tax-invoice"
+            onPick={(files) => void onPickFile(files, "customerTaxInvoiceDocument")}
+            onClear={() => patch({ customerTaxInvoiceDocument: null })}
+          />
+        </FinanceField>
+        <FinanceField label="Packing list" error={fieldErrors.packingListDocument}>
+          <FilePickRow
+            file={value.packingListDocument}
+            inputId="delivery-status-packing-list"
+            onPick={(files) => void onPickFile(files, "packingListDocument")}
+            onClear={() => patch({ packingListDocument: null })}
+          />
         </FinanceField>
       </div>
       <FinanceField label="Remarks" error={fieldErrors.remarks} className="mt-3">
@@ -465,6 +547,10 @@ export function deliveryStatusToFormValue(
     itemType: record.itemType ?? "",
     podDocument: record.podDocument ?? null,
     docketNumber: record.docketNumber || record.trackingNumber || "",
+    transporterName: record.transporterName ?? "",
+    lrGrNumber: record.lrGrNumber ?? "",
+    customerTaxInvoiceDocument: record.customerTaxInvoiceDocument ?? null,
+    packingListDocument: record.packingListDocument ?? null,
     boxCount: record.boxCount ?? "",
     surfaceMode: record.surfaceMode ?? "",
     remarks: record.remarks ?? "",

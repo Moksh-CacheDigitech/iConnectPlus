@@ -22,6 +22,9 @@ const KIND_LABELS: Record<string, string> = {
   order_acknowledged: "Order acknowledgement",
   etd_reminder: "ETD reminder",
   delivery_date_shared: "Delivery date update",
+  po_sent_to_vendor: "PO sent to vendor",
+  order_processed: "Order processed",
+  customer_dispatch_shared: "Customer dispatch shared",
 };
 
 function kindLabel(kind: string | null | undefined, eventType?: string | null): string {

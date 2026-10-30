@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
 from uuid import UUID, uuid4
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from core.exceptions import ConflictException, ForbiddenException, NotFoundException
@@ -51,8 +53,15 @@ class ProcInvoiceGenerationTaskService:
         items_summary: str = "",
         vendor_name: str = "",
         customer_name: str = "",
+        grn_number: str = "",
+        billing_quantity: float | None = None,
+        billing_amount: float | None = None,
     ) -> list[ProcInvoiceGenerationTask]:
-        order = self._db.get(ProcOrderHeader, order_id)
+        order = self._db.scalars(
+            select(ProcOrderHeader)
+            .where(ProcOrderHeader.id == order_id)
+            .options(selectinload(ProcOrderHeader.lines))
+        ).first()
         if order is None or order.is_deleted or order.tenant_id != ctx.tenant_id:
             raise NotFoundException("Purchase order not found")
 
@@ -72,8 +81,11 @@ class ProcInvoiceGenerationTaskService:
             )
 
         po_number = (order.company_po_number or order.document_number or "").strip()
-        grn_number = (batch.grn_number or order.current_grn_number or "").strip()
-        title = f"Invoice generation · {grn_number or po_number or 'GRN'}"
+        override_grn = (grn_number or "").strip()
+        batch_grn = (batch.grn_number or order.current_grn_number or "").strip()
+        grn_label = (override_grn or batch_grn)[:80]
+        # Always title on the PO — My Jobs must not look like a single GRN wave.
+        title = f"Invoice generation · {po_number or grn_label or 'Billing'}"
         summary = (items_summary or "").strip()[:500]
         vendor = (vendor_name or "").strip()[:255]
         customer = (customer_name or "").strip()[:255]
@@ -82,15 +94,108 @@ class ProcInvoiceGenerationTaskService:
         if company_id is None or branch_id is None:
             raise ConflictException("Purchase order is missing company/branch scope")
 
+        bill_qty = (
+            float(billing_quantity)
+            if billing_quantity is not None and float(billing_quantity) >= 0
+            else None
+        )
+        bill_amt = (
+            float(billing_amount)
+            if billing_amount is not None and float(billing_amount) >= 0
+            else None
+        )
+        if bill_qty is None and summary:
+            # Fallback: sum "(qty)" groups from items_summary when client omitted totals.
+            parsed = [
+                float(m)
+                for m in re.findall(r"\((\d+(?:\.\d+)?)\)", summary)
+                if float(m) > 0
+            ]
+            if parsed:
+                bill_qty = round(sum(parsed), 4)
+        if bill_qty is not None and (bill_amt is None or bill_amt <= 0):
+            _, estimated = self.billing_totals_for_batch(
+                ctx,
+                order_id=order_id,
+                receipt_batch_id=receipt_batch_id,
+            )
+            if estimated > 0 and bill_qty > 0:
+                # Scale batch estimate when selection qty differs from full GRN bill qty.
+                scm_qty, _ = self.billing_totals_for_batch(
+                    ctx,
+                    order_id=order_id,
+                    receipt_batch_id=receipt_batch_id,
+                )
+                if scm_qty > 1e-9:
+                    bill_amt = round(estimated * (bill_qty / scm_qty), 2)
+            if bill_amt is None or bill_amt <= 0:
+                # Estimate from PO line unit cost × selected qty.
+                active_lines = [
+                    ln
+                    for ln in (order.lines or [])
+                    if not getattr(ln, "is_deleted", False)
+                ]
+                if active_lines:
+                    ordered = sum(float(getattr(ln, "quantity", 0) or 0) for ln in active_lines)
+                    line_total = sum(
+                        float(getattr(ln, "line_total", 0) or 0) for ln in active_lines
+                    )
+                    unit = (line_total / ordered) if ordered > 1e-9 else float(
+                        getattr(active_lines[0], "unit_cost", 0) or 0
+                    )
+                    bill_amt = round(float(bill_qty) * unit, 2)
+
         created: list[ProcInvoiceGenerationTask] = []
+        newly_created: list[ProcInvoiceGenerationTask] = []
+        now = datetime.now(timezone.utc)
         for user_id in owner_ids:
+            # One My Jobs row per billing selection: drop other pending jobs on this PO.
+            for other in self._repo.list_pending_for_order_assignee(
+                ctx,
+                order_header_id=order_id,
+                assigned_user_id=user_id,
+            ):
+                if other.receipt_batch_id == receipt_batch_id:
+                    continue
+                other.is_deleted = True
+                other.deleted_at = now
+                other.deleted_by = ctx.user_id
+                other.updated_by = ctx.user_id
+
+            # Unique (tenant, batch, assignee) among active rows.
+            # Reuse pending; reopen completed so re-billing from stock reaches My Jobs.
             existing = self._repo.find_for_batch_assignee(
                 ctx,
                 receipt_batch_id=receipt_batch_id,
                 assigned_user_id=user_id,
             )
             if existing is not None:
+                existing.title = title
+                existing.grn_number = grn_label
+                existing.purchase_order_number = po_number[:100]
+                existing.vendor_name = vendor
+                existing.customer_name = customer
+                existing.items_summary = summary
+                existing.requested_by = ctx.user_id
+                existing.updated_by = ctx.user_id
+                if bill_qty is not None:
+                    existing.invoice_quantity = bill_qty
+                if bill_amt is not None:
+                    existing.invoice_amount = bill_amt
+                if existing.status == "pending":
+                    created.append(existing)
+                    continue
+                existing.status = "pending"
+                existing.invoice_number = None
+                existing.invoice_date = None
+                if bill_qty is None:
+                    existing.invoice_quantity = None
+                if bill_amt is None:
+                    existing.invoice_amount = None
+                existing.completed_at = None
+                existing.completed_by = None
                 created.append(existing)
+                newly_created.append(existing)
                 continue
             short = str(uuid4()).replace("-", "")[:8].upper()
             row = ProcInvoiceGenerationTask(
@@ -103,23 +208,27 @@ class ProcInvoiceGenerationTaskService:
                 status="pending",
                 order_header_id=order_id,
                 receipt_batch_id=receipt_batch_id,
-                grn_number=grn_number[:80],
+                grn_number=grn_label,
                 purchase_order_number=po_number[:100],
                 vendor_name=vendor,
                 customer_name=customer,
                 items_summary=summary,
                 assigned_user_id=user_id,
                 requested_by=ctx.user_id,
+                invoice_quantity=bill_qty,
+                invoice_amount=bill_amt,
                 created_by=ctx.user_id,
                 updated_by=ctx.user_id,
             )
-            created.append(self._repo.add(row))
+            saved = self._repo.add(row)
+            created.append(saved)
+            newly_created.append(saved)
 
-        if created:
+        if newly_created:
             self._notify_assignees(
                 ctx,
                 order=order,
-                tasks=created,
+                tasks=newly_created,
                 po_number=po_number,
             )
         return created
@@ -206,6 +315,17 @@ class ProcInvoiceGenerationTaskService:
             return []
         return self._repo.list_for_assignee(ctx, user_id=ctx.user_id, status=status)
 
+    def list_for_order(
+        self,
+        ctx: TenantContext,
+        *,
+        order_id: UUID,
+    ) -> list[ProcInvoiceGenerationTask]:
+        order = self._db.get(ProcOrderHeader, order_id)
+        if order is None or order.is_deleted or order.tenant_id != ctx.tenant_id:
+            raise NotFoundException("Purchase order not found")
+        return self._repo.list_for_order(ctx, order_header_id=order_id)
+
     def get_for_batch_prefill(
         self,
         ctx: TenantContext,
@@ -216,7 +336,10 @@ class ProcInvoiceGenerationTaskService:
         completed = [row for row in rows if row.status == "completed"]
         if completed:
             return completed[0]
-        return None
+        pending = [row for row in rows if row.status == "pending"]
+        if pending:
+            return pending[0]
+        return rows[0] if rows else None
 
     def billing_totals_for_batch(
         self,
@@ -292,6 +415,16 @@ class ProcInvoiceGenerationTaskService:
             order_id=row.order_header_id,
             receipt_batch_id=row.receipt_batch_id,
         )
+        # Stock/partial billing stores selection totals on the task while pending
+        # (GRN batch billing_quantity is often 0 for receive-into-stock waves).
+        draft_qty = (
+            float(row.invoice_quantity) if row.invoice_quantity is not None else None
+        )
+        draft_amt = float(row.invoice_amount) if row.invoice_amount is not None else None
+        if suggested_qty <= 1e-9 and draft_qty is not None and draft_qty > 0:
+            suggested_qty = draft_qty
+        if suggested_amount <= 1e-9 and draft_amt is not None and draft_amt > 0:
+            suggested_amount = draft_amt
         requester_id = getattr(row, "requested_by", None) or getattr(row, "created_by", None)
         names = requester_names
         if names is None and requester_id is not None:
@@ -315,12 +448,8 @@ class ProcInvoiceGenerationTaskService:
             "requested_by_name": (names or {}).get(requester_id) if requester_id else None,
             "invoice_number": row.invoice_number,
             "invoice_date": row.invoice_date,
-            "invoice_quantity": float(row.invoice_quantity)
-            if row.invoice_quantity is not None
-            else None,
-            "invoice_amount": float(row.invoice_amount)
-            if row.invoice_amount is not None
-            else None,
+            "invoice_quantity": draft_qty,
+            "invoice_amount": draft_amt,
             "suggested_quantity": suggested_qty,
             "suggested_amount": suggested_amount,
             "completed_at": row.completed_at,

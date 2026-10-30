@@ -1333,6 +1333,16 @@ class ScmHandoffService:
             unit.updated_at = now
         return len(units)
 
+    def consume_inventory_stock_units_for_document(
+        self,
+        ctx: TenantContext,
+        stock_unit_ids: list[UUID],
+        company_id: UUID | None = None,
+    ) -> int:
+        """Public entry: remove GRN warehouse units after billing / DC selection."""
+        cid = self._scope.resolve_company_id(ctx, company_id)
+        return self._consume_inventory_stock_units(ctx, cid, stock_unit_ids)
+
     def _consume_inventory_import_lines(
         self,
         ctx: TenantContext,
@@ -2335,6 +2345,11 @@ class ScmHandoffService:
         order.updated_at = utcnow()
         order.updated_by = ctx.user_id
         order.version = int(getattr(order, "version", 0) or 0) + 1
+        # CRM POs enter the fulfillment wizard; vendor send is an explicit step.
+        if self._is_ovf_sourced(order):
+            from modules.procurement.service.scm_fulfillment_service import ScmFulfillmentService
+
+            ScmFulfillmentService(self._db).initialize_on_issue(order)
         self._db.flush()
         # Prefer the issued (non-draft) PDF for vendor mail; replace any draft print.
         self._store_po_print_pdf(
@@ -2351,12 +2366,15 @@ class ScmHandoffService:
             performed_by=ctx.user_id,
             new_value={"company_po_number": order.company_po_number},
         )
-        self._notify_vendor_po_issued(
-            ctx,
-            order,
-            po_pdf_base64=po_pdf_base64,
-            po_pdf_filename=po_pdf_filename,
-        )
+        # Non-CRM inventory POs still get the best-effort vendor issue mail.
+        # CRM OVF POs use the fulfillment "Send PO to vendor" step instead.
+        if not self._is_ovf_sourced(order):
+            self._notify_vendor_po_issued(
+                ctx,
+                order,
+                po_pdf_base64=po_pdf_base64,
+                po_pdf_filename=po_pdf_filename,
+            )
         return order
 
     def _notify_vendor_po_issued(
@@ -2541,6 +2559,7 @@ class ScmHandoffService:
         billing: bool = True,
         billing_quantity: float | None = None,
         delivery_challan_quantity: float | None = None,
+        vendor_dispatch_id: UUID | None = None,
     ) -> ProcOrderHeader:
         order = self._order_service.get_order(ctx, order_id)
         if order.status in {
@@ -2579,6 +2598,18 @@ class ScmHandoffService:
         else:
             line_status = "open" if received == 0 else (
                 "received" if received >= qty else "partially_received"
+            )
+
+        if received > previous_received:
+            from modules.procurement.service.scm_fulfillment_service import ScmFulfillmentService
+
+            ScmFulfillmentService(self._db).assert_grn_allowed(
+                ctx,
+                order,
+                line_id=line_id,
+                target_received_qty=received,
+                previous_received_qty=previous_received,
+                vendor_dispatch_id=vendor_dispatch_id,
             )
 
         delta = received - previous_received
@@ -2650,6 +2681,11 @@ class ScmHandoffService:
                     getattr(existing_batch, "reversal_status", "posted") == "reversed"
                 ):
                     starting_new_batch = True
+                elif vendor_dispatch_id is not None and getattr(
+                    existing_batch, "vendor_dispatch_id", None
+                ) != vendor_dispatch_id:
+                    # Different dispatch wave → always open a dedicated GRN batch.
+                    starting_new_batch = True
             if starting_new_batch:
                 batch_id = uuid4()
                 next_seq = int(getattr(order, "grn_sequence", 0) or 0) + 1
@@ -2685,6 +2721,7 @@ class ScmHandoffService:
                     billing=line_billing,
                     billing_quantity=bill_qty,
                     delivery_challan_quantity=dc_qty,
+                    vendor_dispatch_id=vendor_dispatch_id,
                 )
                 if float(bill_qty) > 1e-9 and batch_id is not None:
                     # Fan out Accounts My Jobs for invoice generation (idempotent per
@@ -2726,6 +2763,9 @@ class ScmHandoffService:
             order.received_amount = float(received_amount)
 
         self._db.flush()
+        from modules.procurement.service.scm_fulfillment_service import ScmFulfillmentService
+
+        ScmFulfillmentService(self._db).mark_grn_progress(ctx, order)
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,
             entity_name="proc_order_line",
@@ -2754,6 +2794,7 @@ class ScmHandoffService:
         billing: bool = True,
         billing_quantity: float = 0,
         delivery_challan_quantity: float = 0,
+        vendor_dispatch_id: UUID | None = None,
     ) -> None:
         if starting_new_batch:
             header = ProcOrderReceiptBatch(
@@ -2762,6 +2803,7 @@ class ScmHandoffService:
                 sequence=sequence,
                 grn_number=grn_number,
                 receipt_at=receipt_at,
+                vendor_dispatch_id=vendor_dispatch_id,
                 tenant_id=order.tenant_id,
                 company_id=order.company_id,
                 branch_id=order.branch_id,
@@ -2769,6 +2811,10 @@ class ScmHandoffService:
                 updated_by=ctx.user_id,
             )
             self._db.add(header)
+        elif vendor_dispatch_id is not None:
+            existing = self._db.get(ProcOrderReceiptBatch, batch_id)
+            if existing is not None and getattr(existing, "vendor_dispatch_id", None) is None:
+                existing.vendor_dispatch_id = vendor_dispatch_id
 
         batch_line = (
             self._db.query(ProcOrderReceiptBatchLine)
@@ -3251,9 +3297,25 @@ class ScmHandoffService:
             }
             creator_names = self._resolve_user_names(ctx.tenant_id, creator_ids)
             result: list[dict] = []
+            dispatch_ids = {
+                getattr(batch, "vendor_dispatch_id", None)
+                for batch in sorted_batches
+                if getattr(batch, "vendor_dispatch_id", None)
+            }
+            dispatch_seq_by_id: dict[UUID, int] = {}
+            if dispatch_ids:
+                from modules.procurement.models.vendor_dispatch import ProcVendorDispatch
+
+                for disp in (
+                    self._db.query(ProcVendorDispatch)
+                    .filter(ProcVendorDispatch.id.in_(list(dispatch_ids)))
+                    .all()
+                ):
+                    dispatch_seq_by_id[disp.id] = int(disp.sequence)
             for batch in sorted_batches:
                 batch_lines = lines_by_batch.get(batch.id, [])
                 created_by = getattr(batch, "created_by", None)
+                dispatch_id = getattr(batch, "vendor_dispatch_id", None)
                 result.append(
                     {
                         "id": batch.id,
@@ -3262,6 +3324,10 @@ class ScmHandoffService:
                         "receipt_at": batch.receipt_at,
                         "created_by": created_by,
                         "created_by_name": creator_names.get(created_by) if created_by else None,
+                        "vendor_dispatch_id": dispatch_id,
+                        "vendor_dispatch_sequence": (
+                            dispatch_seq_by_id.get(dispatch_id) if dispatch_id else None
+                        ),
                         "lines": self._receipt_batch_line_payload(batch_lines, line_by_id),
                         "attachments": attachments_by_batch.get(batch.id, []),
                         **self._vendor_invoice_batch_fields(batch),
@@ -3940,10 +4006,124 @@ class ScmHandoffService:
         rows = list(self._db.scalars(stmt).all())
         return {row.id: row for row in rows}
 
+    def repair_wave_grn_batches_into_stock(
+        self, ctx: TenantContext, company_id: UUID | None = None
+    ) -> int:
+        """Move fully-billed wave GRNs with no stock rows into inventory.
+
+        Wave Record GRN briefly posted 100% as billed (no warehouse leftover).
+        Correct path is GRN → stock, then billing/DC later. Idempotent.
+        """
+        if not self._inventory_stock_table_exists() or not self._receipt_batch_tables_exist():
+            return 0
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
+        batch_q = (
+            self._db.query(ProcOrderReceiptBatch)
+            .join(ProcOrderHeader, ProcOrderReceiptBatch.order_header_id == ProcOrderHeader.id)
+            .filter(
+                ProcOrderReceiptBatch.tenant_id == ctx.tenant_id,
+                ProcOrderReceiptBatch.is_deleted.is_(False),
+                ProcOrderReceiptBatch.vendor_dispatch_id.isnot(None),
+                ProcOrderReceiptBatch.reversal_status != "reversed",
+                ProcOrderHeader.is_deleted.is_(False),
+            )
+        )
+        if cid is not None:
+            batch_q = batch_q.filter(ProcOrderReceiptBatch.company_id == cid)
+        batches = batch_q.all()
+        if not batches:
+            return 0
+
+        batch_ids = [b.id for b in batches]
+        existing_stock_batch_ids = {
+            row[0]
+            for row in (
+                self._db.query(ProcInventoryStockUnit.receipt_batch_id)
+                .filter(
+                    ProcInventoryStockUnit.receipt_batch_id.in_(batch_ids),
+                    ProcInventoryStockUnit.is_deleted.is_(False),
+                )
+                .distinct()
+                .all()
+            )
+            if row[0] is not None
+        }
+        lines = (
+            self._db.query(ProcOrderReceiptBatchLine)
+            .filter(
+                ProcOrderReceiptBatchLine.receipt_batch_id.in_(batch_ids),
+                ProcOrderReceiptBatchLine.is_deleted.is_(False),
+            )
+            .all()
+        )
+        lines_by_batch: dict[UUID, list[ProcOrderReceiptBatchLine]] = defaultdict(list)
+        for bl in lines:
+            lines_by_batch[bl.receipt_batch_id].append(bl)
+
+        order_ids = list({b.order_header_id for b in batches})
+        orders = {
+            o.id: o
+            for o in self._db.query(ProcOrderHeader)
+            .filter(
+                ProcOrderHeader.id.in_(order_ids),
+                ProcOrderHeader.tenant_id == ctx.tenant_id,
+                ProcOrderHeader.is_deleted.is_(False),
+            )
+            .all()
+        }
+        line_ids = list({bl.order_line_id for bl in lines})
+        order_lines = self._inventory_order_lines(ctx, line_ids) if line_ids else {}
+
+        repaired = 0
+        for batch in batches:
+            if batch.id in existing_stock_batch_ids:
+                continue
+            order = orders.get(batch.order_header_id)
+            if order is None:
+                continue
+            for bl in lines_by_batch.get(batch.id, []):
+                qty = float(bl.quantity or 0)
+                if qty <= 1e-9:
+                    continue
+                bill = float(getattr(bl, "billing_quantity", 0) or 0)
+                dc = float(getattr(bl, "delivery_challan_quantity", 0) or 0)
+                # Only rewrite fully-billed wave lines with no DC split.
+                if bill + 1e-9 < qty or dc > 1e-9:
+                    continue
+                ol = order_lines.get(bl.order_line_id)
+                if ol is None:
+                    continue
+                bl.billing = False
+                bl.billing_quantity = 0.0
+                bl.updated_by = ctx.user_id
+                bl.updated_at = utcnow()
+                if hasattr(ol, "last_receipt_billing"):
+                    ol.last_receipt_billing = False
+                if hasattr(ol, "last_receipt_billing_quantity"):
+                    ol.last_receipt_billing_quantity = 0.0
+                self._append_stock_units_for_receipt(
+                    ctx,
+                    order=order,
+                    line=ol,
+                    batch_id=batch.id,
+                    grn_number=str(batch.grn_number or ""),
+                    receipt_at=batch.receipt_at,
+                    receive_qty=qty,
+                    billing_quantity=0.0,
+                    serial_numbers=list(bl.serial_numbers or []),
+                    delivery_challan_quantity=0.0,
+                )
+                repaired += 1
+        if repaired:
+            self._db.flush()
+        return repaired
+
     def list_procurement_inventory(
         self, ctx: TenantContext, company_id: UUID | None = None
     ) -> list[dict]:
         """One row per stock unit on hand (ledger) plus optional Excel import lines."""
+        # Heal wave GRNs that were posted as 100% billed (no inventory rows).
+        self.repair_wave_grn_batches_into_stock(ctx, company_id)
         cid = self._scope.resolve_list_company_id(ctx, company_id)
         order_cache: dict[UUID, ProcOrderHeader] = {}
         result: list[dict] = []

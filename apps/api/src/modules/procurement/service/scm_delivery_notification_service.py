@@ -67,11 +67,17 @@ _SOURCE_DOC_TYPE = "ovf"
 KIND_ORDER_ACK = "order_acknowledged"
 KIND_ETD_REMINDER = "etd_reminder"
 KIND_DELIVERY_UPDATE = "delivery_date_shared"
+KIND_PO_SENT_TO_VENDOR = "po_sent_to_vendor"
+KIND_ORDER_PROCESSED = "order_processed"
+KIND_CUSTOMER_DISPATCH_SHARED = "customer_dispatch_shared"
 
 EVENT_BY_KIND = {
     KIND_ORDER_ACK: "procurement.order_acknowledged",
     KIND_ETD_REMINDER: "procurement.etd_reminder",
     KIND_DELIVERY_UPDATE: "procurement.delivery_date_shared",
+    KIND_PO_SENT_TO_VENDOR: "procurement.po_sent_to_vendor",
+    KIND_ORDER_PROCESSED: "procurement.order_processed",
+    KIND_CUSTOMER_DISPATCH_SHARED: "procurement.customer_dispatch_shared",
 }
 
 TEMPLATE_META = {
@@ -113,6 +119,49 @@ TEMPLATE_META = {
             "<p>The material against PO <strong>{{reference}}</strong> is expected with us "
             "by <strong>{{etd}}</strong>.</p>"
             "<p>We will confirm the dispatch plan once the material reaches our warehouse.</p>"
+        ),
+    },
+    KIND_PO_SENT_TO_VENDOR: {
+        "code": "SCM_PO_SENT_TO_VENDOR",
+        "name": "SCM - Purchase order to vendor",
+        "audience": "vendor",
+        "default_subject": "Purchase order {{company_po_number}}",
+        "default_body": (
+            "<p>Dear {{vendor_name}},</p>"
+            "<p>Please find attached purchase order "
+            "<strong>{{company_po_number}}</strong> dated {{document_date}}.</p>"
+            "<p>Kindly confirm acceptance and proceed as per the expected delivery date "
+            "on the PO.</p>"
+            "<p>Thank you.</p>"
+        ),
+    },
+    KIND_ORDER_PROCESSED: {
+        "code": "SCM_ORDER_PROCESSED",
+        "name": "SCM - Order processed (customer)",
+        "audience": "customer",
+        "default_subject": "Your order {{reference}} has been processed",
+        "default_body": (
+            "<p>Dear {{customer_name}},</p>"
+            "<p>Your order against reference <strong>{{reference}}</strong> has been "
+            "processed with our supply partner.</p>"
+            "<p>The promised delivery date is <strong>{{promised_edd}}</strong>.</p>"
+            "<p>We will share dispatch details once material is ready for delivery.</p>"
+            "<p>Thank you for your business.</p>"
+        ),
+    },
+    KIND_CUSTOMER_DISPATCH_SHARED: {
+        "code": "SCM_CUSTOMER_DISPATCH_SHARED",
+        "name": "SCM - Customer dispatch shared",
+        "audience": "customer",
+        "default_subject": "Dispatch details for order {{reference}}",
+        "default_body": (
+            "<p>Dear {{customer_name}},</p>"
+            "<p>Your material against reference <strong>{{reference}}</strong> has been "
+            "dispatched.</p>"
+            "<p>Invoice / DC: <strong>{{invoice_or_dc}}</strong><br/>"
+            "Transporter LR / AWB: <strong>{{lr_awb}}</strong><br/>"
+            "Expected delivery: <strong>{{promised_edd}}</strong></p>"
+            "<p>Please confirm receipt when the material arrives.</p>"
         ),
     },
 }
@@ -250,7 +299,10 @@ class ScmDeliveryNotificationService:
                 "reference",
                 "document_date",
                 "etd",
+                "promised_edd",
                 "company_po_number",
+                "invoice_or_dc",
+                "lr_awb",
             ],
         }
 
@@ -317,7 +369,10 @@ class ScmDeliveryNotificationService:
                 "reference",
                 "document_date",
                 "etd",
+                "promised_edd",
                 "company_po_number",
+                "invoice_or_dc",
+                "lr_awb",
             ],
         }
 
@@ -362,6 +417,7 @@ class ScmDeliveryNotificationService:
         variables: dict[str, Any],
         company_account_id: str | UUID | None = None,
         require_delivered: bool = False,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> None:
         tpl = self._resolve_template(ctx, kind=kind, company_account_id=company_account_id)
         if kind == KIND_ORDER_ACK and tpl is not None:
@@ -380,6 +436,15 @@ class ScmDeliveryNotificationService:
         # Wrap plain paragraphs if template forgot outer styling.
         if "<" not in body_html:
             body_html = _html([body_html])
+        event_payload: dict[str, Any] = {
+            "order_id": str(order.id),
+            "company_po_number": order.company_po_number,
+            "kind": kind,
+            "company_account_id": str(company_account_id) if company_account_id else None,
+            **payload,
+        }
+        if attachments:
+            event_payload["_attachments"] = attachments
         event = self._notifications.send_email(
             tenant_id=ctx.tenant_id,
             to_address=to_address,
@@ -387,13 +452,7 @@ class ScmDeliveryNotificationService:
             body_html=body_html,
             event_type=EVENT_BY_KIND[kind],
             template_id=template_id,
-            payload_json={
-                "order_id": str(order.id),
-                "company_po_number": order.company_po_number,
-                "kind": kind,
-                "company_account_id": str(company_account_id) if company_account_id else None,
-                **payload,
-            },
+            payload_json=event_payload,
             created_by=ctx.user_id,
         )
         if not require_delivered:
@@ -413,7 +472,7 @@ class ScmDeliveryNotificationService:
                 or (delivery.status if delivery is not None else None)
                 or "smtp_send_failed"
             )
-            raise ValidationException(f"Failed to send acknowledgement email: {detail}")
+            raise ValidationException(f"Failed to send email: {detail}")
 
     def _order_reference(self, customer: dict[str, Any], order: ProcOrderHeader) -> str:
         return (
@@ -510,6 +569,126 @@ class ScmDeliveryNotificationService:
             },
         )
         order.etd_customer_notified_for = etd
+        return True
+
+    def send_po_to_vendor(
+        self,
+        ctx: TenantContext,
+        order: ProcOrderHeader,
+        vendor: dict[str, Any],
+        *,
+        attachments: list[dict[str, Any]] | None = None,
+        require_delivered: bool = True,
+    ) -> bool:
+        """Email the issued PO PDF to the vendor."""
+        to_address = (vendor.get("email") or "").strip()
+        if not to_address:
+            return False
+        reference = order.company_po_number or order.document_number
+        self._send(
+            ctx,
+            to_address=to_address,
+            kind=KIND_PO_SENT_TO_VENDOR,
+            order=order,
+            require_delivered=require_delivered,
+            attachments=attachments,
+            variables={
+                "customer_name": "",
+                "vendor_name": vendor.get("vendor_name") or "Vendor",
+                "reference": reference,
+                "document_date": order.document_date or "",
+                "etd": self._format_etd(order),
+                "company_po_number": reference,
+            },
+        )
+        return True
+
+    def send_customer_order_processed(
+        self,
+        ctx: TenantContext,
+        order: ProcOrderHeader,
+        customer: dict[str, Any],
+        *,
+        require_delivered: bool = True,
+    ) -> bool:
+        """Tell the customer the order is processed with Customer EDD (vendor EDD + 4)."""
+        to_address = (customer.get("email") or "").strip()
+        if not to_address:
+            return False
+        reference = self._order_reference(customer, order)
+        promised = order.customer_promised_delivery_date
+        promised_label = (
+            promised.isoformat()
+            if promised is not None and hasattr(promised, "isoformat")
+            else (str(promised) if promised else "to be confirmed")
+        )
+        self._send(
+            ctx,
+            to_address=to_address,
+            kind=KIND_ORDER_PROCESSED,
+            order=order,
+            company_account_id=customer.get("company_account_id"),
+            require_delivered=require_delivered,
+            variables={
+                "customer_name": customer.get("customer_name")
+                or customer.get("account_name")
+                or "Customer",
+                "vendor_name": "",
+                "reference": reference,
+                "document_date": order.document_date or "",
+                "etd": self._format_etd(order),
+                "promised_edd": promised_label,
+                "company_po_number": order.company_po_number or order.document_number,
+            },
+        )
+        return True
+
+    def send_customer_dispatch_shared(
+        self,
+        ctx: TenantContext,
+        order: ProcOrderHeader,
+        customer: dict[str, Any],
+        *,
+        invoice_or_dc: str | None = None,
+        lr_awb: str | None = None,
+        require_delivered: bool = True,
+    ) -> bool:
+        """Share customer dispatch / transporter details."""
+        to_address = (customer.get("email") or "").strip()
+        if not to_address:
+            return False
+        reference = self._order_reference(customer, order)
+        meta = order.customer_delivery_meta if isinstance(order.customer_delivery_meta, dict) else {}
+        promised = order.customer_promised_delivery_date or meta.get("customer_edd")
+        promised_label = (
+            promised.isoformat()
+            if promised is not None and hasattr(promised, "isoformat")
+            else (str(promised) if promised else "to be confirmed")
+        )
+        self._send(
+            ctx,
+            to_address=to_address,
+            kind=KIND_CUSTOMER_DISPATCH_SHARED,
+            order=order,
+            company_account_id=customer.get("company_account_id"),
+            require_delivered=require_delivered,
+            variables={
+                "customer_name": customer.get("customer_name")
+                or customer.get("account_name")
+                or "Customer",
+                "vendor_name": "",
+                "reference": reference,
+                "document_date": order.document_date or "",
+                "etd": self._format_etd(order),
+                "promised_edd": promised_label,
+                "invoice_or_dc": invoice_or_dc
+                or meta.get("invoice_number")
+                or meta.get("dc_number")
+                or "—",
+                "lr_awb": lr_awb or meta.get("lr_awb") or order.awb_number or "—",
+                "company_po_number": order.company_po_number or order.document_number,
+            },
+        )
         return True
 
     # -- correspondence log ------------------------------------------------

@@ -37,19 +37,30 @@ function resolveVendor(
   };
 }
 
-/** Download the PO print PDF for an invoice-generation job's order. */
-export async function downloadInvoiceJobPoPdf(orderId: string): Promise<void> {
+/** Download the PO print PDF for an invoice-generation / approval job's order. */
+export async function downloadInvoiceJobPoPdf(
+  orderId: string,
+  options?: { watermark?: boolean },
+): Promise<void> {
   const [order, vendors] = await Promise.all([
     getPurchaseOrder(orderId),
     listVendorOptions().catch(() => [] as VendorOption[]),
   ]);
   const vendor = resolveVendor(vendors, order.vendor_id);
-  const draft = (order.status || "").toLowerCase() === "draft";
+  const status = (order.status || "").toLowerCase();
+  const approvalStage = (order.scm_approval_stage || "").toLowerCase();
+  // Admin / management approval reviews must see Draft PO + watermark until issued.
+  const inApproval =
+    approvalStage === "accept_po" ||
+    approvalStage === "management" ||
+    status === "draft" ||
+    status === "submitted";
+  const watermark = options?.watermark ?? inApproval;
   await downloadOrderPdf(
     order,
     { name: vendor.name, address: vendor.address },
     undefined,
-    { watermark: draft },
+    { watermark },
   );
 }
 
