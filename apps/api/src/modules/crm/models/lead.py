@@ -145,6 +145,8 @@ class CrmLead(Base, *CrmTransactionMixin):
     distributor_department: Mapped[str | None] = mapped_column(String(150), nullable=True)
     end_customer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     end_customer_location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # sell_through | sell_to — drives end-customer vs account-name capture on the lead form.
+    sale_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
     entity_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     entity_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     entity_address: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -157,6 +159,8 @@ class CrmLead(Base, *CrmTransactionMixin):
     # Gate before BOQ/SOW My Jobs: Yes + contact name unlocks document routing.
     presales_call_aligned: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     presales_call_contact_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # JSON map: { "Hardware": { "aligned": true, "contact_name": "…" }, … }
+    presales_call_by_product: Mapped[str | None] = mapped_column(Text, nullable=True)
     blueprint_state: Mapped[str] = mapped_column(String(30), nullable=False, default="open", server_default="open")
     locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     convert_remark: Mapped[str | None] = mapped_column(Text, nullable=True)

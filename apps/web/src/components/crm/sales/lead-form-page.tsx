@@ -5,12 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Building2,
+  Handshake,
   MessageSquareText,
   MapPin,
   Package,
   Truck,
   UserPlus,
-  Users,
 } from "lucide-react";
 
 import { CrmErrorBanner, CrmPage, CrmSection } from "@/components/crm/crm-ui";
@@ -155,6 +155,7 @@ const EMPTY: LeadCreateFromCompanyInput = {
   distributor_contact_email: "",
   distributor_department: "",
   end_customer_name: "",
+  sale_type: "",
   entity_name: "",
   entity_email: "",
   entity_address: "",
@@ -165,6 +166,24 @@ const EMPTY: LeadCreateFromCompanyInput = {
   notes: "",
   presales_owner_id: "",
 };
+
+type LeadSaleType = "sell_through" | "sell_to";
+
+function resolveLeadSaleType(
+  saleType: string | null | undefined,
+  endCustomerName: string | null | undefined,
+  accountName: string | null | undefined,
+): LeadSaleType | "" {
+  const normalized = (saleType || "").trim().toLowerCase();
+  if (normalized === "sell_through" || normalized === "sell_to") {
+    return normalized;
+  }
+  const endCustomer = (endCustomerName || "").trim().toLowerCase();
+  const account = (accountName || "").trim().toLowerCase();
+  if (!endCustomer) return "";
+  if (account && endCustomer === account) return "sell_to";
+  return "sell_through";
+}
 
 export function LeadFormPage({
   companyAccountId,
@@ -183,7 +202,6 @@ export function LeadFormPage({
   const [leadSources, setLeadSources] = useState<Option[]>([]);
   const [marketingEvents, setMarketingEvents] = useState<Option[]>([]);
   const [leadOwnerLabel, setLeadOwnerLabel] = useState("");
-  const [industryOther, setIndustryOther] = useState("");
   const [form, setForm] = useState<LeadCreateFromCompanyInput>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -265,11 +283,6 @@ export function LeadFormPage({
       setMarketingEvents(events);
       setEntityCatalog(entities);
       const rawIndustry = companyRow.industry ?? "";
-      if (rawIndustry && !INDUSTRIES.includes(rawIndustry)) {
-        setIndustryOther(rawIndustry);
-      } else {
-        setIndustryOther("");
-      }
       const companySourceKey = companySourceToLeadMatchKey(companyRow.source ?? "");
       const inheritedSource = sources.find(
         (source) => normalizeSourceMatchKey(source.label) === companySourceKey,
@@ -318,6 +331,11 @@ export function LeadFormPage({
             distributor_contact_person: leadRow.distributor_contact_person ?? "",
             distributor_contact_email: leadRow.distributor_contact_email ?? "",
             end_customer_name: leadRow.end_customer_name ?? "",
+            sale_type: resolveLeadSaleType(
+              leadRow.sale_type,
+              leadRow.end_customer_name,
+              companyRow.customer_name,
+            ),
             entity_name: leadRow.entity_name ?? "",
             entity_email: leadRow.entity_email ?? "",
             entity_address: leadRow.entity_address ?? "",
@@ -537,7 +555,15 @@ export function LeadFormPage({
       missing.push("Expected Order Value");
     }
     if (!form.expected_closure_date?.trim()) missing.push("Expected Closure Date");
-    if (!form.end_customer_name?.trim()) missing.push("End Customer");
+    const saleType = resolveLeadSaleType(
+      form.sale_type,
+      form.end_customer_name,
+      company?.customer_name,
+    );
+    if (!saleType) missing.push("Sale Type (Sell Through or Sell To)");
+    if (saleType === "sell_through" && !form.end_customer_name?.trim()) {
+      missing.push("End Customer Name");
+    }
     if (!form.entity_name?.trim()) missing.push("Entity Name");
     if (!form.entity_address?.trim()) missing.push("Entity Address");
     if (!form.entity_contact?.trim()) missing.push("Entity Contact Number");
@@ -553,6 +579,16 @@ export function LeadFormPage({
       const { owner_employee_id: _owner, dr_number: _dr, new_dr_number: _newDr, ...leadBody } = form;
       const oemFields = formatOemPartnerFields(oemRows);
       const distributorFields = formatDistributorPartnerFields(distributorRows);
+      const accountName = (company?.customer_name || "").trim();
+      const resolvedSaleType = resolveLeadSaleType(
+        form.sale_type,
+        form.end_customer_name,
+        accountName,
+      );
+      const endCustomerName =
+        resolvedSaleType === "sell_to"
+          ? accountName
+          : (form.end_customer_name || "").trim();
       const payload = {
         ...leadBody,
         ...oemFields,
@@ -568,6 +604,8 @@ export function LeadFormPage({
             ? Number(existingLead.committed_amount)
             : null,
         expected_closure_date: form.expected_closure_date || null,
+        sale_type: resolvedSaleType || null,
+        end_customer_name: endCustomerName || null,
         presales_owner_id: form.presales_owner_id?.trim() || null,
         requires_boq: Boolean(form.requires_boq),
         requires_sow: Boolean(form.requires_sow),
@@ -967,55 +1005,75 @@ export function LeadFormPage({
         allowCustomName
       />
 
-      <CrmSection title="End Customer Detail" icon={Users}>
+      <CrmSection title="Sale Type" icon={Handshake}>
         <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
-          <FinanceField label="End Customer *">
-            <Input
-              value={form.end_customer_name ?? ""}
-              onChange={(e) => set("end_customer_name", e.target.value)}
-            />
-          </FinanceField>
-          <FinanceField label="Industry">
-            <FinanceSelect
-              value={
-                !form.industry || INDUSTRIES.includes(form.industry)
-                  ? (form.industry ?? "")
-                  : "Others"
-              }
-              onChange={(e) => {
-                const value = e.target.value;
-                if (value === "Others") {
-                  set("industry", industryOther.trim() || "Others");
-                } else {
-                  setIndustryOther("");
-                  set("industry", value);
-                }
-              }}
+          <FinanceField label="Sale Type *" className="md:col-span-2">
+            <div
+              role="group"
+              aria-label="Sale type"
+              className="flex flex-wrap gap-4 rounded-lg border border-input px-2.5 py-2"
             >
-              <option value="">None</option>
-              {INDUSTRIES.map((industry) => (
-                <option key={industry} value={industry}>
-                  {industry}
-                </option>
-              ))}
-            </FinanceSelect>
+              {(
+                [
+                  { value: "sell_through" as const, label: "Sell Through" },
+                  { value: "sell_to" as const, label: "Sell To" },
+                ] as const
+              ).map((option) => {
+                const checked = (form.sale_type || "") === option.value;
+                return (
+                  <label
+                    key={option.value}
+                    className="inline-flex cursor-pointer items-center gap-2 text-sm transition-colors duration-150"
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-4 cursor-pointer accent-primary"
+                      checked={checked}
+                      onChange={() => {
+                        const accountName = (company?.customer_name || "").trim();
+                        if (checked) {
+                          setForm((prev) => ({
+                            ...prev,
+                            sale_type: "",
+                            end_customer_name:
+                              option.value === "sell_to" ? "" : prev.end_customer_name,
+                          }));
+                          return;
+                        }
+                        setForm((prev) => ({
+                          ...prev,
+                          sale_type: option.value,
+                          end_customer_name:
+                            option.value === "sell_to"
+                              ? accountName
+                              : option.value === "sell_through" &&
+                                (prev.sale_type || "") === "sell_to"
+                                ? ""
+                                : prev.end_customer_name,
+                        }));
+                      }}
+                    />
+                    {option.label}
+                  </label>
+                );
+              })}
+            </div>
           </FinanceField>
-          {form.industry === "Others" ||
-            (form.industry && !INDUSTRIES.includes(form.industry)) ? (
-            <FinanceField label="Specify industry">
+          {(form.sale_type || "") === "sell_through" ? (
+            <FinanceField label="End Customer Name *">
               <Input
-                value={
-                  form.industry === "Others"
-                    ? industryOther
-                    : INDUSTRIES.includes(form.industry ?? "")
-                      ? ""
-                      : (form.industry ?? "")
-                }
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setIndustryOther(value);
-                  set("industry", value.trim() || "Others");
-                }}
+                value={form.end_customer_name ?? ""}
+                onChange={(e) => set("end_customer_name", e.target.value)}
+                placeholder="Enter end customer name"
+              />
+            </FinanceField>
+          ) : null}
+          {(form.sale_type || "") === "sell_to" ? (
+            <FinanceField label="Account Name">
+              <Input
+                value={company?.customer_name ?? ""}
+                disabled
+                aria-readonly="true"
               />
             </FinanceField>
           ) : null}

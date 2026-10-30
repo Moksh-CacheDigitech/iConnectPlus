@@ -94,6 +94,7 @@ const CURRENT_STATE_TITLES = new Set([
   "Quote Approved",
   "Quote Sent",
   "Quote Accepted",
+  "Deal Won",
   "Customer PO Attached",
   "Customer PO Sent for Approval",
   "Customer PO Approved",

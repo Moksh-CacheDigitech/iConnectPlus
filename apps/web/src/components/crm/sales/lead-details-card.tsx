@@ -2,12 +2,12 @@
 
 import {
   Building2,
+  Handshake,
   MessageSquareText,
   MapPin,
   Package,
   Truck,
   UserPlus,
-  Users,
 } from "lucide-react";
 
 import { CRM_TABLE_HEAD_CELL, CRM_TABLE_HEAD_ROW, CrmSection } from "@/components/crm/crm-ui";
@@ -288,10 +288,35 @@ export function LeadDetailsCard({
         rows={parseDistributorPartnerRows(lead).filter((row) => row.name.trim())}
       />
 
-      <CrmSection title="End Customer Detail" icon={Users}>
+      <CrmSection title="Sale Type" icon={Handshake}>
         <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
-          <LeadReadOnlyField label="End Customer *" value={textOrDash(lead.end_customer_name)} />
-          <LeadReadOnlyField label="Industry" value={textOrDash(lead.industry) || "None"} />
+          <LeadReadOnlyField
+            label="Sale Type *"
+            value={
+              (lead.sale_type || "").trim().toLowerCase() === "sell_to"
+                ? "Sell To"
+                : (lead.sale_type || "").trim().toLowerCase() === "sell_through"
+                  ? "Sell Through"
+                  : lead.end_customer_name
+                    ? companyName &&
+                      lead.end_customer_name.trim().toLowerCase() ===
+                      companyName.trim().toLowerCase()
+                      ? "Sell To"
+                      : "Sell Through"
+                    : "-"
+            }
+          />
+          {(lead.sale_type || "").trim().toLowerCase() === "sell_to" ||
+            (companyName &&
+              (lead.end_customer_name || "").trim().toLowerCase() ===
+              companyName.trim().toLowerCase()) ? (
+            <LeadReadOnlyField label="Account Name" value={textOrDash(companyName)} />
+          ) : (
+            <LeadReadOnlyField
+              label="End Customer Name *"
+              value={textOrDash(lead.end_customer_name)}
+            />
+          )}
         </div>
       </CrmSection>
 

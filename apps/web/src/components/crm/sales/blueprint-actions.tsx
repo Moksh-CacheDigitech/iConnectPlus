@@ -226,9 +226,17 @@ const ACTION_CONFIG: Record<string, ActionConfig> = {
     fields: [],
     description: "Marks this quote as sent to the customer.",
   },
-  negotiate: { label: "Move to Negotiation", fields: [REMARK_FIELD_ALT] },
+  negotiate: {
+    label: "Create Quote Version",
+    fields: [REMARK_FIELD_ALT],
+    description: "Freezes this version and opens the next quote draft for re-approval.",
+  },
   follow_up: { label: "Move to Follow-up", fields: [REMARK_FIELD_ALT] },
-  accept: { label: "Quote Accepted", fields: [REMARK_FIELD_ALT] },
+  accept: {
+    label: "Deal Won",
+    fields: [REMARK_FIELD_ALT],
+    description: "Marks this quote as accepted and the deal as won.",
+  },
   approve: { label: "Approve", fields: [REMARK_FIELD_ALT] },
   reject: {
     label: "Reject",
@@ -254,6 +262,9 @@ const ACTION_CONFIG: Record<string, ActionConfig> = {
 
 const BLUE_ACTION_BUTTON_CLASS =
   "border-blue-900 bg-blue-800 font-bold text-white hover:bg-blue-900 hover:text-white dark:border-blue-700 dark:bg-blue-800 dark:text-white dark:hover:bg-blue-700";
+
+const WON_BUTTON_CLASS =
+  "border-emerald-800 bg-emerald-700 font-bold text-white hover:bg-emerald-800 hover:text-white dark:border-emerald-600 dark:bg-emerald-700 dark:text-white dark:hover:bg-emerald-600";
 
 const LOST_BUTTON_CLASS =
   "border-red-800 bg-red-700 font-bold text-white hover:bg-red-800 hover:text-white dark:border-red-600 dark:bg-red-700 dark:text-white dark:hover:bg-red-600";
@@ -282,14 +293,15 @@ function isOutlookMailExportFile(file: File): boolean {
   return OUTLOOK_MAIL_EXPORT_EXTENSIONS.has(name.slice(dot));
 }
 
-const QUOTE_FLOW_ACTIONS = new Set(["send_to_customer", "accept", "negotiate", "follow_up"]);
+const QUOTE_FLOW_ACTIONS = new Set(["send_to_customer", "negotiate", "follow_up"]);
+
+const WON_ACTIONS = new Set(["accept", "deal_won"]);
 
 const PRIMARY_FLOW_ACTIONS = new Set([
   "convert",
   "create_quote",
   "create_ovf",
   "share_to_scm",
-  "deal_won",
 ]);
 
 const APPROVAL_ACTIONS = new Set([
@@ -704,6 +716,9 @@ export function BlueprintActions({
   }
 
   const activeConfig = activeAction ? resolveConfig(activeAction) : null;
+  const activeLabel = activeAction
+    ? (actionLabelOverrides?.[activeAction] ?? activeConfig?.label ?? "")
+    : "";
   const activePinnedApproverIds = activeAction ? resolvePinnedApproverIds(activeAction) : [];
   const orderedActions = [...visibleActions].sort((a, b) => {
     const rank = (action: string) => {
@@ -715,8 +730,8 @@ export function BlueprintActions({
       if (action === "send_sow_approval") return 5;
       if (action === "deal_reg") return 6;
       if (action === "send_to_customer") return 7;
-      if (action === "accept") return 8;
-      if (action === "negotiate") return 9;
+      if (action === "negotiate") return 8;
+      if (action === "accept") return 9;
       if (action === "follow_up") return 10;
       if (action === "attach_po") return 11;
       if (action === "send_po_approval") return 11;
@@ -759,15 +774,18 @@ export function BlueprintActions({
               const isAttach = ATTACH_ACTIONS.has(action);
               const isApproval = APPROVAL_ACTIONS.has(action);
               const isLost = action === "lost";
+              const isWon = WON_ACTIONS.has(action);
               const isOemQuote = OEM_QUOTE_ACTIONS.has(action);
               const isQuoteFlow = QUOTE_FLOW_ACTIONS.has(action);
               const isPrimaryFlow =
                 PRIMARY_FLOW_ACTIONS.has(action) || action.startsWith("create_ovf:");
               const colorClass = isLost
                 ? LOST_BUTTON_CLASS
-                : isAttach || isApproval || isOemQuote || isQuoteFlow || isPrimaryFlow
-                  ? BLUE_ACTION_BUTTON_CLASS
-                  : undefined;
+                : isWon
+                  ? WON_BUTTON_CLASS
+                  : isAttach || isApproval || isOemQuote || isQuoteFlow || isPrimaryFlow
+                    ? BLUE_ACTION_BUTTON_CLASS
+                    : undefined;
               const variant = colorClass ? "outline" : config.tone === "destructive" ? "destructive" : "outline";
               return (
                 <Fragment key={action}>
@@ -800,10 +818,10 @@ export function BlueprintActions({
 
       <ConfirmDialog
         open={Boolean(activeAction && activeConfig)}
-        title={activeConfig?.label ?? ""}
+        title={activeLabel}
         description={activeConfig?.description}
         tone={activeConfig?.tone}
-        confirmLabel={activeConfig?.label}
+        confirmLabel={activeLabel || activeConfig?.label}
         busy={busy}
         contentClassName={
           activeAction && SEND_APPROVAL_ACTIONS.has(activeAction) ? "max-w-lg" : undefined

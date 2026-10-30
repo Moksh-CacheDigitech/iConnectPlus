@@ -89,9 +89,9 @@ const CUSTOM_ACTIONS = ["quote_accepted"];
 /** Quote follow-on actions to surface on the opportunity BlueprintActions strip. */
 const QUOTE_STAGE_ACTIONS: Record<string, string[]> = {
   approved_internal: ["send_to_customer"],
-  sent_to_customer: ["accept", "negotiate", "follow_up"],
-  negotiation: ["accept", "negotiate", "follow_up"],
-  follow_up: ["accept", "negotiate", "follow_up"],
+  sent_to_customer: ["negotiate", "accept", "lost"],
+  negotiation: ["negotiate", "accept", "lost"],
+  follow_up: ["negotiate", "accept", "lost"],
 };
 
 /** OVF follow-on actions to surface on the opportunity BlueprintActions strip. */
@@ -359,14 +359,24 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
     ovfs.length === 0 &&
     blueprint.state === "ovf_ready";
   const createOvfActions = canCreateOvf ? ["create_ovf"] : [];
-  const createOvfLabels: Record<string, string> = canCreateOvf
-    ? {
-      create_ovf:
-        quotesForOvf.length > 1
-          ? `Create OVF · ${quotesForOvf.length} quotes`
-          : "Create OVF",
-    }
-    : {};
+  const activeQuoteRevision = Math.max(1, Number(activeQuote?.quote_revision) || 1);
+  const createOvfLabels: Record<string, string> = {
+    ...(canCreateOvf
+      ? {
+        create_ovf:
+          quotesForOvf.length > 1
+            ? `Create OVF · ${quotesForOvf.length} quotes`
+            : "Create OVF",
+      }
+      : {}),
+    ...(activeQuote
+      ? {
+        negotiate: `Create Quote V${activeQuoteRevision + 1}`,
+        accept: "Deal Won",
+        lost: "Deal Lost",
+      }
+      : {}),
+  };
   const showQuotes =
     quotes.length > 0 ||
     ["quote_ready", "quote_in_progress", "po_pending", "po_approval", "ovf_ready", "won"].includes(
@@ -380,9 +390,9 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
       : [];
   const ovfFollowOnActions =
     existingOvf &&
-    !existingOvf.locked &&
-    !existingOvf.deal_won &&
-    !existingOvf.shared_to_scm
+      !existingOvf.locked &&
+      !existingOvf.deal_won &&
+      !existingOvf.shared_to_scm
       ? (OVF_STAGE_ACTIONS[existingOvf.blueprint_state] ?? [])
       : [];
   const blueprintActions = Array.from(

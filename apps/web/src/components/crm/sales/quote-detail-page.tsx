@@ -10,6 +10,7 @@ import {
   FileText,
   GitBranch,
   MapPin,
+  Pencil,
   Scale,
 } from "lucide-react";
 
@@ -28,17 +29,13 @@ import { ApprovalBanner } from "@/components/crm/sales/approval-banner";
 import { CrmEntityRejectionAlert } from "@/components/crm/sales/crm-approval-inbox-listener";
 import { BlueprintActions } from "@/components/crm/sales/blueprint-actions";
 import { resolveSalesStageLabel } from "@/lib/crm/sales-blueprint-stages";
-import { CrmDetailEditLink } from "@/components/crm/sales/crm-detail-edit-link";
-import { CrmRecordActionsMenu } from "@/components/crm/sales/crm-record-actions-menu";
 import { QuoteLineTable } from "@/components/crm/sales/quote-line-table";
 import { QuoteSplitPanel } from "@/components/crm/sales/quote-split-panel";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import {
   buildQuotePrintPdfAttachment,
-  cloneQuoteRecord,
   downloadQuoteExport,
-  printQuotePreview,
 } from "@/lib/crm/crm-record-actions";
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
 import { ApiClientError } from "@/services/api-client";
@@ -46,7 +43,6 @@ import {
   applyOpportunityAction,
   applyQuoteAction,
   approveQuoteInternally,
-  deleteQuote,
   formatInrPrecise,
   fullName,
   getOpportunity,
@@ -69,6 +65,35 @@ import {
   type QuoteLine,
   type QuoteRevisionRow,
 } from "@/services/sales-crm-service";
+
+const QUOTE_APPROVED_STAGES = new Set([
+  "approved_internal",
+  "sent_to_customer",
+  "negotiation",
+  "follow_up",
+  "accepted",
+]);
+
+/** Stages where Edit freezes the current version and opens the next draft (same as negotiate). */
+const QUOTE_EDIT_OPENS_NEW_VERSION = new Set([
+  "approved_internal",
+  "sent_to_customer",
+  "negotiation",
+  "follow_up",
+]);
+
+function isQuoteApproved(quote: Quote): boolean {
+  return (
+    quote.approval_status === "approved" || QUOTE_APPROVED_STAGES.has(quote.quote_stage)
+  );
+}
+
+function canShowQuoteEdit(quote: Quote, locked: boolean): boolean {
+  if (locked) return false;
+  if (quote.quote_stage === "accepted" || quote.quote_stage === "lost") return false;
+  if (quote.quote_stage === "internal_approval") return false;
+  return true;
+}
 
 function formatQuoteStage(stage: string): string {
   if (!stage) return "-";
@@ -308,6 +333,9 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
     ...(revisionNo > 1
       ? { send_for_approval: `Send V${revisionNo} for Approval` }
       : {}),
+    negotiate: `Create Quote V${revisionNo + 1}`,
+    accept: "Deal Won",
+    lost: "Deal Lost",
   };
 
   const oppTransitionActions =
@@ -350,16 +378,32 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
       !(action === "lost" && dealAlreadyWon),
   );
 
-  async function onPrintPreview() {
-    const q = quote;
-    if (!q) return;
-    await printQuotePreview(q, lines);
+  function canDownloadRevision(row: QuoteRevisionRow): boolean {
+    // Current version: only after internal approval (or later customer stages).
+    if (row.is_current) return isQuoteApproved(quote);
+    // Prior versions exist only after negotiate from an approved/sent quote.
+    return Boolean(row.snapshotted_at);
   }
 
-  async function onExport() {
-    const q = quote;
-    if (!q) return;
-    await downloadQuoteExport(q, lines);
+  async function onEditQuote() {
+    if (!quote) return;
+    setBusy(true);
+    setBanner(null);
+    try {
+      if (QUOTE_EDIT_OPENS_NEW_VERSION.has(quote.quote_stage)) {
+        await applyQuoteAction(quoteId, "negotiate", {
+          remark: "Edit opened a new quote version for re-approval",
+        });
+      }
+      router.push(`/crm/quotes/${quoteId}/edit`);
+    } catch (err) {
+      setBanner({
+        text: err instanceof ApiClientError ? err.message : "Failed to open quote for edit",
+        tone: "error",
+      });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onDownloadRevision(revisionNo: number) {
@@ -420,7 +464,21 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
         title={`${formatCrmCode(quote.quote_no)}${quote.quote_revision > 1 ? ` V${quote.quote_revision}` : ""}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <CrmDetailEditLink href={`/crm/quotes/${quote.id}/edit`} />
+            {canShowQuoteEdit(quote, blueprint.locked) ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 cursor-pointer gap-1.5 px-2.5 text-[0.8rem] transition-colors duration-200"
+                disabled={busy}
+                onClick={() => void onEditQuote()}
+              >
+                <Pencil className="size-3.5" />
+                {busy && QUOTE_EDIT_OPENS_NEW_VERSION.has(quote.quote_stage)
+                  ? "Opening…"
+                  : "Edit"}
+              </Button>
+            ) : null}
             {existingOvf ? (
               <Link
                 href={`/crm/ovf/${existingOvf.id}`}
@@ -428,24 +486,6 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
               >
                 Open OVF
               </Link>
-            ) : null}
-            {quote ? (
-              <CrmRecordActionsMenu
-                entityType="quote"
-                entityId={quote.id}
-                entityLabel="Quote"
-                entityName={formatCrmCode(quote.quote_no)}
-                shareTitle={formatCrmCode(quote.quote_no)}
-                onClone={() => cloneQuoteRecord(quote, lines, router)}
-                onPrintPreview={onPrintPreview}
-                onExport={onExport}
-                onDelete={() => deleteQuote(quote.id)}
-                onDeleted={() =>
-                  router.push(
-                    opportunity ? `/crm/opportunities/${opportunity.id}` : "/crm/quotes",
-                  )
-                }
-              />
             ) : null}
           </div>
         }
@@ -535,18 +575,22 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
                         : `${Number(row.negotiation_pct || 0) > 0 ? "+" : ""}${Number(row.negotiation_pct || 0).toFixed(2)}%`}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-7 cursor-pointer gap-1.5 px-2.5 text-[0.8rem] transition-colors duration-200"
-                        disabled={downloadingRevision === row.revision_no || busy}
-                        onClick={() => void onDownloadRevision(row.revision_no)}
-                        aria-label={`Download V${row.revision_no} print PDF`}
-                      >
-                        <Download className="size-3.5" />
-                        {downloadingRevision === row.revision_no ? "…" : "Download"}
-                      </Button>
+                      {canDownloadRevision(row) ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 cursor-pointer gap-1.5 px-2.5 text-[0.8rem] transition-colors duration-200"
+                          disabled={downloadingRevision === row.revision_no || busy}
+                          onClick={() => void onDownloadRevision(row.revision_no)}
+                          aria-label={`Download V${row.revision_no} print PDF`}
+                        >
+                          <Download className="size-3.5" />
+                          {downloadingRevision === row.revision_no ? "…" : "Download"}
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -556,7 +600,8 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
           Negotiation % compares each version grand total against original V1. Moving to negotiation
-          creates the next version and restarts approval. Download prints that version&apos;s PDF.
+          creates the next version and restarts approval. Print PDF download is available after that
+          version is approved.
         </p>
       </CrmSection>
 

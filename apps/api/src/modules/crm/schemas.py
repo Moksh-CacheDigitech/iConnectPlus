@@ -143,6 +143,7 @@ class SalesLeadUpdate(BaseModel):
     distributor_department: str | None = None
     end_customer_name: str | None = None
     end_customer_location: str | None = None
+    sale_type: str | None = None
     entity_name: str | None = None
     entity_email: str | None = None
     entity_address: str | None = None
@@ -154,6 +155,7 @@ class SalesLeadUpdate(BaseModel):
     presales_owner_id: UUID | None = None
     presales_call_aligned: bool | None = None
     presales_call_contact_name: str | None = None
+    presales_call_by_product: str | None = None
 
 
 class LeadAssignRequest(BaseModel):
@@ -237,6 +239,7 @@ class LeadResponse(OrmModel):
     distributor_department: str | None = None
     end_customer_name: str | None = None
     end_customer_location: str | None = None
+    sale_type: str | None = None
     notes: str | None
     convert_remark: str | None = None
     lost_reason: str | None = None
@@ -245,6 +248,7 @@ class LeadResponse(OrmModel):
     presales_owner_id: UUID | None = None
     presales_call_aligned: bool | None = None
     presales_call_contact_name: str | None = None
+    presales_call_by_product: str | None = None
     version: int
 
 
@@ -1112,6 +1116,7 @@ class LeadCreateFromCompany(BaseModel):
     distributor_department: str | None = None
     end_customer_name: str | None = None
     end_customer_location: str | None = None
+    sale_type: str | None = None
     entity_name: str | None = None
     entity_email: str | None = None
     entity_address: str | None = None
@@ -1121,6 +1126,9 @@ class LeadCreateFromCompany(BaseModel):
     requires_sow: bool = False
     notes: str | None = None
     presales_owner_id: UUID | None = None
+    presales_call_aligned: bool | None = None
+    presales_call_contact_name: str | None = None
+    presales_call_by_product: str | None = None
 
 
 class LeadLostRequest(BaseModel):
@@ -1174,11 +1182,13 @@ class SalesLeadResponse(OrmModel):
     distributor_department: str | None = None
     end_customer_name: str | None = None
     end_customer_location: str | None = None
+    sale_type: str | None = None
     notes: str | None = None
     converted_opportunity_id: UUID | None
     presales_owner_id: UUID | None = None
     presales_call_aligned: bool | None = None
     presales_call_contact_name: str | None = None
+    presales_call_by_product: str | None = None
     version: int
 
 
@@ -1452,6 +1462,7 @@ class QuoteLineCreate(BaseModel):
     product_name: str
     hsn_sac: str | None = None
     description: str | None = None
+    sub_product_category: str | None = None
     line_type: str = "hardware"
     qty: Decimal = Decimal("1")
     unit_cost: Decimal = Decimal("0")
@@ -1463,6 +1474,7 @@ class QuoteLineUpdate(BaseModel):
     product_name: str | None = None
     hsn_sac: str | None = None
     description: str | None = None
+    sub_product_category: str | None = None
     line_type: str | None = None
     qty: Decimal | None = None
     unit_cost: Decimal | None = None
@@ -1479,6 +1491,7 @@ class QuoteLineResponse(OrmModel):
     product_name: str
     hsn_sac: str | None
     description: str | None = None
+    sub_product_category: str | None = None
     line_type: str
     qty: Decimal
     unit_cost: Decimal

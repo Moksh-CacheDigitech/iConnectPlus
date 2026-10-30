@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import UUID
@@ -39,6 +40,53 @@ from modules.foundation.models.security import SecUser
 from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.master_data.published import EmployeeCommands, EmployeeRead
 from modules.master_data.repository.employee_repository import EmployeeRepository
+
+
+def _lead_product_types(lead: CrmLead) -> list[str]:
+    raw = (lead.product_type or "").replace("&", ",")
+    out: list[str] = []
+    for part in raw.split(","):
+        name = part.strip()
+        if not name or name in out:
+            continue
+        out.append(name)
+    return out
+
+
+def _parse_presales_by_product(raw: str | None) -> dict[str, dict]:
+    if not (raw or "").strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    out: dict[str, dict] = {}
+    for key, value in parsed.items():
+        product = str(key or "").strip()
+        if not product or not isinstance(value, dict):
+            continue
+        aligned = value.get("aligned")
+        if aligned is not True and aligned is not False:
+            aligned = None
+        out[product] = {
+            "aligned": aligned,
+            "contact_name": str(value.get("contact_name") or "").strip(),
+        }
+    return out
+
+
+def _presales_ready_from_map(product_types: list[str], by_product: dict[str, dict]) -> bool:
+    if not product_types:
+        return False
+    for product in product_types:
+        entry = by_product.get(product) or {}
+        if entry.get("aligned") is not True:
+            return False
+        if not str(entry.get("contact_name") or "").strip():
+            return False
+    return True
 
 
 class LeadSourceService:
@@ -451,7 +499,44 @@ class LeadService:
             # Technical team is always looped in on hardware/services leads.
             fields.pop("requires_boq", None)
             fields.pop("requires_sow", None)
-        if "presales_call_aligned" in fields or "presales_call_contact_name" in fields:
+        if "presales_call_by_product" in fields:
+            raw_map = fields.get("presales_call_by_product")
+            by_product = _parse_presales_by_product(
+                str(raw_map) if raw_map is not None else None
+            )
+            product_types = _lead_product_types(lead)
+            for product in product_types:
+                entry = by_product.get(product) or {}
+                aligned = entry.get("aligned")
+                contact = str(entry.get("contact_name") or "").strip()
+                if aligned is not True and aligned is not False:
+                    raise ConflictException(
+                        f"Select Yes or No for PreSales call alignment on {product}"
+                    )
+                if aligned is True and not contact:
+                    raise ConflictException(
+                        f"PreSales contact person is required for {product} when Call aligned is Yes"
+                    )
+            fields["presales_call_by_product"] = (
+                json.dumps(by_product, separators=(",", ":")) if by_product else None
+            )
+            all_yes = bool(product_types) and all(
+                (by_product.get(product) or {}).get("aligned") is True
+                for product in product_types
+            )
+            any_no = any(
+                (by_product.get(product) or {}).get("aligned") is False
+                for product in product_types
+            )
+            contacts = [
+                str((by_product.get(product) or {}).get("contact_name") or "").strip()
+                for product in product_types
+                if (by_product.get(product) or {}).get("aligned") is True
+                and str((by_product.get(product) or {}).get("contact_name") or "").strip()
+            ]
+            fields["presales_call_aligned"] = True if all_yes else False if any_no else None
+            fields["presales_call_contact_name"] = "; ".join(contacts) if contacts else None
+        elif "presales_call_aligned" in fields or "presales_call_contact_name" in fields:
             aligned = fields.get("presales_call_aligned", lead.presales_call_aligned)
             contact = fields.get(
                 "presales_call_contact_name",
@@ -545,9 +630,14 @@ class LeadService:
 
     @staticmethod
     def _presales_call_ready(lead: CrmLead) -> bool:
-        """BOQ/SOW My Jobs unlock only after a Yes call with contact person name."""
+        """BOQ/SOW My Jobs unlock only after Yes + contact for every product type."""
         if not LeadService._boq_sow_mandatory(lead):
             return True
+        product_types = _lead_product_types(lead)
+        by_product = _parse_presales_by_product(getattr(lead, "presales_call_by_product", None))
+        if product_types and by_product:
+            return _presales_ready_from_map(product_types, by_product)
+        # Legacy single-field fallback for older leads.
         return bool(lead.presales_call_aligned) and bool(
             (lead.presales_call_contact_name or "").strip()
         )
@@ -785,18 +875,32 @@ class LeadService:
                 file_path=row.file_path,
                 content_type=row.content_type,
             )
-        flags = {}
+        flags: dict = {}
         if lead.boq_attached:
             flags["boq_attached"] = True
-            # Lead My Jobs attach is equivalent to opportunity provide_* (sets approved).
-            flags["boq_approved"] = True
+            flags["boq_approved"] = False
         if lead.sow_attached:
             flags["sow_attached"] = True
-            flags["sow_approved"] = True
+            flags["sow_approved"] = False
         if flags:
-            # DR is assigned on lead create — skip Deal Registration and land on OEM.
-            flags["blueprint_state"] = "oem_pending"
+            # After lead attach, opportunity must go through BOQ/SOW approval My Jobs
+            # (same path as opportunity provide_* → _auto_raise_doc_approval).
+            if lead.boq_attached:
+                flags["blueprint_state"] = "boq_approval"
+            else:
+                flags["blueprint_state"] = "sow_approval"
+            flags["locked"] = True
             OpportunityRepository(self._db).update(ctx, opportunity_id, **flags)
+            from modules.crm.models.opportunity import CrmOpportunity
+            from modules.crm.service.blueprint_service import OpportunityBlueprintService
+
+            opp = self._db.get(CrmOpportunity, opportunity_id)
+            if opp is not None:
+                blueprint = OpportunityBlueprintService(self._db)
+                if lead.boq_attached:
+                    blueprint._auto_raise_doc_approval(ctx, opp, doc="boq")
+                if lead.sow_attached:
+                    blueprint._auto_raise_doc_approval(ctx, opp, doc="sow")
 
     def delete(self, ctx: TenantContext, lead_id: UUID) -> None:
         self._crm_admin.ensure_admin(ctx)

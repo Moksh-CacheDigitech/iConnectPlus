@@ -143,6 +143,7 @@ export function salesLeadToCreateInput(lead: SalesLead): LeadCreateFromCompanyIn
     distributor_department: lead.distributor_department ?? null,
     end_customer_name: lead.end_customer_name ?? null,
     end_customer_location: lead.end_customer_location ?? null,
+    sale_type: lead.sale_type ?? null,
     entity_name: lead.entity_name,
     entity_email: lead.entity_email,
     entity_address: lead.entity_address,

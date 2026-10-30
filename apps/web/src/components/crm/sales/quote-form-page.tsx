@@ -25,8 +25,8 @@ import { resolveSessionEmployeeLabel } from "@/lib/crm/session-employee";
 import {
   normalizeQuoteServiceType,
   parseLeadProductTypes,
+  parseLeadSubProductCategories,
 } from "@/lib/crm/lead-product-options";
-import { downloadQuoteExport } from "@/lib/crm/crm-record-actions";
 import { ApiClientError } from "@/services/api-client";
 import { extractVendorQuoteLines, getDefaultQuoteTerms } from "@/services/crm-deal-controls-service";
 import {
@@ -95,6 +95,7 @@ type LineDraft = {
   product_name: string;
   hsn_sac: string;
   description: string;
+  sub_product_category: string;
   line_type: string;
   qty: string;
   unit_cost: string;
@@ -142,6 +143,7 @@ function newLine(lineType: string = "hardware"): LineDraft {
     product_name: "",
     hsn_sac: "",
     description: "",
+    sub_product_category: "",
     line_type: lineType,
     qty: "1",
     unit_cost: "0",
@@ -219,6 +221,7 @@ async function resolveQuoteContact(input: {
 
 const LINE_TABLE_HEADERS = [
   "S.No",
+  "Sub Product Type",
   "Product Name",
   "HSN/SAC Code",
   "Item Description",
@@ -234,6 +237,10 @@ const LINE_TABLE_HEADERS = [
   "Total Amount incl. GST",
   "",
 ] as const;
+
+const SERVICE_LINE_TABLE_HEADERS = LINE_TABLE_HEADERS.filter(
+  (label) => label !== "Sub Product Type",
+);
 
 export function QuoteFormPage({
   opportunityId,
@@ -262,6 +269,7 @@ export function QuoteFormPage({
   const [importingVendor, setImportingVendor] = useState(false);
   const [vendorImportNote, setVendorImportNote] = useState<string | null>(null);
   const [leadProductType, setLeadProductType] = useState<string | null>(null);
+  const [leadSubProductCategories, setLeadSubProductCategories] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -283,9 +291,15 @@ export function QuoteFormPage({
             : Promise.resolve([]),
           listCrmMemberOptions().catch(() => []),
         ]);
+        const leadRow = opportunityRow.lead_id
+          ? await getSalesLead(opportunityRow.lead_id).catch(() => null)
+          : null;
         setQuote(quoteRow);
         setOpportunity(opportunityRow);
-        setLeadProductType(opportunityRow.product_type ?? null);
+        setLeadProductType(leadRow?.product_type ?? opportunityRow.product_type ?? null);
+        setLeadSubProductCategories(
+          parseLeadSubProductCategories(leadRow?.sub_product_category),
+        );
         setContacts(contactRows);
         setForm({
           project_title: quoteRow.project_title ?? "",
@@ -326,6 +340,7 @@ export function QuoteFormPage({
               product_name: line.product_name,
               hsn_sac: line.hsn_sac ?? "",
               description: line.description ?? "",
+              sub_product_category: line.sub_product_category ?? "",
               line_type: line.line_type || "hardware",
               qty: String(line.qty ?? 1),
               unit_cost: String(line.unit_cost ?? 0),
@@ -376,6 +391,8 @@ export function QuoteFormPage({
       setOpportunity(opportunityRow);
       const productTypeSource = leadRow?.product_type ?? opportunityRow.product_type ?? null;
       setLeadProductType(productTypeSource);
+      const leadSubCats = parseLeadSubProductCategories(leadRow?.sub_product_category);
+      setLeadSubProductCategories(leadSubCats);
       const resolvedContact = await resolveQuoteContact({
         opportunity: opportunityRow,
         company: companyRow,
@@ -437,10 +454,20 @@ export function QuoteFormPage({
         Boolean(opportunityRow.has_services) || selectedTypes.includes("Services");
       const wantsProducts =
         selectedTypes.length === 0 || selectedTypes.some((type) => type !== "Services");
+      const defaultSub =
+        leadSubCats.length === 1 ? leadSubCats[0] : "";
       const starter: LineDraft[] = [];
-      if (wantsProducts) starter.push(newLine("hardware"));
-      if (wantsServices) starter.push(newLine("services"));
-      setLines(starter.length > 0 ? starter : [newLine("hardware")]);
+      if (wantsProducts) {
+        starter.push({ ...newLine("hardware"), sub_product_category: defaultSub });
+      }
+      if (wantsServices) {
+        starter.push({ ...newLine("services"), sub_product_category: defaultSub });
+      }
+      setLines(
+        starter.length > 0
+          ? starter
+          : [{ ...newLine("hardware"), sub_product_category: defaultSub }],
+      );
       setInitialLineIds([]);
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Failed to load quote details");
@@ -636,12 +663,55 @@ export function QuoteFormPage({
       product_name: line.product_name.trim(),
       hsn_sac: line.hsn_sac || null,
       description: line.description || null,
+      sub_product_category: isServiceLine(line)
+        ? null
+        : line.sub_product_category.trim() || null,
       line_type: line.line_type || "hardware",
       qty: Number(line.qty) || 1,
       unit_cost: unitPrice,
       unit_sell: unitPrice * (1 + marginPct / 100),
       gst_pct: Number(line.gst_pct) || 0,
     };
+  }
+
+  function subProductOptionsForLine(line: LineDraft): string[] {
+    const selected = line.sub_product_category.trim();
+    if (selected && !leadSubProductCategories.includes(selected)) {
+      return [selected, ...leadSubProductCategories];
+    }
+    return leadSubProductCategories;
+  }
+
+  function addLineRow(lineType: string) {
+    const defaultSub =
+      leadSubProductCategories.length === 1 ? leadSubProductCategories[0] : "";
+    setLines((current) => [
+      ...current,
+      { ...newLine(lineType), sub_product_category: defaultSub },
+    ]);
+  }
+
+  function renderSubProductSelect(line: LineDraft) {
+    const options = subProductOptionsForLine(line);
+    return (
+      <td className="px-2 py-2">
+        <FinanceSelect
+          className="w-40 min-w-[9rem] cursor-pointer"
+          value={line.sub_product_category}
+          disabled={options.length === 0}
+          onChange={(e) => setLine(line.key, "sub_product_category", e.target.value)}
+        >
+          <option value="">
+            {options.length === 0 ? "No lead sub-products" : "Select"}
+          </option>
+          {options.map((category) => (
+            <option key={category} value={category}>
+              {category}
+            </option>
+          ))}
+        </FinanceSelect>
+      </td>
+    );
   }
 
   function quotePayload() {
@@ -680,14 +750,6 @@ export function QuoteFormPage({
       description: form.description || null,
       reason_for_discount: form.reason_for_discount || null,
     };
-  }
-
-  async function downloadSavedQuotePdf(savedQuoteId: string) {
-    const [savedQuote, savedLines] = await Promise.all([
-      getQuote(savedQuoteId),
-      listQuoteLines(savedQuoteId),
-    ]);
-    await downloadQuoteExport(savedQuote, savedLines);
   }
 
   async function onSave() {
@@ -756,11 +818,6 @@ export function QuoteFormPage({
         savedId = created.id;
       }
 
-      try {
-        await downloadSavedQuotePdf(savedId);
-      } catch {
-        // Save succeeded; do not block navigation if PDF generation fails.
-      }
       router.push(`/crm/quotes/${savedId}`);
     } catch (err) {
       setError(
@@ -804,7 +861,7 @@ export function QuoteFormPage({
               Cancel
             </Link>
             <Button type="button" className="cursor-pointer" disabled={saving} onClick={() => void onSave()}>
-              {saving ? "Saving…" : "Save and Print"}
+              {saving ? "Saving…" : "Save Quote"}
             </Button>
           </div>
         }
@@ -992,7 +1049,7 @@ export function QuoteFormPage({
                 variant="outline"
                 size="sm"
                 className="cursor-pointer"
-                onClick={() => setLines((current) => [...current, newLine("hardware")])}
+                onClick={() => addLineRow("hardware")}
               >
                 <Plus className="size-3.5" /> Add row
               </Button>
@@ -1033,6 +1090,7 @@ export function QuoteFormPage({
                     return (
                       <tr key={line.key} className="border-b last:border-0">
                         <td className="px-2 py-2 text-center">{index + 1}</td>
+                        {renderSubProductSelect(line)}
                         <td className="px-2 py-2">
                           <Input
                             className="w-40 min-w-[9rem]"
@@ -1145,7 +1203,7 @@ export function QuoteFormPage({
               variant="outline"
               size="sm"
               className="cursor-pointer"
-              onClick={() => setLines((current) => [...current, newLine("services")])}
+              onClick={() => addLineRow("services")}
             >
               <Plus className="size-3.5" /> Add row
             </Button>
@@ -1154,7 +1212,7 @@ export function QuoteFormPage({
             <table className="w-max min-w-full text-left text-xs">
               <thead>
                 <tr className="border-b bg-muted/40 text-[10px] uppercase text-muted-foreground">
-                  {LINE_TABLE_HEADERS.map((label) => (
+                  {SERVICE_LINE_TABLE_HEADERS.map((label) => (
                     <th key={label || "service-actions"} className="whitespace-nowrap px-2 py-2">
                       {label === "Product Name" ? "Service Name" : label}
                     </th>
@@ -1165,7 +1223,7 @@ export function QuoteFormPage({
                 {serviceLines.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={LINE_TABLE_HEADERS.length}
+                      colSpan={SERVICE_LINE_TABLE_HEADERS.length}
                       className="px-4 py-6 text-center text-muted-foreground"
                     >
                       No service lines yet. Add a row for implementation, support, or AMC.

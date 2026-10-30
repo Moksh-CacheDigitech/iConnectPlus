@@ -162,27 +162,28 @@ _TRANSITIONS: dict[str, dict[str, dict[str, str]]] = {
             "reject_internally": "draft",
             "lost": "lost",
         },
-        "approved_internal": {"send_to_customer": "sent_to_customer", "lost": "lost"},
-        "sent_to_customer": {
-            # Negotiation opens a new quote revision back in draft for re-approval.
+        "approved_internal": {
+            "send_to_customer": "sent_to_customer",
+            # Edit (and negotiate) freezes this version and opens the next draft for re-approval.
             "negotiate": "draft",
-            "follow_up": "follow_up",
+            "lost": "lost",
+        },
+        "sent_to_customer": {
+            # Create Quote Vn (negotiate) → next draft; Deal Won (accept); Deal Lost.
+            "negotiate": "draft",
             "accept": "accepted",
             "lost": "lost",
         },
         "negotiation": {
-            # Legacy rows stuck in negotiation restart via negotiate → draft (next
-            # revision). Do not offer send_for_approval here: V1 was already
-            # approved/sent before entering negotiation.
+            # Legacy rows stuck in negotiation: same three outcomes as sent_to_customer.
             "negotiate": "draft",
-            "follow_up": "follow_up",
             "accept": "accepted",
             "lost": "lost",
         },
         "follow_up": {
+            # Legacy follow-up rows: Create Quote Vn / Deal Won / Deal Lost.
             "negotiate": "draft",
             "accept": "accepted",
-            "follow_up": "follow_up",
             "lost": "lost",
         },
         "accepted": {},

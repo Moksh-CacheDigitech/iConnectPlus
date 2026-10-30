@@ -30,9 +30,9 @@ function resolveQuoteStageLabel(
     case "sent_to_customer":
     case "negotiation":
     case "follow_up":
-      return "Quote Sent";
+      return `Quote Sent V${rev}`;
     case "accepted":
-      return "Quote Accepted";
+      return rev > 1 ? `Deal Won · V${rev}` : "Deal Won";
     case "lost":
       return "Deal Lost";
     default:

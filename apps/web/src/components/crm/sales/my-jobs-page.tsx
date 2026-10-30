@@ -50,6 +50,7 @@ const SUPPORTING_ITEMS_ACTION = "provide_supporting_items";
 const PRICE_SUPPORTING_ACTION = "price_supporting_items";
 const SERVICE_VISITS_ACTION = "provide_service_visits";
 const ATTACHMENT_ACTIONS = new Set(["provide_boq_attachment", "provide_sow_attachment"]);
+const DOC_APPROVAL_ACTIONS = new Set(["approve_boq", "approve_sow"]);
 /** Finance → Legal → Management customer PO chain (same two docs on every stage). */
 const PO_APPROVAL_ACTIONS = new Set(["approve_po_finance", "approve_po_terms", "approve_po"]);
 const ACCEPTED_QUOTE_PRINT_NAME = "Accepted_Quote_Print.pdf";
@@ -58,6 +59,21 @@ type PoApprovalDocs = {
   quotePrint: Attachment | null;
   customerPo: Attachment | null;
 };
+
+type DocApprovalFile = {
+  attachment: Attachment | null;
+  label: string;
+};
+
+function isDocApprovalTask(task: ApprovalTask): boolean {
+  return Boolean(task.action && DOC_APPROVAL_ACTIONS.has(task.action));
+}
+
+function docApprovalCategory(action: string | null | undefined): "boq" | "sow" | null {
+  if (action === "approve_boq") return "boq";
+  if (action === "approve_sow") return "sow";
+  return null;
+}
 
 function isPoApprovalTask(task: ApprovalTask): boolean {
   return (
@@ -209,6 +225,7 @@ export function MyJobsPage({
   const [downloadingOvfId, setDownloadingOvfId] = useState<string | null>(null);
   const [downloadingDocKey, setDownloadingDocKey] = useState<string | null>(null);
   const [poDocsByTask, setPoDocsByTask] = useState<Record<string, PoApprovalDocs>>({});
+  const [docApprovalByTask, setDocApprovalByTask] = useState<Record<string, DocApprovalFile>>({});
   const [pricingDrafts, setPricingDrafts] = useState<PricingDraft[]>([]);
   const [loadingPricing, setLoadingPricing] = useState(false);
   const [responding, setResponding] = useState(false);
@@ -216,6 +233,47 @@ export function MyJobsPage({
   // SLA overdue flags are judged against when the list was fetched.
   const [loadedAt, setLoadedAt] = useState(0);
   const router = useRouter();
+
+  const loadDocApprovalFiles = useCallback(async (tasks: ApprovalTask[]) => {
+    const relevant = tasks.filter(isDocApprovalTask);
+    if (relevant.length === 0) {
+      setDocApprovalByTask({});
+      return;
+    }
+    const entries = await Promise.all(
+      relevant.map(async (task) => {
+        const category = docApprovalCategory(task.action);
+        const label = category === "sow" ? "SOW" : "BOQ";
+        if (!category) {
+          return [task.id, { attachment: null, label }] as const;
+        }
+        try {
+          let entityType = task.entity_type;
+          let entityId = task.entity_id;
+          if (task.entity_type === "lead") {
+            const lead = await getSalesLead(task.entity_id).catch(() => null);
+            if (lead?.converted_opportunity_id) {
+              entityType = "opportunity";
+              entityId = lead.converted_opportunity_id;
+            }
+          }
+          const rows = await listAttachments(entityType, entityId).catch(() => [] as Attachment[]);
+          const match =
+            rows.find((row) => row.category === category) ??
+            rows.find((row) =>
+              category === "boq"
+                ? /boq/i.test(row.file_name || "")
+                : /sow/i.test(row.file_name || ""),
+            ) ??
+            null;
+          return [task.id, { attachment: match, label }] as const;
+        } catch {
+          return [task.id, { attachment: null, label }] as const;
+        }
+      }),
+    );
+    setDocApprovalByTask(Object.fromEntries(entries));
+  }, []);
 
   const loadPoDocs = useCallback(async (tasks: ApprovalTask[]) => {
     const relevant = tasks.filter(needsCustomerPoDownload);
@@ -300,15 +358,16 @@ export function MyJobsPage({
 
       setRows(visible);
       setLoadedAt(Date.now());
-      await loadPoDocs(visible);
+      await Promise.all([loadPoDocs(visible), loadDocApprovalFiles(visible)]);
     } catch (err) {
       setRows([]);
       setPoDocsByTask({});
+      setDocApprovalByTask({});
       setError(err instanceof ApiClientError ? err.message : "Failed to load My Jobs");
     } finally {
       setLoading(false);
     }
-  }, [mineOnly, companyAccountId, loadPoDocs]);
+  }, [mineOnly, companyAccountId, loadPoDocs, loadDocApprovalFiles]);
 
   useEffect(() => {
     if (!mineFilterReady) return;
@@ -425,6 +484,25 @@ export function MyJobsPage({
       return;
     }
     const key = `${task.id}-${kind}`;
+    setDownloadingDocKey(key);
+    setError(null);
+    try {
+      await downloadAttachment(attachment.id, attachment.file_name, attachment);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to download document");
+    } finally {
+      setDownloadingDocKey(null);
+    }
+  }
+
+  async function downloadDocApprovalFile(task: ApprovalTask) {
+    const docs = docApprovalByTask[task.id];
+    const attachment = docs?.attachment;
+    if (!attachment) {
+      setError(`${docs?.label || "Document"} file is not attached yet`);
+      return;
+    }
+    const key = `${task.id}-doc`;
     setDownloadingDocKey(key);
     setError(null);
     try {
@@ -693,8 +771,12 @@ export function MyJobsPage({
                   const poDocs = needsCustomerPoDownload(task)
                     ? poDocsByTask[task.id]
                     : undefined;
+                  const docApproval = isDocApprovalTask(task)
+                    ? docApprovalByTask[task.id]
+                    : undefined;
                   const quoteDocKey = `${task.id}-quote`;
                   const poDocKey = `${task.id}-po`;
+                  const docKey = `${task.id}-doc`;
                   return (
                     <tr key={task.id} className="border-b border-border/50 last:border-0 hover:bg-accent/30">
                       <td className="px-3 py-2.5 align-middle">
@@ -791,6 +873,26 @@ export function MyJobsPage({
                               >
                                 <Download className="size-3.5" />
                                 {downloadingDocKey === poDocKey ? "PO…" : "PO"}
+                              </Button>
+                            ) : null}
+                            {isDocApprovalTask(task) ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={!docApproval?.attachment || downloadingDocKey === docKey}
+                                title={
+                                  docApproval?.attachment
+                                    ? docApproval.attachment.file_name
+                                    : `${docApproval?.label || "Document"} file not attached yet`
+                                }
+                                className="cursor-pointer"
+                                onClick={() => void downloadDocApprovalFile(task)}
+                              >
+                                <Download className="size-3.5" />
+                                {downloadingDocKey === docKey
+                                  ? "File…"
+                                  : docApproval?.label || "File"}
                               </Button>
                             ) : null}
                             {task.action && ATTACHMENT_ACTIONS.has(task.action) && !task.responded_at ? (

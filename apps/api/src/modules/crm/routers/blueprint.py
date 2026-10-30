@@ -140,6 +140,12 @@ def get_quote_blueprint(
                     for action in sales_blueprint_engine.allowed_actions("quote", quote.quote_stage)
                     if action != "approve_internally"
                     and not (action == "send_for_approval" and v1_already_approved)
+                    # Edit button owns revise-from-approved; keep Transitions free of Negotiate there.
+                    and not (
+                        action == "negotiate" and str(quote.quote_stage or "") == "approved_internal"
+                    )
+                    # Follow-up retired from quote Transitions (Create Quote Vn / Deal Won / Lost).
+                    and action != "follow_up"
                 ]
             ),
         },

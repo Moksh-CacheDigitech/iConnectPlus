@@ -141,6 +141,8 @@ class CrmQuoteLine(Base, *CrmTransactionMixin):
     product_name: Mapped[str] = mapped_column(String(255), nullable=False)
     hsn_sac: Mapped[str | None] = mapped_column(String(20), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Selected from the lead's sub-product categor(ies) at quote line entry.
+    sub_product_category: Mapped[str | None] = mapped_column(String(150), nullable=True)
     line_type: Mapped[str] = mapped_column(String(20), nullable=False, default="hardware")
     qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=1)
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)

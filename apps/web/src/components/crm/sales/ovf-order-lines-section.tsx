@@ -731,21 +731,10 @@ export function computeOvfMargins(input: {
 
 export function validateChargeAttachments(
   _customerRows: CustomerChargeRow[],
-  vendorRows: VendorChargeRow[],
+  _vendorRows: VendorChargeRow[],
 ): string | null {
   // Customer PO / vendor quote files are carried from the opportunity / quote
-  // (view-only on the OVF form).
-
-  for (const row of vendorRows) {
-    const hasContent =
-      row.product_name.trim() ||
-      normalizeDistributorName(row.vendor_name) ||
-      row.vendor_name.trim() === DISTRIBUTOR_OTHERS_PENDING;
-    if (hasContent && !normalizeDistributorName(row.vendor_name)) {
-      return "Distributor Name is required for each vendor charge row.";
-    }
-  }
-
+  // (view-only on the OVF form). Distributor Name is optional.
   return null;
 }
 
@@ -1271,9 +1260,7 @@ export function OvfOrderLinesSection({
                 <th className={thClass()}>GST ({GST_PCT}%)</th>
                 <th className={thClass()}>Total Amount in GST</th>
                 <th className={thClass()}>Total Amount with GST</th>
-                <th className={thClass()}>
-                  Distributor Name <span className="text-destructive">*</span>
-                </th>
+                <th className={thClass()}>Distributor Name</th>
                 <th className={thClass()}>Contact Person</th>
                 <th className={thClass()}>Contact Number.</th>
                 <th className={thClass()}>Quote file</th>

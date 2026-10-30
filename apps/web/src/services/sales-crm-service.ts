@@ -327,6 +327,8 @@ export type LeadCreateFromCompanyInput = {
   distributor_department?: string | null;
   end_customer_name?: string | null;
   end_customer_location?: string | null;
+  /** sell_through | sell_to */
+  sale_type?: string | null;
   entity_name?: string | null;
   entity_email?: string | null;
   entity_address?: string | null;
@@ -338,6 +340,8 @@ export type LeadCreateFromCompanyInput = {
   presales_owner_id?: string | null;
   presales_call_aligned?: boolean | null;
   presales_call_contact_name?: string | null;
+  /** JSON map of product type → { aligned, contact_name }. */
+  presales_call_by_product?: string | null;
 };
 
 export async function createLeadFromCompany(
@@ -579,6 +583,8 @@ export type SalesLead = {
   sow_attached?: boolean;
   presales_call_aligned?: boolean | null;
   presales_call_contact_name?: string | null;
+  /** JSON map of product type → { aligned, contact_name }. */
+  presales_call_by_product?: string | null;
   oem_name?: string | null;
   oem_contact_person?: string | null;
   oem_contact_number?: string | null;
@@ -590,6 +596,8 @@ export type SalesLead = {
   distributor_department?: string | null;
   end_customer_name?: string | null;
   end_customer_location?: string | null;
+  /** sell_through | sell_to */
+  sale_type?: string | null;
   notes: string | null;
   convert_remark?: string | null;
   lost_reason?: string | null;
@@ -967,6 +975,7 @@ export type QuoteLine = {
   product_name: string;
   hsn_sac: string | null;
   description?: string | null;
+  sub_product_category?: string | null;
   line_type: string;
   qty: number;
   unit_cost: number;
@@ -985,6 +994,7 @@ export type QuoteLineFormInput = {
   product_name: string;
   hsn_sac?: string | null;
   description?: string | null;
+  sub_product_category?: string | null;
   line_type?: string;
   qty?: number;
   unit_cost?: number;
