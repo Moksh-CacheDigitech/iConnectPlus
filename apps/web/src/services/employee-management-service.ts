@@ -45,11 +45,11 @@ const LOCAL_EMP_KEY = "erp_hr_local_employees_v1";
 const ACTIVITY_KEY = "erp_employee_activity_v1";
 const AUDIT_KEY = "erp_employee_audit_v1";
 
-/** Classic seed / fake local-only demo employee codes. */
+/** Classic seed / fake demo employee codes (local + seeded API rows). */
 const DEMO_EMP_CODE_RE =
   /^(EMP-\d{3}|EMP-T\d{2}|EMP-ESS-\d+|EMP-E\d{2}|EMP-O\d{2}|MGR-ENG|MGR-SAL)$/i;
 
-function isDemoEmployeeCode(code: string | undefined | null): boolean {
+export function isDemoEmployeeCode(code: string | undefined | null): boolean {
   return DEMO_EMP_CODE_RE.test(String(code || "").trim());
 }
 
@@ -515,6 +515,7 @@ export async function listEmployeesPage(
   const extensions = loadExtensions();
   const records = masterRows
     .filter((m) => !m.is_deleted)
+    .filter((m) => !isDemoEmployeeCode(String(m.employee_code ?? "")))
     .map((m) => {
       const id = String(m.id);
       return mergeRow(
@@ -644,6 +645,7 @@ async function fetchEmployeeDirectoryUncached(): Promise<EmployeeDirectoryResult
 
   const records = masterRows
     .filter((m) => !m.is_deleted)
+    .filter((m) => !isDemoEmployeeCode(String(m.employee_code ?? "")))
     .map((m) => {
       const id = String(m.id);
       const profile = profileByEmployee.get(id);

@@ -17,7 +17,10 @@ import {
 } from "@/services/hr-service";
 import { ApiClientError } from "@/services/api-client";
 import { loadRecruitmentOverview } from "@/services/recruitment-service";
-import { loadEmployeeDirectory } from "@/services/employee-management-service";
+import {
+  isDemoEmployeeCode,
+  loadEmployeeDirectory,
+} from "@/services/employee-management-service";
 import type { EmployeeRecord } from "@/types/employee-management";
 import {
   inboxItemHref,
@@ -256,7 +259,7 @@ function peopleFromDirectory(records: EmployeeRecord[]): {
   empById: Map<string, MasterEmployee>;
 } {
   const people: DashboardPerson[] = records
-    .filter((r) => !r.isDeleted)
+    .filter((r) => !r.isDeleted && !isDemoEmployeeCode(r.employeeCode))
     .map((r) => {
       const parts = r.displayName.trim().split(/\s+/).filter(Boolean);
       const emp: MasterEmployee = {
@@ -303,6 +306,8 @@ function peopleFromHrOverview(overview: HrOverview): {
     .map((profile) => {
       const empId = String(profile.employee_id ?? profile.id ?? "");
       if (!empId) return null;
+      const employeeCode = String(profile.employee_code ?? "");
+      if (isDemoEmployeeCode(employeeCode)) return null;
       const employment = employmentByEmployee.get(empId);
       const display =
         String(profile.employee_name ?? "").trim() ||
@@ -312,7 +317,7 @@ function peopleFromHrOverview(overview: HrOverview): {
         id: empId,
         first_name: parts[0] ?? "",
         last_name: parts.slice(1).join(" "),
-        employee_code: String(profile.employee_code ?? ""),
+        employee_code: employeeCode,
         date_of_joining: employment?.date_of_joining,
         designation: String(profile.designation ?? ""),
         status: String(employment?.status ?? profile.status ?? "active"),
