@@ -225,12 +225,10 @@ export function JobOpeningDrawer({ open, onClose, onSubmit, initial }: Props) {
   );
 
   async function save() {
-    if (!title.trim()) return;
-    if (!branchId || !departmentId || !hiringManagerId) return;
-    if (!evidenceEmailFileName.trim() && !evidenceEmailFile) return;
-    const designationName = nameById(designationsForCompany, designationId) || title.trim();
+    if (!canSave) return;
+    const designationName = nameById(designationsForCompany, designationId);
     const branchName = nameById(branches, branchId) || "Head Office";
-    const locationValue = location.trim() || branchName;
+    const locationValue = location.trim();
     setSaving(true);
     try {
       await Promise.resolve(
@@ -257,7 +255,7 @@ export function JobOpeningDrawer({ open, onClose, onSubmit, initial }: Props) {
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean),
-          description,
+          description: description.trim(),
           deadline,
           priority,
           status,
@@ -278,10 +276,26 @@ export function JobOpeningDrawer({ open, onClose, onSubmit, initial }: Props) {
 
   const canSave = Boolean(
     title.trim() &&
+      postingAudience &&
+      (evidenceEmailFile || evidenceEmailFileName.trim()) &&
       branchId &&
       departmentId &&
+      designationId &&
+      employmentType &&
+      priority &&
+      location.trim() &&
       hiringManagerId &&
-      (evidenceEmailFile || evidenceEmailFileName.trim()),
+      recruiterId &&
+      Number(positions) > 0 &&
+      parseInrInput(salaryMinDisplay) > 0 &&
+      parseInrInput(salaryMaxDisplay) > 0 &&
+      experienceMin.trim() !== "" &&
+      experienceMax.trim() !== "" &&
+      deadline.trim() &&
+      skills.trim() &&
+      description.trim() &&
+      jdFileName.trim() &&
+      status,
   );
 
   return (
@@ -363,7 +377,7 @@ export function JobOpeningDrawer({ open, onClose, onSubmit, initial }: Props) {
               disabled={lookupsLoading && !departmentId}
             />
           </SetupField>
-          <SetupField label="Designation">
+          <SetupField label="Designation" required>
             <SearchableSelect
               value={designationId}
               onChange={setDesignationId}
@@ -375,7 +389,7 @@ export function JobOpeningDrawer({ open, onClose, onSubmit, initial }: Props) {
           </SetupField>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <SetupField label="Employment type">
+          <SetupField label="Employment type" required>
             <SetupSelect
               value={employmentType}
               onChange={(e) => setEmploymentType(e.target.value as EmploymentType)}
@@ -386,7 +400,7 @@ export function JobOpeningDrawer({ open, onClose, onSubmit, initial }: Props) {
               <option value="part_time">Part Time</option>
             </SetupSelect>
           </SetupField>
-          <SetupField label="Priority">
+          <SetupField label="Priority" required>
             <SetupSelect
               value={priority}
               onChange={(e) => setPriority(e.target.value as JobPriority)}
@@ -409,7 +423,7 @@ export function JobOpeningDrawer({ open, onClose, onSubmit, initial }: Props) {
               ))}
             </SetupSelect>
           </SetupField>
-          <SetupField label="Location">
+          <SetupField label="Location" required>
             <SetupInput value={location} onChange={(e) => setLocation(e.target.value)} />
           </SetupField>
         </div>
@@ -423,7 +437,7 @@ export function JobOpeningDrawer({ open, onClose, onSubmit, initial }: Props) {
               options={hiringManagerOptions.map((e) => ({ value: e.id, label: e.name }))}
             />
           </SetupField>
-          <SetupField label="Recruiter">
+          <SetupField label="Recruiter" required>
             <SearchableSelect
               value={recruiterId}
               onChange={setRecruiterId}
@@ -434,10 +448,10 @@ export function JobOpeningDrawer({ open, onClose, onSubmit, initial }: Props) {
           </SetupField>
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
-          <SetupField label="No. of positions">
+          <SetupField label="No. of positions" required>
             <SetupInput type="number" value={positions} onChange={(e) => setPositions(e.target.value)} />
           </SetupField>
-          <SetupField label="Salary min (₹)">
+          <SetupField label="Salary min (₹)" required>
             <div className="relative">
               <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs text-muted-foreground">
                 ₹
@@ -454,7 +468,7 @@ export function JobOpeningDrawer({ open, onClose, onSubmit, initial }: Props) {
               />
             </div>
           </SetupField>
-          <SetupField label="Salary max (₹)">
+          <SetupField label="Salary max (₹)" required>
             <div className="relative">
               <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs text-muted-foreground">
                 ₹
@@ -473,31 +487,31 @@ export function JobOpeningDrawer({ open, onClose, onSubmit, initial }: Props) {
           </SetupField>
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
-          <SetupField label="Exp min (yrs)">
+          <SetupField label="Exp min (yrs)" required>
             <SetupInput
               type="number"
               value={experienceMin}
               onChange={(e) => setExperienceMin(e.target.value)}
             />
           </SetupField>
-          <SetupField label="Exp max (yrs)">
+          <SetupField label="Exp max (yrs)" required>
             <SetupInput
               type="number"
               value={experienceMax}
               onChange={(e) => setExperienceMax(e.target.value)}
             />
           </SetupField>
-          <SetupField label="Deadline">
+          <SetupField label="Deadline" required>
             <SetupInput type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
           </SetupField>
         </div>
-        <SetupField label="Skills required" hint="Comma separated">
+        <SetupField label="Skills required" required hint="Comma separated">
           <SetupInput value={skills} onChange={(e) => setSkills(e.target.value)} />
         </SetupField>
-        <SetupField label="Job description">
+        <SetupField label="Job description" required>
           <SetupTextarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} />
         </SetupField>
-        <SetupField label="JD attachment" hint="PDF / DOC for interview attach">
+        <SetupField label="JD attachment" required hint="PDF / DOC for interview attach">
           <SetupInput
             type="file"
             accept=".pdf,.doc,.docx"
@@ -510,7 +524,7 @@ export function JobOpeningDrawer({ open, onClose, onSubmit, initial }: Props) {
             <p className="mt-1 text-[10px] text-muted-foreground">{jdFileName}</p>
           ) : null}
         </SetupField>
-        <SetupField label="Status">
+        <SetupField label="Status" required>
           <SetupSelect
             value={status}
             onChange={(e) => setStatus(e.target.value as JobOpening["status"])}

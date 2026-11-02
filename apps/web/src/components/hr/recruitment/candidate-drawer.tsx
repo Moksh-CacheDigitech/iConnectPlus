@@ -223,8 +223,52 @@ export function CandidateDrawer({
       setError("Alternate phone must be a 10-digit Indian mobile number");
       return;
     }
-    if (pincode && !isValidPincode(pincode)) {
+    if (!dob.trim()) {
+      setError("Date of birth is required");
+      return;
+    }
+    if (!address.trim()) {
+      setError("Address is required");
+      return;
+    }
+    if (!state.trim()) {
+      setError("State is required");
+      return;
+    }
+    if (!isValidPincode(pincode)) {
       setError("Pincode must be 6 digits");
+      return;
+    }
+    if (experienceYears.trim() === "") {
+      setError("Experience is required");
+      return;
+    }
+    if (parseInrInput(expectedSalaryDisplay) <= 0) {
+      setError("Expected salary is required");
+      return;
+    }
+    if (noticePeriodDays.trim() === "") {
+      setError("Notice period is required");
+      return;
+    }
+    if (!skills.length) {
+      setError("Add at least one skill");
+      return;
+    }
+    if (!resumeName.trim() && !resumeUrl.trim()) {
+      setError("Resume upload is required");
+      return;
+    }
+    if (!source) {
+      setError("Source is required");
+      return;
+    }
+    if (!recruiter.trim()) {
+      setError("Recruiter is required");
+      return;
+    }
+    if (!jobId) {
+      setError("Select a job to apply to");
       return;
     }
 
@@ -269,7 +313,21 @@ export function CandidateDrawer({
   }
 
   const canSubmit =
-    Boolean(fullName.trim()) && isValidEmail(email) && isValidIndianMobile(phone);
+    Boolean(fullName.trim()) &&
+    isValidEmail(email) &&
+    isValidIndianMobile(phone) &&
+    Boolean(dob.trim()) &&
+    Boolean(address.trim()) &&
+    Boolean(state.trim()) &&
+    isValidPincode(pincode) &&
+    experienceYears.trim() !== "" &&
+    parseInrInput(expectedSalaryDisplay) > 0 &&
+    noticePeriodDays.trim() !== "" &&
+    skills.length > 0 &&
+    Boolean(resumeName.trim() || resumeUrl.trim()) &&
+    Boolean(source) &&
+    Boolean(recruiter.trim()) &&
+    Boolean(jobId);
 
   const openJobs = jobs.filter((j) => j.status === "open");
   const jobOptions = useMemo(() => {
@@ -350,10 +408,10 @@ export function CandidateDrawer({
             </SetupSelect>
           </SetupField>
         </div>
-        <SetupField label="DOB">
+        <SetupField label="DOB" required>
           <SetupInput type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
         </SetupField>
-        <SetupField label="Address">
+        <SetupField label="Address" required>
           <SetupInput
             value={address}
             onChange={(e) => setAddress(e.target.value)}
@@ -361,7 +419,7 @@ export function CandidateDrawer({
           />
         </SetupField>
         <div className="grid gap-3 sm:grid-cols-2">
-          <SetupField label="State">
+          <SetupField label="State" required>
             <SetupSelect value={state} onChange={(e) => setState(e.target.value)}>
               <option value="">Select state…</option>
               {INDIAN_STATES.map((s) => (
@@ -371,7 +429,7 @@ export function CandidateDrawer({
               ))}
             </SetupSelect>
           </SetupField>
-          <SetupField label="Pincode" hint="6 digits">
+          <SetupField label="Pincode" required hint="6 digits">
             <SetupInput
               inputMode="numeric"
               maxLength={6}
@@ -393,14 +451,14 @@ export function CandidateDrawer({
           </SetupField>
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
-          <SetupField label="Experience (yrs)">
+          <SetupField label="Experience (yrs)" required>
             <SetupInput
               type="number"
               value={experienceYears}
               onChange={(e) => setExperienceYears(e.target.value)}
             />
           </SetupField>
-          <SetupField label="Expected salary (₹)">
+          <SetupField label="Expected salary (₹)" required>
             <div className="relative">
               <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-xs text-muted-foreground">
                 ₹
@@ -419,7 +477,7 @@ export function CandidateDrawer({
               />
             </div>
           </SetupField>
-          <SetupField label="Notice period (days)">
+          <SetupField label="Notice period (days)" required>
             <SetupInput
               type="number"
               value={noticePeriodDays}
@@ -429,6 +487,7 @@ export function CandidateDrawer({
         </div>
         <SetupField
           label="Skills"
+          required
           hint="Type a skill and press Enter, or paste comma-separated"
         >
           <div className="space-y-2">
@@ -480,7 +539,7 @@ export function CandidateDrawer({
             </div>
           </div>
         </SetupField>
-        <SetupField label="Resume upload" hint="Optional — attach file; enter profile details manually">
+        <SetupField label="Resume upload" required hint="PDF / DOC / TXT">
           <SetupInput
             type="file"
             accept=".pdf,.doc,.docx,.txt"
@@ -502,7 +561,7 @@ export function CandidateDrawer({
           </SetupField>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <SetupField label="Source">
+          <SetupField label="Source" required>
             <SetupSelect
               value={source}
               onChange={(e) => setSource(e.target.value as CandidateSource)}
@@ -514,7 +573,7 @@ export function CandidateDrawer({
               ))}
             </SetupSelect>
           </SetupField>
-          <SetupField label="Recruiter" hint={recruiterSourceHint(recruiterSource)}>
+          <SetupField label="Recruiter" required hint={recruiterSourceHint(recruiterSource)}>
             <SearchableSelect
               value={recruiter}
               onChange={setRecruiter}
@@ -526,15 +585,14 @@ export function CandidateDrawer({
         </div>
         <SetupField
           label="Apply to job"
+          required
           hint={
             selectedJob
               ? editing
                 ? `Applied for ${selectedJob.title} (${selectedJob.jobCode})`
                 : `Will apply to ${selectedJob.title}`
               : jobOptions.length
-                ? editing
-                  ? "Select the role this candidate should be linked to"
-                  : "Optional — apply candidate to an opening"
+                ? "Select the job opening for this candidate"
                 : "No open job openings available. Create/publish a job first."
           }
         >
@@ -543,9 +601,7 @@ export function CandidateDrawer({
             onChange={(e) => setJobId(e.target.value)}
             disabled={!jobOptions.length}
           >
-            <option value="">
-              {editing ? "None — no job link" : "None — add to talent pool only"}
-            </option>
+            <option value="">Select job…</option>
             {jobOptions.map((j) => (
               <option key={j.id} value={j.id}>
                 {j.jobCode} · {j.title}
