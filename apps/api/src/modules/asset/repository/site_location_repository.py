@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import true, func, select
 from sqlalchemy.orm import Session
 
 from modules.asset.models.site_building import AstBuilding
@@ -25,9 +25,9 @@ class SiteLocationRepository(AstScopedRepository):
         stmt = self.apply_ast_filter(stmt, AstLocation, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def get_by_name(self, ctx: TenantContext, company_id: UUID, name: str) -> AstLocation | None:
+    def get_by_name(self, ctx: TenantContext, company_id: UUID | None, name: str) -> AstLocation | None:
         stmt = select(AstLocation).where(
-            AstLocation.company_id == company_id,
+            (AstLocation.company_id == company_id if company_id is not None else true()),
             AstLocation.is_deleted.is_(False),
             func.lower(func.btrim(AstLocation.name)) == name.strip().lower(),
         )
@@ -37,12 +37,12 @@ class SiteLocationRepository(AstScopedRepository):
     def list_rows(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         search: str | None = None,
     ) -> list[AstLocation]:
         stmt = select(AstLocation).where(
-            AstLocation.company_id == company_id,
+            (AstLocation.company_id == company_id if company_id is not None else true()),
             AstLocation.is_deleted.is_(False),
         )
         if search:
@@ -116,13 +116,13 @@ class SiteBuildingRepository(AstScopedRepository):
     def list_rows(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         location_id: UUID | None = None,
         search: str | None = None,
     ) -> list[AstBuilding]:
         stmt = select(AstBuilding).where(
-            AstBuilding.company_id == company_id,
+            (AstBuilding.company_id == company_id if company_id is not None else true()),
             AstBuilding.is_deleted.is_(False),
         )
         if location_id is not None:

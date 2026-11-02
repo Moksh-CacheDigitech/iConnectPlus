@@ -29,7 +29,7 @@ class ContractService:
         self._audit = PlatformAuditFacade(db)
 
     def list_contracts(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_contracts(ctx, cid)
 
     def get_contract(self, ctx: TenantContext, contract_id: UUID) -> ProcVendorContract:

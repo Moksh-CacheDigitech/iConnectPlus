@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from modules.asset.domain.enums import DcChallanStatus
@@ -24,7 +24,7 @@ OPEN_DC_STATUSES: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class DcChallanListFilters:
-    company_id: UUID
+    company_id: UUID | None
     status: str | None = None
     asset_id: UUID | None = None
     assignment_id: UUID | None = None
@@ -71,7 +71,7 @@ class DcChallanRepository(AstScopedRepository):
         limit: int,
     ) -> tuple[list[AstDcChallan], int]:
         stmt = select(AstDcChallan).where(
-            AstDcChallan.company_id == filters.company_id,
+            (AstDcChallan.company_id == filters.company_id if filters.company_id is not None else true()),
             AstDcChallan.is_deleted.is_(False),
         )
         if filters.status is not None:
@@ -110,12 +110,12 @@ class DcChallanRepository(AstScopedRepository):
         return rows, total
 
     def summary_counts(
-        self, ctx: TenantContext, company_id: UUID
+        self, ctx: TenantContext, company_id: UUID | None
     ) -> dict[str, int]:
         stmt = (
             select(AstDcChallan.status, func.count())
             .where(
-                AstDcChallan.company_id == company_id,
+                (AstDcChallan.company_id == company_id if company_id is not None else true()),
                 AstDcChallan.is_deleted.is_(False),
             )
             .group_by(AstDcChallan.status)

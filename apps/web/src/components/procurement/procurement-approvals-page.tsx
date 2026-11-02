@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
-import { BadgeCheck, Check, Eye, Loader2, Paperclip, RefreshCw, X } from "lucide-react";
+import { BadgeCheck, Check, Download, Eye, Loader2, Paperclip, RefreshCw, X } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import {
@@ -13,8 +13,8 @@ import {
   procurementUi,
 } from "@/components/procurement/procurement-ui";
 import { Button } from "@/components/ui/button";
+import { useProcurementApprovalAccess } from "@/hooks/use-procurement-approval-access";
 import { useProcurementApprovals } from "@/hooks/use-procurement-approvals";
-import { useProcurementRole } from "@/hooks/use-procurement-role";
 import {
   enrichPoApprovals,
   isOvfCreatePoApprovalOrderKey,
@@ -27,11 +27,14 @@ import { cn } from "@/lib/utils";
 import { formatApiError } from "@/services/api-client";
 import {
   collectPoApprovalDocuments,
-  finalizeScmOrder,
+  downloadScmCommercialAttachment,
+  getScmOvfPreview,
   listPurchaseOrders,
   listVendorOptions,
   openScmCommercialAttachment,
 } from "@/services/procurement-service";
+import { downloadInvoiceJobPoPdf } from "@/utils/invoice-job-pdf";
+import { buildScmOvfPdfBlob } from "@/utils/scm-ovf-pdf";
 
 function formatWhen(iso: string): string {
   try {
@@ -54,7 +57,25 @@ function statusTone(status: PoApprovalRequest["status"]): string {
 }
 
 function approvalKindLabel(row: PoApprovalRequest): string {
-  return row.kind === "create_po_in_stock" ? "Create PO (IN STOCK)" : "Finalize PO";
+  if (row.kind === "create_po_in_stock") return "Create PO (IN STOCK)";
+  if (row.stageLabel) return row.stageLabel;
+  if (row.scmApprovalStage === "management") return "Management PO approval";
+  if (row.scmApprovalStage === "accept_po") return "Accept PO";
+  return "Accept PO";
+}
+
+function canDecideRow(
+  row: PoApprovalRequest,
+  access: {
+    isAdmin: boolean;
+    canDecideAcceptPo: boolean;
+    canDecideManagement: boolean;
+    canDecideStage: (stage: "accept_po" | "management" | null | undefined) => boolean;
+  },
+): boolean {
+  if (row.status !== "pending") return false;
+  if (row.kind === "create_po_in_stock") return access.isAdmin;
+  return access.canDecideStage(row.scmApprovalStage || "accept_po");
 }
 
 function approvalPrimaryHref(row: PoApprovalRequest): string {
@@ -75,6 +96,50 @@ function approvalPrimaryLabel(row: PoApprovalRequest): string {
   return row.companyPoNumber || row.documentNumber;
 }
 
+async function openApprovalDocument(doc: PoApprovalDocument): Promise<void> {
+  if (doc.attachmentSource === "generated" && doc.id.startsWith("generated-ovf-pdf:")) {
+    const ovfId = doc.id.slice("generated-ovf-pdf:".length);
+    const preview = await getScmOvfPreview(ovfId);
+    const { blob, fileName } = await buildScmOvfPdfBlob(preview);
+    const url = URL.createObjectURL(blob);
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      a.rel = "noopener";
+      a.click();
+    }
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return;
+  }
+  await openScmCommercialAttachment(doc.id, {
+    source: doc.attachmentSource || "upload",
+    external_url: doc.externalUrl || null,
+    file_name: doc.fileName,
+  });
+}
+
+async function downloadApprovalDocument(doc: PoApprovalDocument): Promise<void> {
+  if (doc.attachmentSource === "generated" && doc.id.startsWith("generated-ovf-pdf:")) {
+    const ovfId = doc.id.slice("generated-ovf-pdf:".length);
+    const preview = await getScmOvfPreview(ovfId);
+    const { blob, fileName } = await buildScmOvfPdfBlob(preview);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.rel = "noopener";
+    a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+  await downloadScmCommercialAttachment(doc.id, doc.fileName, {
+    source: doc.attachmentSource || "upload",
+    external_url: doc.externalUrl || null,
+  });
+}
+
 function ApprovalDocuments({
   documents,
   onOpenError,
@@ -83,6 +148,7 @@ function ApprovalDocuments({
   onOpenError: (message: string) => void;
 }) {
   const [openingId, setOpeningId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   if (documents.length === 0) {
     return <span className="text-xs text-muted-foreground">No documents</span>;
   }
@@ -96,14 +162,10 @@ function ApprovalDocuments({
               type="button"
               className="min-w-0 max-w-full cursor-pointer truncate text-left text-xs font-medium text-sky-800 transition-colors duration-200 hover:underline"
               disabled={openingId === doc.id}
-              title={`${doc.source === "po" ? "PO" : "OVF"} · ${doc.category}`}
+              title={`View ${doc.fileName}`}
               onClick={() => {
                 setOpeningId(doc.id);
-                void openScmCommercialAttachment(doc.id, {
-                  source: doc.attachmentSource || "upload",
-                  external_url: doc.externalUrl || null,
-                  file_name: doc.fileName,
-                })
+                void openApprovalDocument(doc)
                   .catch((err) =>
                     onOpenError(err instanceof Error ? err.message : "Failed to open document"),
                   )
@@ -112,13 +174,28 @@ function ApprovalDocuments({
             >
               {openingId === doc.id ? "Opening…" : doc.fileName}
             </button>
-            {doc.remarks ? (
-              <p className="mt-0.5 text-[11px] text-muted-foreground">{doc.remarks}</p>
-            ) : null}
           </div>
-          <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
-            {doc.source === "po" ? "PO" : "OVF"}
-          </span>
+          <button
+            type="button"
+            className="mt-0.5 inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            title={`Download ${doc.fileName}`}
+            aria-label={`Download ${doc.fileName}`}
+            disabled={downloadingId === doc.id}
+            onClick={() => {
+              setDownloadingId(doc.id);
+              void downloadApprovalDocument(doc)
+                .catch((err) =>
+                  onOpenError(err instanceof Error ? err.message : "Failed to download document"),
+                )
+                .finally(() => setDownloadingId(null));
+            }}
+          >
+            {downloadingId === doc.id ? (
+              <Loader2 className="size-3 animate-spin" aria-hidden />
+            ) : (
+              <Download className="size-3" aria-hidden />
+            )}
+          </button>
           <Eye className="mt-0.5 size-3 shrink-0 text-muted-foreground" aria-hidden />
         </li>
       ))}
@@ -161,9 +238,11 @@ function DocumentsInsideToggle({
 }
 
 export function ProcurementApprovalsPage() {
-  const { isAdmin } = useProcurementRole();
-  const { rows, pending, pendingCount, decide, refresh } = useProcurementApprovals();
+  const access = useProcurementApprovalAccess();
+  const { isAdmin, canDecideApprovals } = access;
+  const { rows, pending, pendingCount, decide, refresh, loadError } = useProcurementApprovals();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [downloadingPoId, setDownloadingPoId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "pending" | "accepted" | "rejected">("all");
@@ -210,7 +289,7 @@ export function ProcurementApprovalsPage() {
         }
       }
       enrichPoApprovals(patch);
-      refresh();
+      void refresh();
     } catch (err) {
       setError(formatApiError(err, "Failed to load customer / vendor names"));
     } finally {
@@ -223,13 +302,29 @@ export function ProcurementApprovalsPage() {
   }, [hydrateLabels, rows.length]);
 
   const visible = useMemo(() => {
-    const source = isAdmin && filter === "pending" ? pending : rows;
+    const source = canDecideApprovals && filter === "pending" ? pending : rows;
     if (filter === "all") return source;
     return source.filter((row) => row.status === filter);
-  }, [isAdmin, filter, pending, rows]);
+  }, [canDecideApprovals, filter, pending, rows]);
 
   const acceptedCount = rows.filter((row) => row.status === "accepted").length;
   const rejectedCount = rows.filter((row) => row.status === "rejected").length;
+
+  async function onDownloadPo(row: PoApprovalRequest, event?: MouseEvent) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (row.kind !== "finalize" || isOvfCreatePoApprovalOrderKey(row.orderId)) return;
+    setDownloadingPoId(row.id);
+    setError(null);
+    try {
+      // Admin / management review: Draft PO with watermark until issued to vendor.
+      await downloadInvoiceJobPoPdf(row.orderId, { watermark: true });
+    } catch (err) {
+      setError(formatApiError(err, "Failed to download PO PDF"));
+    } finally {
+      setDownloadingPoId(null);
+    }
+  }
 
   async function onAccept(row: PoApprovalRequest, event?: MouseEvent) {
     event?.preventDefault();
@@ -238,22 +333,25 @@ export function ProcurementApprovalsPage() {
     setError(null);
     setSuccess(null);
     try {
-      if (row.kind === "finalize") {
-        await finalizeScmOrder(row.orderId);
+      await decide(row, "accepted");
+      if (row.kind === "create_po_in_stock") {
+        setSuccess(
+          "Create PO approved. Requester can create the PO in SCM - nothing is sent to Projects.",
+        );
+      } else if ((row.scmApprovalStage || "accept_po") === "accept_po") {
+        setSuccess("PO accepted. It is now waiting for Management approval.");
+      } else {
+        setSuccess(
+          "PO issued. It stays in Procurement (GRN / delivery). It is not sent to Projects - share only from Installation.",
+        );
       }
-      decide(row.id, "accepted");
-      setSuccess(
-        row.kind === "create_po_in_stock"
-          ? "Create PO approved. Requester can create the PO in SCM - nothing is sent to Projects."
-          : "PO issued. It stays in Procurement (GRN / delivery). It is not sent to Projects - share only from Installation.",
-      );
     } catch (err) {
       setError(
         formatApiError(
           err,
           row.kind === "create_po_in_stock"
             ? "Failed to approve Create PO request"
-            : "Failed to accept finalize request",
+            : "Failed to accept approval request",
         ),
       );
     } finally {
@@ -261,15 +359,17 @@ export function ProcurementApprovalsPage() {
     }
   }
 
-  function onReject(row: PoApprovalRequest, event?: MouseEvent) {
+  async function onReject(row: PoApprovalRequest, event?: MouseEvent) {
     event?.preventDefault();
     event?.stopPropagation();
     setBusyId(row.id);
     setError(null);
     setSuccess(null);
     try {
-      decide(row.id, "rejected");
+      await decide(row, "rejected");
       setSuccess("Request rejected. Requester can edit and resubmit.");
+    } catch (err) {
+      setError(formatApiError(err, "Failed to reject request"));
     } finally {
       setBusyId(null);
     }
@@ -280,9 +380,9 @@ export function ProcurementApprovalsPage() {
       <PageHeader
         title="Approval"
         description={
-          isAdmin
-            ? "Approve Create PO for IN STOCK OVFs, or accept finalize to issue a draft PO. Accepting does not send the PO to Projects - that happens only from Installation → Share to Project."
-            : "Track Create PO (IN STOCK) and finalize requests you sent. You get a notification when an admin decides."
+          canDecideApprovals
+            ? "Accept PO first, then Management issues the PO. Create PO (IN STOCK) stays admin-only. Issuing does not send the PO to Projects."
+            : "Track Create PO (IN STOCK) and finalize requests you sent. You get a notification when an approver decides."
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -294,7 +394,7 @@ export function ProcurementApprovalsPage() {
               onClick={() => {
                 setError(null);
                 setSuccess(null);
-                refresh();
+                void refresh();
                 void hydrateLabels();
               }}
             >
@@ -309,7 +409,7 @@ export function ProcurementApprovalsPage() {
 
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
         <ProcurementKpiCard
-          label={isAdmin ? "PENDING REQUESTS" : "MY REQUESTS"}
+          label={canDecideApprovals ? "PENDING REQUESTS" : "MY REQUESTS"}
           value={String(pendingCount)}
           icon={BadgeCheck}
           tone="warning"
@@ -348,6 +448,7 @@ export function ProcurementApprovalsPage() {
         ))}
       </div>
 
+      {loadError ? <ProcurementErrorBanner>{loadError}</ProcurementErrorBanner> : null}
       {error ? <ProcurementErrorBanner>{error}</ProcurementErrorBanner> : null}
       {success ? (
         <div className="rounded-md border border-emerald-200/80 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
@@ -363,20 +464,21 @@ export function ProcurementApprovalsPage() {
         </div>
         {visible.length === 0 ? (
           <div className="px-4 py-10 text-center text-sm text-muted-foreground">
-            {isAdmin
+            {canDecideApprovals
               ? "No approval requests match this filter."
               : "No approval requests yet. Request Create PO on an IN STOCK OVF, or finalize a draft PO."}
           </div>
         ) : (
           <div className={procurementUi.tableScroll}>
-            <table className={cn(procurementUi.table, "min-w-[880px]")}>
+            <table className={cn(procurementUi.table, "min-w-[980px]")}>
               <thead className={procurementUi.thead}>
                 <tr>
                   <th className="px-3 py-2 font-medium">Request</th>
                   <th className="px-3 py-2 font-medium">Type</th>
                   <th className="px-3 py-2 font-medium">Customer</th>
                   <th className="px-3 py-2 font-medium">Vendor</th>
-                  <th className="px-3 py-2 font-medium">Requested</th>
+                  <th className="px-3 py-2 font-medium">Requested by</th>
+                  <th className="px-3 py-2 font-medium">Requested at</th>
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium text-right">Action</th>
                 </tr>
@@ -412,6 +514,9 @@ export function ProcurementApprovalsPage() {
                     <td className="px-3 py-2.5 text-sm text-foreground">
                       {row.vendorName || "-"}
                     </td>
+                    <td className="px-3 py-2.5 text-sm text-foreground">
+                      {row.requestedByName || "-"}
+                    </td>
                     <td className="px-3 py-2.5 text-sm text-muted-foreground">
                       {formatWhen(row.createdAt)}
                     </td>
@@ -433,7 +538,28 @@ export function ProcurementApprovalsPage() {
                         >
                           {row.kind === "create_po_in_stock" ? "Open OVF" : "Open PO"}
                         </Link>
-                        {isAdmin && row.status === "pending" ? (
+                        {row.kind === "finalize" &&
+                          !isOvfCreatePoApprovalOrderKey(row.orderId) ? (
+                          <button
+                            type="button"
+                            disabled={downloadingPoId === row.id}
+                            title="Download Draft PO PDF with watermark"
+                            onClick={(event) => void onDownloadPo(row, event)}
+                            className={cn(
+                              "inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground",
+                              "transition-colors duration-200 hover:bg-muted/50 hover:text-foreground",
+                              "disabled:cursor-not-allowed disabled:opacity-60",
+                            )}
+                          >
+                            {downloadingPoId === row.id ? (
+                              <Loader2 className="size-3 animate-spin" aria-hidden />
+                            ) : (
+                              <Download className="size-3" aria-hidden />
+                            )}
+                            {downloadingPoId === row.id ? "PO…" : "PO"}
+                          </button>
+                        ) : null}
+                        {canDecideRow(row, access) ? (
                           <>
                             <button
                               type="button"
@@ -453,12 +579,14 @@ export function ProcurementApprovalsPage() {
                               )}
                               {row.kind === "create_po_in_stock"
                                 ? "Approve Create PO"
-                                : "Accept finalize"}
+                                : (row.scmApprovalStage || "accept_po") === "management"
+                                  ? "Issue PO"
+                                  : "Accept PO"}
                             </button>
                             <button
                               type="button"
                               disabled={busyId === row.id}
-                              onClick={(event) => onReject(row, event)}
+                              onClick={(event) => void onReject(row, event)}
                               className={cn(
                                 "inline-flex cursor-pointer items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-800",
                                 "transition-colors duration-200 hover:bg-red-100",

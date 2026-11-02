@@ -19,7 +19,7 @@ class ContactService:
         self._scope = CrmScopeValidator(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None, company_account_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_contacts(ctx, cid, company_account_id)
 
     def get(self, ctx: TenantContext, row_id: UUID):

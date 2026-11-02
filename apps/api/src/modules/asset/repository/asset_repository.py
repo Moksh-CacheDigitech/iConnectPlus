@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import true, and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from modules.asset.domain.enums import AssetAssignmentStatus, AssetOperationalStatus
@@ -19,7 +19,7 @@ _ACTIVE_ASSIGNMENT = AssetAssignmentStatus.ACTIVE.value
 
 @dataclass(frozen=True)
 class AssetListFilters:
-    company_id: UUID
+    company_id: UUID | None
     branch_id: UUID | None = None
     status: str | None = None
     operational_status: str | None = None
@@ -146,9 +146,9 @@ class AssetRepository(AstScopedRepository):
         stmt = self.apply_ast_filter(stmt, AstAsset, ctx, branch_scoped=True)
         return self.db.scalar(stmt)
 
-    def find_by_code(self, ctx: TenantContext, company_id: UUID, asset_code: str) -> AstAsset | None:
+    def find_by_code(self, ctx: TenantContext, company_id: UUID | None, asset_code: str) -> AstAsset | None:
         stmt = select(AstAsset).where(
-            AstAsset.company_id == company_id,
+            (AstAsset.company_id == company_id if company_id is not None else true()),
             AstAsset.asset_code == asset_code,
             AstAsset.is_deleted.is_(False),
         )
@@ -158,13 +158,13 @@ class AssetRepository(AstScopedRepository):
     def find_by_serial(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         serial_number: str,
         *,
         exclude_id: UUID | None = None,
     ) -> AstAsset | None:
         stmt = select(AstAsset).where(
-            AstAsset.company_id == company_id,
+            (AstAsset.company_id == company_id if company_id is not None else true()),
             AstAsset.serial_number == serial_number,
             AstAsset.is_deleted.is_(False),
         )
@@ -176,13 +176,13 @@ class AssetRepository(AstScopedRepository):
     def find_by_barcode(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         barcode: str,
         *,
         exclude_id: UUID | None = None,
     ) -> AstAsset | None:
         stmt = select(AstAsset).where(
-            AstAsset.company_id == company_id,
+            (AstAsset.company_id == company_id if company_id is not None else true()),
             AstAsset.barcode == barcode,
             AstAsset.is_deleted.is_(False),
         )
@@ -191,7 +191,7 @@ class AssetRepository(AstScopedRepository):
         stmt = self.apply_ast_filter(stmt, AstAsset, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
         items, _ = self.search(ctx, AssetListFilters(company_id=company_id), offset=0, limit=10_000)
         return items
 
@@ -203,10 +203,9 @@ class AssetRepository(AstScopedRepository):
         offset: int,
         limit: int,
     ) -> tuple[list[AstAsset], int]:
-        stmt = select(AstAsset).where(
-            AstAsset.company_id == filters.company_id,
-            AstAsset.is_deleted.is_(False),
-        )
+        stmt = select(AstAsset).where(AstAsset.is_deleted.is_(False))
+        if filters.company_id is not None:
+            stmt = stmt.where(AstAsset.company_id == filters.company_id)
         if filters.branch_id is not None:
             stmt = stmt.where(AstAsset.branch_id == filters.branch_id)
         if filters.status is not None:
@@ -286,11 +285,11 @@ class AssetRepository(AstScopedRepository):
 
     @staticmethod
     def _exists_active_assignment(
-        company_id: UUID, *, employee_id: UUID | None = None
+        company_id: UUID | None, *, employee_id: UUID | None = None
     ):
         clauses = [
             AstAssetAssignment.asset_id == AstAsset.id,
-            AstAssetAssignment.company_id == company_id,
+            (AstAssetAssignment.company_id == company_id if company_id is not None else true()),
             AstAssetAssignment.is_deleted.is_(False),
             AstAssetAssignment.status == _ACTIVE_ASSIGNMENT,
         ]
@@ -299,7 +298,7 @@ class AssetRepository(AstScopedRepository):
         return exists(select(1).select_from(AstAssetAssignment).where(and_(*clauses)))
 
     @staticmethod
-    def _exists_active_assignment_for_department(company_id: UUID, department_id: UUID):
+    def _exists_active_assignment_for_department(company_id: UUID | None, department_id: UUID):
         return exists(
             select(1)
             .select_from(AstAssetAssignment)
@@ -312,7 +311,7 @@ class AssetRepository(AstScopedRepository):
             )
             .where(
                 AstAssetAssignment.asset_id == AstAsset.id,
-                AstAssetAssignment.company_id == company_id,
+                (AstAssetAssignment.company_id == company_id if company_id is not None else true()),
                 AstAssetAssignment.is_deleted.is_(False),
                 AstAssetAssignment.status == _ACTIVE_ASSIGNMENT,
                 or_(
@@ -349,7 +348,7 @@ class AssetRepository(AstScopedRepository):
         )
 
     @staticmethod
-    def _exists_active_assignment_employee_search(company_id: UUID, term: str):
+    def _exists_active_assignment_employee_search(company_id: UUID | None, term: str):
         full_name = func.concat(
             EmployeeRead.first_name, " ", EmployeeRead.last_name
         )
@@ -365,7 +364,7 @@ class AssetRepository(AstScopedRepository):
             )
             .where(
                 AstAssetAssignment.asset_id == AstAsset.id,
-                AstAssetAssignment.company_id == company_id,
+                (AstAssetAssignment.company_id == company_id if company_id is not None else true()),
                 AstAssetAssignment.is_deleted.is_(False),
                 AstAssetAssignment.status == _ACTIVE_ASSIGNMENT,
                 or_(
@@ -381,13 +380,13 @@ class AssetRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         asset_category_id: UUID,
         statuses: frozenset[str] | set[str],
     ) -> int:
         """Count non-deleted assets in operational statuses for a category (CR-001)."""
         stmt = select(func.count()).select_from(AstAsset).where(
-            AstAsset.company_id == company_id,
+            (AstAsset.company_id == company_id if company_id is not None else true()),
             AstAsset.asset_category_id == asset_category_id,
             AstAsset.is_deleted.is_(False),
             AstAsset.status.in_(tuple(statuses)),
@@ -399,12 +398,12 @@ class AssetRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         operational_status: str,
         branch_id: UUID | None = None,
     ) -> int:
         inner = select(AstAsset.id).where(
-            AstAsset.company_id == company_id,
+            (AstAsset.company_id == company_id if company_id is not None else true()),
             AstAsset.is_deleted.is_(False),
             AstAsset.operational_status == operational_status,
         )
@@ -417,13 +416,13 @@ class AssetRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         branch_id: UUID | None = None,
         location_id: UUID | None = None,
         asset_domain: str | None = "IT",
     ) -> OperationalStatusCounts:
         inner = select(AstAsset.operational_status, func.count().label("cnt")).where(
-            AstAsset.company_id == company_id,
+            (AstAsset.company_id == company_id if company_id is not None else true()),
             AstAsset.is_deleted.is_(False),
         )
         if asset_domain is not None:
@@ -443,7 +442,7 @@ class AssetRepository(AstScopedRepository):
                 buckets[attr] = int(cnt or 0)
 
         total_stmt = select(func.count()).select_from(AstAsset).where(
-            AstAsset.company_id == company_id,
+            (AstAsset.company_id == company_id if company_id is not None else true()),
             AstAsset.is_deleted.is_(False),
         )
         if asset_domain is not None:
@@ -469,7 +468,7 @@ class AssetRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         asset_domain: str | None = "IT",
     ) -> list[BranchOperationalSummary]:
         inner = select(
@@ -477,7 +476,7 @@ class AssetRepository(AstScopedRepository):
             AstAsset.operational_status,
             func.count().label("cnt"),
         ).where(
-            AstAsset.company_id == company_id,
+            (AstAsset.company_id == company_id if company_id is not None else true()),
             AstAsset.is_deleted.is_(False),
         )
         if asset_domain is not None:
@@ -499,7 +498,7 @@ class AssetRepository(AstScopedRepository):
                 bucket[attr] = int(cnt or 0)
 
         totals_stmt = select(AstAsset.branch_id, func.count().label("cnt")).where(
-            AstAsset.company_id == company_id,
+            (AstAsset.company_id == company_id if company_id is not None else true()),
             AstAsset.is_deleted.is_(False),
         )
         if asset_domain is not None:
@@ -529,7 +528,7 @@ class AssetRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         asset_domain: str | None = "IT",
     ) -> list[LocationOperationalSummary]:
         from modules.asset.models.site_location import AstLocation
@@ -544,7 +543,7 @@ class AssetRepository(AstScopedRepository):
             .join(AstAsset, AstAsset.id == AstAssetLocation.asset_id)
             .outerjoin(AstLocation, AstLocation.id == AstAssetLocation.location_id)
             .where(
-                AstAsset.company_id == company_id,
+                (AstAsset.company_id == company_id if company_id is not None else true()),
                 AstAsset.is_deleted.is_(False),
                 AstAssetLocation.is_deleted.is_(False),
                 AstAssetLocation.is_current.is_(True),
@@ -582,7 +581,7 @@ class AssetRepository(AstScopedRepository):
             select(AstAssetLocation.location_id, func.count().label("cnt"))
             .join(AstAsset, AstAsset.id == AstAssetLocation.asset_id)
             .where(
-                AstAsset.company_id == company_id,
+                (AstAsset.company_id == company_id if company_id is not None else true()),
                 AstAsset.is_deleted.is_(False),
                 AstAssetLocation.is_deleted.is_(False),
                 AstAssetLocation.is_current.is_(True),

@@ -23,7 +23,7 @@ class WipService:
         self._scope = MfgScopeValidator(db)
 
     def list_wip(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_wip(ctx, cid)
 
     def get_wip(self, ctx: TenantContext, wip_id: UUID) -> MfgWip:
@@ -47,7 +47,7 @@ class VarianceService:
         self._scope = MfgScopeValidator(db)
 
     def list_variances(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_variances(ctx, cid)
 
     def get_variance(self, ctx: TenantContext, variance_id: UUID) -> MfgVariance:

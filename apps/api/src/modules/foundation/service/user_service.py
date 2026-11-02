@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.exceptions import AppException, ConflictException, NotFoundException
@@ -10,23 +11,28 @@ from modules.foundation.domain.erp_modules import (
     ADMIN_USER_TYPES,
     ERP_MODULE_KEYS,
     ERP_MODULE_KEY_SET,
+    MODULE_ROLE_ADMIN,
     effective_admin_module_keys,
     effective_module_keys,
     has_all_modules_admin,
     resolve_session_user_type,
 )
 from modules.foundation.domain.entities import UserEntity
+from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.repository.session_repository import SessionRepository
 from modules.foundation.service.hrms_user_directory import HrmsUserDirectory
 from modules.foundation.repository.user_module_repository import UserModuleRepository
 from modules.foundation.repository.user_repository import UserRepository
 from modules.foundation.schemas import UserResponse
+from modules.organization.models.company import OrgCompany
+from modules.organization.repository.org_scope_repository import OrgScopeRepository
 from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.foundation.service.rbac_service import RBACService
 from security.password import PasswordHasher
 
 # Shared temporary password issued by ERP admins from Organization → Users.
-DEFAULT_TEMPORARY_PASSWORD = "Cache@123"
+# Avoid "@" — email clients linkify it and users copy a broken password.
+DEFAULT_TEMPORARY_PASSWORD = "CacheDigi#123"
 
 
 class UserService:
@@ -86,6 +92,40 @@ class UserService:
             raise ErpAdminRequiredException()
         return actor
 
+    def apply_erp_admin_defaults(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        default_company_id: UUID | None = None,
+    ) -> None:
+        """ERP admins get every active entity and every sidebar module by default."""
+        company_ids = list(
+            self._modules.db.scalars(
+                select(OrgCompany.id).where(
+                    OrgCompany.tenant_id == tenant_id,
+                    OrgCompany.is_deleted.is_(False),
+                )
+            ).all()
+        )
+        ctx = TenantContext(tenant_id=tenant_id, user_id=actor_id or user_id, user_type="super_admin")
+        if company_ids:
+            OrgScopeRepository(self._modules.db).replace_company_scopes(
+                ctx,
+                user_id=user_id,
+                company_ids=company_ids,
+                default_company_id=default_company_id,
+            )
+        # Explicit module-admin rows so Organization / audit views show full sidebar access.
+        self._modules.replace_admin_keys(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            module_keys=list(ERP_MODULE_KEYS),
+            assigned_by=actor_id,
+        )
+        self._rbac.invalidate_user(user_id)
+
     def issue_temporary_password(
         self, tenant_id: UUID, user_id: UUID, *, actor_id: UUID | None
     ) -> tuple[UserEntity, str]:
@@ -110,6 +150,17 @@ class UserService:
             event_type="auth.temporary_password_issued",
             user_id=user_id,
         )
+        try:
+            from modules.foundation.service.org_access_email_service import OrgAccessEmailService
+
+            OrgAccessEmailService(self._repo.db).notify_temporary_password(
+                tenant_id=tenant_id,
+                user=row,
+                temporary_password=password,
+                created_by=actor_id,
+            )
+        except Exception:  # noqa: BLE001
+            pass
         return self.get_user(tenant_id, user_id), password
 
     def effective_modules_for_user(self, user: UserEntity) -> list[str]:
@@ -183,7 +234,66 @@ class UserService:
             performed_by=updated_by,
             new_value={"admin_module_keys": normalized},
         )
+        newly_granted = sorted(set(normalized) - set(previous_admin_keys))
+        if newly_granted:
+            self._notify_admin_module_emails(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                newly_granted=newly_granted,
+                first_module=not (previous_admin_keys or user.assigned_module_keys),
+                actor_id=updated_by,
+            )
         return self.get_user(tenant_id, user_id)
+
+    def _notify_admin_module_emails(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        newly_granted: list[str],
+        first_module: bool,
+        actor_id: UUID | None,
+    ) -> None:
+        try:
+            from modules.foundation.models.security import SecUser
+            from modules.foundation.service.org_access_email_service import OrgAccessEmailService
+            from security.password import PasswordHasher
+
+            row = self._repo.db.get(SecUser, user_id)
+            if row is None or row.is_deleted:
+                return
+            mail = OrgAccessEmailService(self._repo.db)
+            module_label = (
+                "All modules"
+                if len(newly_granted) >= len(ERP_MODULE_KEYS)
+                else newly_granted[0]
+            )
+            if first_module:
+                row.password_hash = PasswordHasher.hash_password(DEFAULT_TEMPORARY_PASSWORD)
+                row.must_change_password = True
+                row.failed_login_count = 0
+                row.locked_until = None
+                if row.status == "locked":
+                    row.status = "active"
+                self._repo.db.flush()
+                mail.notify_welcome(
+                    tenant_id=tenant_id,
+                    user=row,
+                    module_key=module_label if module_label != "All modules" else "*",
+                    role=MODULE_ROLE_ADMIN,
+                    temporary_password=DEFAULT_TEMPORARY_PASSWORD,
+                    created_by=actor_id,
+                )
+            else:
+                mail.notify_module_assigned(
+                    tenant_id=tenant_id,
+                    user=row,
+                    module_key=module_label if module_label != "All modules" else "*",
+                    role=MODULE_ROLE_ADMIN,
+                    created_by=actor_id,
+                )
+        except Exception:  # noqa: BLE001
+            pass
 
     def list_users(self, tenant_id: UUID):
         # Keep Organization "Module users" in sync with Asset domain memberships.
@@ -223,6 +333,8 @@ class UserService:
             user_type=user_type,
             created_by=created_by,
         )
+        if user.user_type in ADMIN_USER_TYPES:
+            self.apply_erp_admin_defaults(tenant_id, user.id, actor_id=created_by)
         self._audit.log_entity_change(
             tenant_id=tenant_id,
             entity_name="sec_user",
@@ -234,9 +346,16 @@ class UserService:
         return user
 
     def update_user(self, tenant_id: UUID, user_id: UUID, updated_by: UUID | None = None, **fields):
+        previous = self._repo.get_by_id(tenant_id, user_id)
+        previous_type = previous.user_type if previous is not None else None
         user = self._repo.update(tenant_id, user_id, **fields)
         if user is None:
             raise NotFoundException("User not found")
+        if (
+            user.user_type in ADMIN_USER_TYPES
+            and previous_type not in ADMIN_USER_TYPES
+        ):
+            self.apply_erp_admin_defaults(tenant_id, user_id, actor_id=updated_by)
         self._audit.log_entity_change(
             tenant_id=tenant_id,
             entity_name="sec_user",

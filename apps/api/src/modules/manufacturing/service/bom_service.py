@@ -27,7 +27,7 @@ class BomService:
         self._audit = PlatformAuditFacade(db)
 
     def list_boms(self, ctx: TenantContext, company_id: UUID | None = None, product_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_boms(ctx, cid, product_id)
 
     def get_bom(self, ctx: TenantContext, bom_id: UUID) -> MfgBom:

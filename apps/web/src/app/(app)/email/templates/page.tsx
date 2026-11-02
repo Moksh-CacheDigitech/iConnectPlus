@@ -1,5 +1,6 @@
-import { EmailTemplatesPage } from "@/components/email/email-templates-page";
+import { redirect } from "next/navigation";
 
+/** Templates UI removed — Email module is compose + delivery only. */
 export default function EmailTemplatesRoute() {
-  return <EmailTemplatesPage />;
+  redirect("/email");
 }

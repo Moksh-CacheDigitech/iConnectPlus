@@ -35,7 +35,7 @@ class ScrapService:
         self._audit = PlatformAuditFacade(db)
 
     def list_scraps(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_scraps(ctx, cid)
 
     def get_scrap(self, ctx: TenantContext, scrap_id: UUID) -> MfgScrap:

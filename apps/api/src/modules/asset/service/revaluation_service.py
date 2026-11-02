@@ -56,7 +56,7 @@ class RevaluationService:
         offset: int = 0,
         limit: int = 25,
     ) -> tuple[list[AstAssetRevaluation], int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         filters = AssetRevaluationListFilters(
             company_id=cid,
             asset_id=asset_id,
@@ -67,7 +67,7 @@ class RevaluationService:
         return self._repo.search(ctx, filters, offset=offset, limit=limit)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_rows(ctx, cid)
 
     def get(self, ctx: TenantContext, row_id: UUID) -> AstAssetRevaluation:

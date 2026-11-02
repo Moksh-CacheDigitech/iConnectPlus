@@ -167,16 +167,54 @@ class ProcurementMasterDataAdapter:
         )
 
     def resolve_default_uom_id(self, ctx: TenantContext, company_id: UUID) -> UUID:
-        uoms = self._uoms.list_uoms(ctx, company_id=company_id)
-        if not uoms:
-            raise NotFoundException(
-                "No UOM found - create a base UOM in Master Data before creating SCM POs"
+        """Pick a company UOM for SCM PO lines; ensure EA exists when Master Data is empty.
+
+        OVFs often land on a company (e.g. CT) that has no seeded UOMs while CDPL does.
+        Prefer base / count UOMs, then auto-create EA for the OVF company.
+        """
+
+        def _pick(uoms: list) -> UUID | None:
+            if not uoms:
+                return None
+            for uom in uoms:
+                if bool(getattr(uom, "is_base_uom", False)):
+                    return uom.id
+            for uom in uoms:
+                code = (getattr(uom, "uom_code", None) or "").upper()
+                if code in {"EA", "EACH", "NOS", "PCS", "UNIT"}:
+                    return uom.id
+            return uoms[0].id
+
+        chosen = _pick(self._uoms.list_uoms(ctx, company_id=company_id))
+        if chosen is not None:
+            return chosen
+
+        # Company has no UOMs - create a base EA on this company for SCM.
+        try:
+            created = self._uoms.create_uom(
+                ctx,
+                company_id=company_id,
+                uom_code="EA",
+                uom_name="Each",
+                uom_type="count",
+                decimal_places=0,
+                is_base_uom=True,
             )
-        for uom in uoms:
-            code = (getattr(uom, "uom_code", None) or "").upper()
-            if code in {"EA", "EACH", "NOS", "UNIT"}:
-                return uom.id
-        return uoms[0].id
+            return created.id
+        except DuplicateMasterCodeError:
+            again = _pick(self._uoms.list_uoms(ctx, company_id=company_id))
+            if again is not None:
+                return again
+        except Exception:
+            # Last resort: reuse any tenant-visible UOM so SCM is not blocked.
+            fallback = _pick(self._uoms.list_uoms(ctx, company_id=None))
+            if fallback is not None:
+                return fallback
+            raise
+
+        raise NotFoundException(
+            "No UOM found - create a base UOM in Master Data before creating SCM POs"
+        )
 
     def _find_scm_placeholder(
         self, ctx: TenantContext, company_id: UUID

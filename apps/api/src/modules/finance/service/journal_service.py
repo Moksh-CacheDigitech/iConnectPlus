@@ -45,7 +45,7 @@ class JournalService:
         sort_by: str = "journal_date",
         sort_dir: str = "desc",
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_journals(
             ctx,
             cid,

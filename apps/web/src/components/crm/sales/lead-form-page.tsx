@@ -5,20 +5,20 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Building2,
+  Handshake,
   MessageSquareText,
   MapPin,
   Package,
   Truck,
   UserPlus,
-  Users,
 } from "lucide-react";
 
 import { CrmErrorBanner, CrmPage, CrmSection } from "@/components/crm/crm-ui";
 import { BlueprintActions } from "@/components/crm/sales/blueprint-actions";
 import { KycContactDesignationField } from "@/components/crm/sales/kyc-contact-designation-field";
-import { LeadDistributorMultiSelect } from "@/components/crm/sales/lead-distributor-multi-select";
-import { LeadOemMultiSelect } from "@/components/crm/sales/lead-oem-multi-select";
+import { LeadPartnerRowsTable } from "@/components/crm/sales/lead-partner-rows-table";
 import { LeadProductTypeMultiSelect } from "@/components/crm/sales/lead-product-type-multi-select";
+import { LeadSubProductCategoryMultiSelect } from "@/components/crm/sales/lead-sub-product-category-multi-select";
 import {
   RequiredFieldsDialog,
   missingRequiredMessage,
@@ -30,7 +30,18 @@ import {
 } from "@/components/finance/journals/finance-form-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatLeadDistributorNames, parseLeadDistributorNames } from "@/lib/crm/lead-distributor-options";
+import {
+  loadCrmDistributorOptions,
+} from "@/lib/crm/lead-distributor-options";
+import { LEAD_OEM_OPTIONS } from "@/lib/crm/lead-oem-options";
+import {
+  emptyLeadPartnerRow,
+  formatDistributorPartnerFields,
+  formatOemPartnerFields,
+  parseDistributorPartnerRows,
+  parseOemPartnerRows,
+  type LeadPartnerRow,
+} from "@/lib/crm/lead-partner-rows";
 import {
   companySourceToLeadMatchKey,
   isEventLeadSourceLabel,
@@ -40,11 +51,12 @@ import {
 } from "@/lib/crm/company-lead-sources";
 import { isCrmModuleAdmin } from "@/lib/crm/crm-module-access";
 import { resolveSalesStageLabel } from "@/lib/crm/sales-blueprint-stages";
-import { formatLeadOemNames, parseLeadOemNames } from "@/lib/crm/lead-oem-options";
 import {
   formatLeadProductTypes,
+  formatLeadSubProductCategories,
   isCloudLeadProductType,
   parseLeadProductTypes,
+  parseLeadSubProductCategories,
   subProductOptionsForTypes,
 } from "@/lib/crm/lead-product-options";
 import {
@@ -80,7 +92,6 @@ import {
 } from "@/services/sales-crm-service";
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
 
-const SALUTATIONS = ["Mr.", "Ms.", "Mrs.", "Dr."] as const;
 const ENGAGEMENT_SCORES = [25, 50, 75, 100] as const;
 
 const DEFAULT_ENTITY_EMAIL = "info@cachedigitech.com";
@@ -144,6 +155,7 @@ const EMPTY: LeadCreateFromCompanyInput = {
   distributor_contact_email: "",
   distributor_department: "",
   end_customer_name: "",
+  sale_type: "",
   entity_name: "",
   entity_email: "",
   entity_address: "",
@@ -154,6 +166,24 @@ const EMPTY: LeadCreateFromCompanyInput = {
   notes: "",
   presales_owner_id: "",
 };
+
+type LeadSaleType = "sell_through" | "sell_to";
+
+function resolveLeadSaleType(
+  saleType: string | null | undefined,
+  endCustomerName: string | null | undefined,
+  accountName: string | null | undefined,
+): LeadSaleType | "" {
+  const normalized = (saleType || "").trim().toLowerCase();
+  if (normalized === "sell_through" || normalized === "sell_to") {
+    return normalized;
+  }
+  const endCustomer = (endCustomerName || "").trim().toLowerCase();
+  const account = (accountName || "").trim().toLowerCase();
+  if (!endCustomer) return "";
+  if (account && endCustomer === account) return "sell_to";
+  return "sell_through";
+}
 
 export function LeadFormPage({
   companyAccountId,
@@ -172,7 +202,6 @@ export function LeadFormPage({
   const [leadSources, setLeadSources] = useState<Option[]>([]);
   const [marketingEvents, setMarketingEvents] = useState<Option[]>([]);
   const [leadOwnerLabel, setLeadOwnerLabel] = useState("");
-  const [industryOther, setIndustryOther] = useState("");
   const [form, setForm] = useState<LeadCreateFromCompanyInput>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -184,9 +213,10 @@ export function LeadFormPage({
   const [blueprint, setBlueprint] = useState<BlueprintState | null>(null);
   const [crmMembers, setCrmMembers] = useState<Option[]>([]);
   const [nextDrNumber, setNextDrNumber] = useState("");
+  const [oemRows, setOemRows] = useState<LeadPartnerRow[]>([emptyLeadPartnerRow()]);
+  const [distributorRows, setDistributorRows] = useState<LeadPartnerRow[]>([emptyLeadPartnerRow()]);
+  const [distributorNameOptions, setDistributorNameOptions] = useState<string[]>(["IN STOCK"]);
 
-  const selectedOemNames = parseLeadOemNames(form.oem_name);
-  const selectedDistributorNames = parseLeadDistributorNames(form.distributor_name);
   const selectedLeadSource = leadSources.find((source) => source.id === form.lead_source_id);
   const isMultiTierSource = isMultiTierLeadSourceLabel(selectedLeadSource?.label);
   const isEventSource = isEventLeadSourceLabel(selectedLeadSource?.label);
@@ -253,11 +283,6 @@ export function LeadFormPage({
       setMarketingEvents(events);
       setEntityCatalog(entities);
       const rawIndustry = companyRow.industry ?? "";
-      if (rawIndustry && !INDUSTRIES.includes(rawIndustry)) {
-        setIndustryOther(rawIndustry);
-      } else {
-        setIndustryOther("");
-      }
       const companySourceKey = companySourceToLeadMatchKey(companyRow.source ?? "");
       const inheritedSource = sources.find(
         (source) => normalizeSourceMatchKey(source.label) === companySourceKey,
@@ -306,6 +331,11 @@ export function LeadFormPage({
             distributor_contact_person: leadRow.distributor_contact_person ?? "",
             distributor_contact_email: leadRow.distributor_contact_email ?? "",
             end_customer_name: leadRow.end_customer_name ?? "",
+            sale_type: resolveLeadSaleType(
+              leadRow.sale_type,
+              leadRow.end_customer_name,
+              companyRow.customer_name,
+            ),
             entity_name: leadRow.entity_name ?? "",
             entity_email: leadRow.entity_email ?? "",
             entity_address: leadRow.entity_address ?? "",
@@ -324,6 +354,7 @@ export function LeadFormPage({
           owner_employee_id: ownerFromEmployee || f.owner_employee_id,
           first_name: companyRow.first_name ?? "",
           last_name: companyRow.last_name ?? "",
+          designation: companyRow.role ?? "",
           mobile: companyRow.phone ?? "",
           email: companyRow.customer_email ?? "",
           lead_source_id: f.lead_source_id || inheritedSource?.id || "",
@@ -351,9 +382,13 @@ export function LeadFormPage({
       });
       if (leadRow) {
         setNextDrNumber("");
+        setOemRows(parseOemPartnerRows(leadRow));
+        setDistributorRows(parseDistributorPartnerRows(leadRow));
       } else {
         const preview = await peekNextLeadDrNumber(companyRow.company_id).catch(() => "");
         setNextDrNumber(preview);
+        setOemRows([emptyLeadPartnerRow()]);
+        setDistributorRows([emptyLeadPartnerRow()]);
       }
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Failed to load company");
@@ -373,11 +408,10 @@ export function LeadFormPage({
 
   function onProductTypesChange(types: string[]) {
     setForm((f) => {
-      const options = subProductOptionsForTypes(types);
-      const keepCategory =
-        f.sub_product_category && options.includes(f.sub_product_category)
-          ? f.sub_product_category
-          : "";
+      const options = new Set(subProductOptionsForTypes(types));
+      const keepCategories = parseLeadSubProductCategories(f.sub_product_category).filter((cat) =>
+        options.has(cat),
+      );
       const cloudSelected = types.includes("Cloud");
       const channels = parseLeadSourcingChannels(f.deal_type);
       if (!leadNeedsHardwareSourcing(types)) delete channels.hardware;
@@ -385,7 +419,7 @@ export function LeadFormPage({
       return {
         ...f,
         product_type: formatLeadProductTypes(types),
-        sub_product_category: keepCategory,
+        sub_product_category: formatLeadSubProductCategories(keepCategories),
         sub_product: cloudSelected ? "" : f.sub_product,
         sub_product_other: cloudSelected ? "" : f.sub_product_other,
         deal_type: formatLeadSourcingChannels(channels, types),
@@ -393,7 +427,17 @@ export function LeadFormPage({
     });
   }
 
+  function onSubProductCategoriesChange(categories: string[]) {
+    setForm((f) => ({
+      ...f,
+      sub_product_category: formatLeadSubProductCategories(categories),
+      sub_product: isCloudLeadProductType(f.product_type) ? "" : f.sub_product,
+      sub_product_other: isCloudLeadProductType(f.product_type) ? "" : f.sub_product_other,
+    }));
+  }
+
   const selectedProductTypes = parseLeadProductTypes(form.product_type);
+  const selectedSubProductCategories = parseLeadSubProductCategories(form.sub_product_category);
   const subProductCategoryOptions = subProductOptionsForTypes(selectedProductTypes);
   const isCloudProduct = isCloudLeadProductType(form.product_type);
   const showHardwareSourcing = leadNeedsHardwareSourcing(selectedProductTypes);
@@ -429,33 +473,29 @@ export function LeadFormPage({
     setSourcingChannel("hardware", next);
   }
 
-  function onOemNamesChange(names: string[]) {
-    setForm((f) => ({
-      ...f,
-      oem_name: formatLeadOemNames(names),
-      ...(names.length === 0
-        ? {
-          oem_contact_person: "",
-          oem_contact_number: "",
-          oem_contact_email: "",
-        }
-        : {}),
-    }));
+  function onOemRowsChange(rows: LeadPartnerRow[]) {
+    setOemRows(rows);
+    setForm((f) => ({ ...f, ...formatOemPartnerFields(rows) }));
   }
 
-  function onDistributorNamesChange(names: string[]) {
-    setForm((f) => ({
-      ...f,
-      distributor_name: formatLeadDistributorNames(names),
-      ...(names.length === 0
-        ? {
-          distributor_contact_person: "",
-          distributor_contact: "",
-          distributor_contact_email: "",
-        }
-        : {}),
-    }));
+  function onDistributorRowsChange(rows: LeadPartnerRow[]) {
+    setDistributorRows(rows);
+    setForm((f) => ({ ...f, ...formatDistributorPartnerFields(rows) }));
   }
+
+  useEffect(() => {
+    let cancelled = false;
+    const selectedNames = distributorRows
+      .map((row) => row.name.trim())
+      .filter(Boolean)
+      .join(", ");
+    void loadCrmDistributorOptions(selectedNames).then((options) => {
+      if (!cancelled) setDistributorNameOptions(options);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [distributorRows]);
 
   function onEntityPickChange(value: string) {
     setEntityPick(value);
@@ -500,7 +540,7 @@ export function LeadFormPage({
     if (!form.lead_source_id) missing.push("Lead Source");
     if (isMultiTierSource && !form.partner_names?.trim()) missing.push("Partner Names");
     if (isEventSource && !form.marketing_event_id) missing.push("Event");
-    if (!form.sub_product_category?.trim()) {
+    if (selectedSubProductCategories.length === 0) {
       missing.push(isCloudLeadProductType(form.product_type) ? "Sub Product" : "Sub Product Category");
     }
     if (!form.requirement_type) missing.push("Requirement Type");
@@ -515,11 +555,19 @@ export function LeadFormPage({
       missing.push("Expected Order Value");
     }
     if (!form.expected_closure_date?.trim()) missing.push("Expected Closure Date");
-    if (!form.end_customer_name?.trim()) missing.push("End Customer");
+    const saleType = resolveLeadSaleType(
+      form.sale_type,
+      form.end_customer_name,
+      company?.customer_name,
+    );
+    if (!saleType) missing.push("Sale Type (Sell Through or Sell To)");
+    if (saleType === "sell_through" && !form.end_customer_name?.trim()) {
+      missing.push("End Customer Name");
+    }
     if (!form.entity_name?.trim()) missing.push("Entity Name");
     if (!form.entity_address?.trim()) missing.push("Entity Address");
     if (!form.entity_contact?.trim()) missing.push("Entity Contact Number");
-    if (!form.oem_name?.trim()) missing.push("OEM Name");
+    if (!oemRows.some((row) => row.name.trim())) missing.push("OEM Name");
     if (missing.length > 0) {
       setMandateMessage(missingRequiredMessage(missing));
       setMandateOpen(true);
@@ -529,8 +577,22 @@ export function LeadFormPage({
     setError(null);
     try {
       const { owner_employee_id: _owner, dr_number: _dr, new_dr_number: _newDr, ...leadBody } = form;
+      const oemFields = formatOemPartnerFields(oemRows);
+      const distributorFields = formatDistributorPartnerFields(distributorRows);
+      const accountName = (company?.customer_name || "").trim();
+      const resolvedSaleType = resolveLeadSaleType(
+        form.sale_type,
+        form.end_customer_name,
+        accountName,
+      );
+      const endCustomerName =
+        resolvedSaleType === "sell_to"
+          ? accountName
+          : (form.end_customer_name || "").trim();
       const payload = {
         ...leadBody,
+        ...oemFields,
+        ...distributorFields,
         assign_to_id: null,
         assigned_date: null,
         partner_names: isMultiTierSource ? form.partner_names?.trim() || null : null,
@@ -538,12 +600,12 @@ export function LeadFormPage({
         deal_type: formatLeadSourcingChannels(sourcingChannels, selectedProductTypes),
         expected_amount: form.expected_amount ? Number(form.expected_amount) : null,
         committed_amount:
-          form.committed_amount !== undefined &&
-            form.committed_amount !== null &&
-            !Number.isNaN(Number(form.committed_amount))
-            ? Number(form.committed_amount)
+          isEdit && existingLead?.committed_amount != null
+            ? Number(existingLead.committed_amount)
             : null,
         expected_closure_date: form.expected_closure_date || null,
+        sale_type: resolvedSaleType || null,
+        end_customer_name: endCustomerName || null,
         presales_owner_id: form.presales_owner_id?.trim() || null,
         requires_boq: Boolean(form.requires_boq),
         requires_sow: Boolean(form.requires_sow),
@@ -645,21 +707,7 @@ export function LeadFormPage({
           </FinanceField>
 
           <FinanceField label="First Name *">
-            <div className="flex gap-2">
-              <FinanceSelect
-                value={form.salutation ?? ""}
-                onChange={(e) => set("salutation", e.target.value)}
-                className="w-14 shrink-0 px-1.5"
-              >
-                <option value="" disabled hidden />
-                {SALUTATIONS.map((salutation) => (
-                  <option key={salutation} value={salutation}>
-                    {salutation}
-                  </option>
-                ))}
-              </FinanceSelect>
-              <Input value={form.first_name ?? ""} onChange={(e) => set("first_name", e.target.value)} />
-            </div>
+            <Input value={form.first_name ?? ""} onChange={(e) => set("first_name", e.target.value)} />
           </FinanceField>
           <FinanceField label="Last Name *">
             <Input value={form.last_name ?? ""} onChange={(e) => set("last_name", e.target.value)} />
@@ -749,29 +797,19 @@ export function LeadFormPage({
           </FinanceField>
 
           <FinanceField label={isCloudProduct ? "Sub Product *" : "Sub Product Category *"}>
-            <FinanceSelect
-              value={form.sub_product_category ?? ""}
-              onChange={(e) => {
-                const next = e.target.value;
-                setForm((f) => ({
-                  ...f,
-                  sub_product_category: next,
-                  sub_product: isCloudProduct ? "" : f.sub_product,
-                  sub_product_other: isCloudProduct ? "" : f.sub_product_other,
-                }));
-              }}
+            <LeadSubProductCategoryMultiSelect
+              value={selectedSubProductCategories}
+              options={subProductCategoryOptions}
+              onChange={onSubProductCategoriesChange}
               disabled={selectedProductTypes.length === 0}
-              required
-            >
-              <option value="">
-                {selectedProductTypes.length > 0 ? "None" : "Select product type first"}
-              </option>
-              {subProductCategoryOptions.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </FinanceSelect>
+              emptyPlaceholder={
+                selectedProductTypes.length > 0
+                  ? isCloudProduct
+                    ? "Select sub product(s)"
+                    : "Select sub product categor(ies)"
+                  : "Select product type first"
+              }
+            />
           </FinanceField>
           <FinanceField label="Requirement Type *">
             <FinanceSelect
@@ -909,18 +947,6 @@ export function LeadFormPage({
             />
           </FinanceField>
 
-          <FinanceField label="Committed Amount">
-            <Input
-              type="number"
-              min={0}
-              step="0.01"
-              value={form.committed_amount ?? ""}
-              onChange={(e) =>
-                set("committed_amount", e.target.value ? Number(e.target.value) : undefined)
-              }
-            />
-          </FinanceField>
-
           <FinanceField label="Expected Closure Date *">
             <Input
               type="date"
@@ -959,131 +985,108 @@ export function LeadFormPage({
         </div>
       </CrmSection>
 
-      <CrmSection title="OEM Information" icon={Package}>
-        <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
-          <FinanceField label="OEM Name *">
-            <LeadOemMultiSelect value={selectedOemNames} onChange={onOemNamesChange} />
-          </FinanceField>
-          <FinanceField label="OEM Contact Person">
-            <Input
-              value={form.oem_contact_person ?? ""}
-              onChange={(e) => set("oem_contact_person", e.target.value)}
-              disabled={selectedOemNames.length === 0}
-            />
-          </FinanceField>
-          <FinanceField label="OEM Contact Number">
-            <Input
-              value={form.oem_contact_number ?? ""}
-              onChange={(e) => set("oem_contact_number", e.target.value)}
-              disabled={selectedOemNames.length === 0}
-            />
-          </FinanceField>
-          <FinanceField label="OEM Contact Email">
-            <Input
-              type="email"
-              value={form.oem_contact_email ?? ""}
-              onChange={(e) => set("oem_contact_email", e.target.value)}
-              disabled={selectedOemNames.length === 0}
-            />
-          </FinanceField>
-        </div>
-      </CrmSection>
+      <LeadPartnerRowsTable
+        title="OEM Information"
+        icon={Package}
+        nameLabel="OEM Name"
+        rows={oemRows}
+        nameOptions={LEAD_OEM_OPTIONS}
+        onChange={onOemRowsChange}
+        nameRequired
+      />
 
-      <CrmSection title="Distributor Information" icon={Truck}>
-        <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
-          <FinanceField label="Distributor Name">
-            <LeadDistributorMultiSelect
-              value={selectedDistributorNames}
-              onChange={onDistributorNamesChange}
-            />
-          </FinanceField>
-          <FinanceField label="Distributor Contact Person">
-            <Input
-              value={form.distributor_contact_person ?? ""}
-              onChange={(e) => set("distributor_contact_person", e.target.value)}
-              disabled={selectedDistributorNames.length === 0}
-            />
-          </FinanceField>
-          <FinanceField label="Distributor Contact Number">
-            <Input
-              value={form.distributor_contact ?? ""}
-              onChange={(e) => set("distributor_contact", e.target.value)}
-              disabled={selectedDistributorNames.length === 0}
-            />
-          </FinanceField>
-          <FinanceField label="Distributor Contact Email">
-            <Input
-              type="email"
-              value={form.distributor_contact_email ?? ""}
-              onChange={(e) => set("distributor_contact_email", e.target.value)}
-              disabled={selectedDistributorNames.length === 0}
-            />
-          </FinanceField>
-        </div>
-      </CrmSection>
+      <LeadPartnerRowsTable
+        title="Distributor Information"
+        icon={Truck}
+        nameLabel="Distributor Name"
+        rows={distributorRows}
+        nameOptions={distributorNameOptions}
+        onChange={onDistributorRowsChange}
+        allowCustomName
+      />
 
-      <CrmSection title="End Customer Detail" icon={Users}>
+      <CrmSection title="Sale Type" icon={Handshake}>
         <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
-          <FinanceField label="End Customer *">
-            <Input
-              value={form.end_customer_name ?? ""}
-              onChange={(e) => set("end_customer_name", e.target.value)}
-            />
-          </FinanceField>
-          <FinanceField label="Industry">
-            <FinanceSelect
-              value={
-                !form.industry || INDUSTRIES.includes(form.industry)
-                  ? (form.industry ?? "")
-                  : "Others"
-              }
-              onChange={(e) => {
-                const value = e.target.value;
-                if (value === "Others") {
-                  set("industry", industryOther.trim() || "Others");
-                } else {
-                  setIndustryOther("");
-                  set("industry", value);
-                }
-              }}
+          <FinanceField label="Sale Type *" className="md:col-span-2">
+            <div
+              role="group"
+              aria-label="Sale type"
+              className="flex flex-wrap gap-4 rounded-lg border border-input px-2.5 py-2"
             >
-              <option value="">None</option>
-              {INDUSTRIES.map((industry) => (
-                <option key={industry} value={industry}>
-                  {industry}
-                </option>
-              ))}
-            </FinanceSelect>
+              {(
+                [
+                  { value: "sell_through" as const, label: "Sell Through" },
+                  { value: "sell_to" as const, label: "Sell To" },
+                ] as const
+              ).map((option) => {
+                const checked = (form.sale_type || "") === option.value;
+                return (
+                  <label
+                    key={option.value}
+                    className="inline-flex cursor-pointer items-center gap-2 text-sm transition-colors duration-150"
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-4 cursor-pointer accent-primary"
+                      checked={checked}
+                      onChange={() => {
+                        const accountName = (company?.customer_name || "").trim();
+                        if (checked) {
+                          setForm((prev) => ({
+                            ...prev,
+                            sale_type: "",
+                            end_customer_name:
+                              option.value === "sell_to" ? "" : prev.end_customer_name,
+                          }));
+                          return;
+                        }
+                        setForm((prev) => ({
+                          ...prev,
+                          sale_type: option.value,
+                          end_customer_name:
+                            option.value === "sell_to"
+                              ? accountName
+                              : option.value === "sell_through" &&
+                                (prev.sale_type || "") === "sell_to"
+                                ? ""
+                                : prev.end_customer_name,
+                        }));
+                      }}
+                    />
+                    {option.label}
+                  </label>
+                );
+              })}
+            </div>
           </FinanceField>
-          {form.industry === "Others" ||
-            (form.industry && !INDUSTRIES.includes(form.industry)) ? (
-            <FinanceField label="Specify industry">
+          {(form.sale_type || "") === "sell_through" ? (
+            <FinanceField label="End Customer Name *">
               <Input
-                value={
-                  form.industry === "Others"
-                    ? industryOther
-                    : INDUSTRIES.includes(form.industry ?? "")
-                      ? ""
-                      : (form.industry ?? "")
-                }
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setIndustryOther(value);
-                  set("industry", value.trim() || "Others");
-                }}
+                value={form.end_customer_name ?? ""}
+                onChange={(e) => set("end_customer_name", e.target.value)}
+                placeholder="Enter end customer name"
+              />
+            </FinanceField>
+          ) : null}
+          {(form.sale_type || "") === "sell_to" ? (
+            <FinanceField label="Account Name">
+              <Input
+                value={company?.customer_name ?? ""}
+                disabled
+                aria-readonly="true"
               />
             </FinanceField>
           ) : null}
         </div>
       </CrmSection>
 
-      <CrmSection title="Entity Information" icon={Building2}>
+      <CrmSection title="Cache Legal Entity" icon={Building2}>
         <div className="grid gap-x-10 gap-y-3 md:grid-cols-2">
           <FinanceField label="Entity Name *">
             <FinanceSelect
               value={entityPick}
               onChange={(e) => onEntityPickChange(e.target.value)}
-              aria-label="Select selling entity"
+              aria-label="Select own legal entity"
               required
             >
               <option value="">Select entity</option>

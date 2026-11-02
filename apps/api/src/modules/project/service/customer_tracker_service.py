@@ -105,7 +105,7 @@ class CustomerTrackerService:
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         self._admin.ensure_admin(ctx)
-        rows = self._repo.list_rows(ctx, self._scope.resolve_company_id(ctx, company_id))
+        rows = self._repo.list_rows(ctx, self._scope.resolve_list_company_id(ctx, company_id))
         enriched = []
         for row in rows:
             meta = _grid_meta_from_row(row)

@@ -27,7 +27,13 @@ import { CompanyWorkspaceNav } from "@/components/crm/company-workspace-nav";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { cloneOpportunityRecord, downloadOpportunityExport, printOpportunityPreview } from "@/lib/crm/crm-record-actions";
+import {
+  buildOvfPrintPdfAttachmentById,
+  buildQuotePrintPdfAttachment,
+  cloneOpportunityRecord,
+  downloadOpportunityExport,
+  printOpportunityPreview,
+} from "@/lib/crm/crm-record-actions";
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
 import { setCrmOpportunityContext, setCrmSidebarFocus } from "@/lib/crm-sidebar-focus";
 import { ApiClientError } from "@/services/api-client";
@@ -46,6 +52,7 @@ import {
   listLeadSourceOptions,
   listMarketingEventOptions,
   listOvfs,
+  listQuoteLines,
   listQuotes,
   downloadAttachment,
   markOvfDealWon,
@@ -82,16 +89,16 @@ const CUSTOM_ACTIONS = ["quote_accepted"];
 /** Quote follow-on actions to surface on the opportunity BlueprintActions strip. */
 const QUOTE_STAGE_ACTIONS: Record<string, string[]> = {
   approved_internal: ["send_to_customer"],
-  sent_to_customer: ["accept", "negotiate", "follow_up"],
-  negotiation: ["accept", "negotiate", "follow_up"],
-  follow_up: ["accept", "negotiate", "follow_up"],
+  sent_to_customer: ["negotiate", "accept", "lost"],
+  negotiation: ["negotiate", "accept", "lost"],
+  follow_up: ["negotiate", "accept", "lost"],
 };
 
 /** OVF follow-on actions to surface on the opportunity BlueprintActions strip. */
 const OVF_STAGE_ACTIONS: Record<string, string[]> = {
   draft: ["send_for_approval"],
   approved: ["share_to_scm"],
-  shared_scm: ["deal_won"],
+  // shared_scm is CRM-terminal (no Mark Deal Won / further transitions)
 };
 const OVF_FOLLOW_ON = new Set(Object.values(OVF_STAGE_ACTIONS).flat());
 
@@ -217,6 +224,12 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
           if (!assignedUserId && assignedUserIds.length === 0) {
             throw new ApiClientError("Select an approver before sending for approval.", 400);
           }
+          let ovfPdf: { filename: string; base64: string } | null = null;
+          try {
+            ovfPdf = await buildOvfPrintPdfAttachmentById(ovf.id);
+          } catch {
+            ovfPdf = null;
+          }
           await sendOvfForApproval(ovf.id, {
             team_role: typeof payload.team_role === "string" ? payload.team_role : undefined,
             remarks: typeof payload.remarks === "string" ? payload.remarks : null,
@@ -227,6 +240,8 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
                 : assignedUserId
                   ? [assignedUserId]
                   : undefined,
+            ovf_pdf_base64: ovfPdf?.base64 ?? null,
+            ovf_pdf_filename: ovfPdf?.filename ?? null,
           });
         } else if (action === "share_to_scm") {
           await shareOvfToScm(ovf.id);
@@ -240,7 +255,24 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
       } else if (quote && quoteFollowOn.includes(action)) {
         await applyQuoteAction(quote.id, action, payload);
       } else {
-        await applyOpportunityAction(opportunityId, action, payload);
+        let enrichedPayload = payload;
+        if (action === "attach_po" || action === "send_po_approval") {
+          const acceptedQuote = quotes.find((row) => row.quote_stage === "accepted") ?? quote;
+          if (acceptedQuote) {
+            try {
+              const lineRows = await listQuoteLines(acceptedQuote.id);
+              const quotationPdf = await buildQuotePrintPdfAttachment(acceptedQuote, lineRows);
+              enrichedPayload = {
+                ...payload,
+                quotation_pdf_base64: quotationPdf.base64,
+                quotation_pdf_filename: quotationPdf.filename,
+              };
+            } catch {
+              // PO approval still proceeds; email may omit the quote print.
+            }
+          }
+        }
+        await applyOpportunityAction(opportunityId, action, enrichedPayload);
       }
       await load();
     } catch (err) {
@@ -327,14 +359,24 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
     ovfs.length === 0 &&
     blueprint.state === "ovf_ready";
   const createOvfActions = canCreateOvf ? ["create_ovf"] : [];
-  const createOvfLabels: Record<string, string> = canCreateOvf
-    ? {
-      create_ovf:
-        quotesForOvf.length > 1
-          ? `Create OVF · ${quotesForOvf.length} quotes`
-          : "Create OVF",
-    }
-    : {};
+  const activeQuoteRevision = Math.max(1, Number(activeQuote?.quote_revision) || 1);
+  const createOvfLabels: Record<string, string> = {
+    ...(canCreateOvf
+      ? {
+        create_ovf:
+          quotesForOvf.length > 1
+            ? `Create OVF · ${quotesForOvf.length} quotes`
+            : "Create OVF",
+      }
+      : {}),
+    ...(activeQuote
+      ? {
+        negotiate: `Create Quote V${activeQuoteRevision + 1}`,
+        accept: "Deal Won",
+        lost: "Deal Lost",
+      }
+      : {}),
+  };
   const showQuotes =
     quotes.length > 0 ||
     ["quote_ready", "quote_in_progress", "po_pending", "po_approval", "ovf_ready", "won"].includes(
@@ -347,7 +389,10 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
       ? (QUOTE_STAGE_ACTIONS[activeQuote.quote_stage] ?? [])
       : [];
   const ovfFollowOnActions =
-    existingOvf && !existingOvf.locked && !existingOvf.deal_won
+    existingOvf &&
+      !existingOvf.locked &&
+      !existingOvf.deal_won &&
+      !existingOvf.shared_to_scm
       ? (OVF_STAGE_ACTIONS[existingOvf.blueprint_state] ?? [])
       : [];
   const blueprintActions = Array.from(
@@ -477,6 +522,55 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
             }
           />
 
+          <div className="grid gap-2 rounded-xl border border-border/80 bg-card px-4 py-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                Account
+              </p>
+              <p className="mt-0.5 text-sm font-medium text-foreground">
+                {company?.customer_name?.trim() || "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                Stage / status
+              </p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                <Badge
+                  variant="outline"
+                  className={
+                    opp.current_stage === "won" || opp.status === "won"
+                      ? "border-emerald-200 bg-emerald-50 capitalize text-emerald-800"
+                      : "capitalize"
+                  }
+                >
+                  {opp.current_stage === "won" || opp.status === "won"
+                    ? "Deal won"
+                    : opp.current_stage.replaceAll("_", " ")}
+                </Badge>
+                <span className="text-xs capitalize text-muted-foreground">{opp.status}</span>
+              </div>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                {opp.status === "won" ? "Won amount" : "Expected revenue"}
+              </p>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums text-foreground">
+                {opp.status === "won" && opp.deal_won_amount != null
+                  ? formatInr(opp.deal_won_amount)
+                  : formatInr(opp.expected_revenue)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                Code
+              </p>
+              <p className="mt-0.5 text-sm font-medium tabular-nums text-foreground">
+                {formatCrmCode(opp.opportunity_code)}
+              </p>
+            </div>
+          </div>
+
           {banner ? <CrmErrorBanner>{banner.text}</CrmErrorBanner> : null}
           {error ? <CrmErrorBanner>{error}</CrmErrorBanner> : null}
 
@@ -493,6 +587,10 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
               quotes,
               ovfs,
             })}
+            showDealWonBadge={
+              String(opp.status || "").toLowerCase() === "won" ||
+              quotes.some((row) => row.quote_stage === "accepted")
+            }
             excludeActions={CUSTOM_ACTIONS}
             actionLabelOverrides={createOvfLabels}
             defaultValues={{

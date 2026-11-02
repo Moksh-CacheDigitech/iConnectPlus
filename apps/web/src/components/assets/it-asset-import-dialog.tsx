@@ -16,9 +16,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   employeeDirectoryPermissionMessage,
+  findEmployeeByCode,
+  indexEmployeesByCode,
   isMissingPermissionError,
   listEmployeeDirectory,
-  normalizeEmployeeCodeKey,
   type EmployeeDirectoryEntry,
 } from "@/lib/org-options";
 import { getStoredOrgContext } from "@/lib/org-context-storage";
@@ -178,6 +179,37 @@ function namesMatch(assignee: string, employee: EmployeeDirectoryEntry): boolean
   return expected === display || label.startsWith(expected) || display.includes(expected);
 }
 
+function findLocationForCompany(
+  locations: SiteLocation[],
+  name: string | null | undefined,
+  companyId: string | null | undefined,
+): SiteLocation | undefined {
+  if (!name?.trim()) return undefined;
+  const key = normalizeName(name);
+  const matches = locations.filter((l) => normalizeName(l.name) === key);
+  if (matches.length === 0) return undefined;
+  if (companyId) {
+    const scoped = matches.find((l) => l.company_id === companyId);
+    if (scoped) return scoped;
+  }
+  return matches[0];
+}
+
+function findAssetTypeForCompany(
+  assetTypes: ItAssetType[],
+  name: string,
+  companyId: string | null | undefined,
+): ItAssetType | undefined {
+  const key = normalizeName(name);
+  const matches = assetTypes.filter((t) => t.active && normalizeName(t.name) === key);
+  if (matches.length === 0) return undefined;
+  if (companyId) {
+    const scoped = matches.find((t) => t.company_id === companyId);
+    if (scoped) return scoped;
+  }
+  return matches[0];
+}
+
 function parseIssueDate(raw: unknown): string | null {
   if (raw == null || raw === "") return null;
   if (typeof raw === "number") {
@@ -272,11 +304,7 @@ function validateRows(
   assetTypes: ItAssetType[],
   options: { skipEmployeeLookup?: boolean } = {},
 ): ParsedImportRow[] {
-  const empByCode = new Map(
-    employees
-      .filter((e) => e.employeeCode)
-      .map((e) => [e.employeeCode!.toLowerCase(), e]),
-  );
+  const empByCode = indexEmployeesByCode(employees);
   const locByName = new Map(locations.map((l) => [normalizeName(l.name), l]));
   const typeByName = new Map(
     assetTypes
@@ -299,9 +327,7 @@ function validateRows(
       errors.push("In Maintenance status requires Maintenance Reason");
     }
     if (row.employee_code && !options.skipEmployeeLookup) {
-      const emp =
-        empByCode.get(row.employee_code.toLowerCase()) ??
-        empByCode.get(normalizeEmployeeCodeKey(row.employee_code));
+      const emp = findEmployeeByCode(empByCode, row.employee_code);
       if (!emp) {
         errors.push(`Employee ID '${row.employee_code}' not found`);
       } else if (row.assignee_name && !namesMatch(row.assignee_name, emp)) {
@@ -543,24 +569,19 @@ export function ItAssetImportDialog({
     setError(null);
     try {
       const sessionScope = await ensureSessionBranch();
-      const companyForImport =
+      const sessionCompanyId =
         resolvedCompanyId || sessionScope?.company_id || undefined;
-      const branchForImport =
+      const sessionBranchId =
         fallbackBranchId || sessionScope?.branch_id || undefined;
 
-      if (!companyForImport) {
+      if (!sessionCompanyId && !sessionScope?.company_id) {
         setError(
           "Company context is required for import. Select a company in the header, then retry.",
         );
         return;
       }
 
-      const empByCode = new Map<string, string>();
-      for (const e of employees) {
-        if (!e.employeeCode) continue;
-        empByCode.set(e.employeeCode.toLowerCase(), e.id);
-        empByCode.set(normalizeEmployeeCodeKey(e.employeeCode), e.id);
-      }
+      const empByCode = indexEmployeesByCode(employees);
 
       const revalidated = validateRows(preview, employees, locations, assetTypes, {
         skipEmployeeLookup: employeesLoadFailed,
@@ -569,34 +590,69 @@ export function ItAssetImportDialog({
       if (stillInvalid.length > 0) {
         setError(
           stillInvalid[0]?.errors[0] ??
-            `Location not found. ${LOCATION_MISSING_HINT}`,
+          `Location not found. ${LOCATION_MISSING_HINT}`,
         );
-        setBusy(false);
         return;
       }
 
-      const typeByName = new Map(
-        assetTypes.filter((t) => t.active).map((t) => [normalizeName(t.name), t.id]),
-      );
-      const locByName = new Map(
-        locations.map((l) => [normalizeName(l.name), l]),
-      );
-
-      const apiRows = revalidated.map((row) => {
-        const loc = row.location
-          ? locByName.get(normalizeName(row.location))
+      const apiRows: Array<Record<string, unknown>> = [];
+      for (const row of revalidated) {
+        const matchedEmployee = row.employee_code
+          ? findEmployeeByCode(empByCode, row.employee_code)
           : undefined;
-        return {
+
+        // Prefer employee company (ASSIGNED), else location company, else session.
+        // Avoids "Asset type does not belong to this company" when header company ≠ row data.
+        const provisionalCompany =
+          matchedEmployee?.companyId ||
+          findLocationForCompany(locations, row.location, null)?.company_id ||
+          sessionCompanyId ||
+          sessionScope?.company_id ||
+          undefined;
+
+        if (!provisionalCompany) {
+          setError(
+            `Row ${row.row_number}: could not resolve company for import. Select a company in the header.`,
+          );
+          return;
+        }
+
+        const loc = findLocationForCompany(locations, row.location, provisionalCompany);
+        const assetType = findAssetTypeForCompany(
+          assetTypes,
+          row.asset_type,
+          provisionalCompany,
+        );
+        if (!assetType) {
+          setError(
+            `Row ${row.row_number}: Asset type '${row.asset_type}' not found for this company.`,
+          );
+          return;
+        }
+
+        const rowCompanyId = loc?.company_id || matchedEmployee?.companyId || provisionalCompany;
+        const rowBranchId =
+          (matchedEmployee?.companyId === rowCompanyId && matchedEmployee.branchId) ||
+          (sessionCompanyId === rowCompanyId ? sessionBranchId : undefined) ||
+          sessionBranchId ||
+          undefined;
+
+        if (!rowBranchId) {
+          setError(
+            `Row ${row.row_number}: branch context is required. Select a branch in the header, then retry.`,
+          );
+          return;
+        }
+
+        apiRows.push({
           row_number: row.row_number,
           preview_status: "valid",
           asset_name: row.asset_name,
-          ...(branchForImport ? { branch_id: branchForImport } : {}),
-          company_id: companyForImport,
+          branch_id: rowBranchId,
+          company_id: rowCompanyId,
           operational_status: row.operational_status,
-          employee_id: row.employee_code
-            ? empByCode.get(row.employee_code.toLowerCase()) ?? null
-            : null,
-          asset_type_id: typeByName.get(normalizeName(row.asset_type))!,
+          employee_id: matchedEmployee?.id ?? null,
+          asset_type_id: assetType.id,
           serial_number: row.serial_number,
           make: row.make,
           model: row.model,
@@ -607,21 +663,20 @@ export function ItAssetImportDialog({
           issue_date: row.issue_date,
           ...(row.operational_status === "IN_MAINTENANCE"
             ? {
-                maintenance_reason: row.maintenance_reason,
-                expected_duration_days: 7,
-              }
+              maintenance_reason: row.maintenance_reason,
+              expected_duration_days: 7,
+            }
             : {}),
-        };
-      });
+        });
+      }
 
-      const resolvedCompanyId =
-        companyId ||
-        locations.find((l) => l.company_id)?.company_id ||
-        locations[0]?.company_id ||
-        undefined;
+      const batchCompanyId =
+        (apiRows[0]?.company_id as string | undefined) ||
+        sessionCompanyId ||
+        sessionScope?.company_id;
 
       const result = await assetOperationsService.importExcelRegister({
-        company_id: companyForImport,
+        company_id: batchCompanyId,
         confirm_warnings: true,
         defaults: {
           asset_type: "fixed",
@@ -639,6 +694,16 @@ export function ItAssetImportDialog({
         failed: result.failed,
         rows: result.rows as ImportSummary["rows"],
       });
+      if (result.failed > 0 && result.imported === 0) {
+        const firstFail = result.rows.find(
+          (r) => r.outcome === "failed" && typeof r.reason === "string" && r.reason,
+        );
+        setError(
+          firstFail?.reason
+            ? String(firstFail.reason)
+            : `Import failed for ${result.failed} row(s).`,
+        );
+      }
       onImported();
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Import failed");

@@ -7,7 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ForbiddenException
-from modules.foundation.domain.org_data_scope import apply_org_scope_filter
+from modules.foundation.domain.org_data_scope import (
+    apply_org_scope_filter,
+    resolve_list_company_id as shared_resolve_list_company_id,
+    resolve_write_company_id as shared_resolve_write_company_id,
+)
 from modules.foundation.domain.value_objects import TenantContext
 from modules.organization.repository.base import OrgScopedRepository
 
@@ -28,15 +32,6 @@ class MktScopedRepository(OrgScopedRepository):
         return apply_org_scope_filter(
             stmt, model, ctx, module_key=MODULE_KEY, branch_scoped=branch_scoped
         )
-
-    @staticmethod
-    def resolve_company_id(ctx: TenantContext, company_id: UUID | None) -> UUID:
-        if company_id is not None:
-            MktScopedRepository.ensure_company_access(ctx, company_id, module_key=MODULE_KEY)
-            return company_id
-        if ctx.company_id is None:
-            raise ForbiddenException("Company context required")
-        return ctx.company_id
 
     def get_by_id(self, model, ctx: TenantContext, row_id: UUID, *, branch_scoped: bool = False):
         stmt = select(model).where(model.id == row_id, model.is_deleted.is_(False))
@@ -94,3 +89,26 @@ class MktScopedRepository(OrgScopedRepository):
             row.version = int(row.version or 1) + 1
         self.db.flush()
         return row
+
+    @staticmethod
+    def resolve_list_company_id(
+        ctx: TenantContext, company_id: UUID | None
+    ) -> UUID | None:
+        """Optional company filter for list/read APIs (never session-pin alone)."""
+        if company_id is not None:
+            MktScopedRepository.ensure_company_access(
+                ctx, company_id, module_key=MODULE_KEY
+            )
+        return shared_resolve_list_company_id(
+            ctx, company_id, module_key=MODULE_KEY
+        )
+
+    @staticmethod
+    def resolve_company_id(ctx: TenantContext, company_id: UUID | None) -> UUID:
+        """Concrete company for create/update - always requires a single company."""
+        if company_id is not None:
+            MktScopedRepository.ensure_company_access(
+                ctx, company_id, module_key=MODULE_KEY
+            )
+            return company_id
+        return shared_resolve_write_company_id(ctx, None)

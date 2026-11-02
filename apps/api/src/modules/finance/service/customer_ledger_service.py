@@ -81,7 +81,7 @@ class CustomerLedgerService:
         customer_id: UUID | None = None,
         **filters,
     ):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_customer_ledger(ctx, cid, customer_id, **filters)
 
     def list_responses(
@@ -472,7 +472,7 @@ class CustomerLedgerService:
         return self._enrich(ctx, rows)
 
     def summary(self, ctx: TenantContext, company_id: UUID | None = None) -> ArSummaryResponse:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         stats = self._repo.ar_aggregate_stats(ctx, cid)
         aging_entries = self.aging_report(ctx, cid)
         buckets = {"0-30": 0.0, "31-60": 0.0, "61-90": 0.0, "90+": 0.0}

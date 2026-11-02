@@ -241,6 +241,24 @@ def notify_stale_lead(
         payload_json=payload,
         created_by=created_by,
     )
+    try:
+        from modules.crm.service.crm_email_notification_service import (
+            CrmEmailNotificationService,
+            entity_record_url,
+        )
+
+        CrmEmailNotificationService(db).notify_followup(
+            tenant_id=tenant_id,
+            recipient_user_id=recipient_user_id,
+            record_title=f"{lead_code} — {lead_name}",
+            customer_name=company_name,
+            stage="open",
+            days_idle=days_idle,
+            record_url=entity_record_url("lead", lead_id),
+            created_by=created_by,
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return True
 
 

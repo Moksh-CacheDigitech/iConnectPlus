@@ -18,6 +18,8 @@ apps/api/var/recruitment-resumes/*
 !apps/api/var/recruitment-resumes/.gitkeep
 apps/api/var/recruitment-bg-docs/*
 !apps/api/var/recruitment-bg-docs/.gitkeep
+apps/api/var/recruitment-job-evidence/*
+!apps/api/var/recruitment-job-evidence/.gitkeep
 # Misplaced local uploads (cwd drift) — never commit
 apps/api/src/var/
 apps/api/var/*.jsonl

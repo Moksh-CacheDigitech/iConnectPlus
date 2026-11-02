@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from modules.asset.models import AstAsset, AstAssetServiceHistory
@@ -59,7 +59,7 @@ class AssetServiceHistoryRepository(AstScopedRepository):
         limit: int,
     ) -> tuple[list[AstAssetServiceHistory], int]:
         stmt = select(AstAssetServiceHistory).where(
-            AstAssetServiceHistory.company_id == filters.company_id,
+            (AstAssetServiceHistory.company_id == filters.company_id if filters.company_id is not None else true()),
             AstAssetServiceHistory.is_deleted.is_(False),
         )
         if filters.asset_id is not None:

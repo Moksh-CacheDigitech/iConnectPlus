@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, Search } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 export type SearchableSelectOption = {
   value: string;
   label: string;
+  description?: string;
+  disabled?: boolean;
 };
 
 type SearchableSelectProps = {
@@ -21,10 +24,13 @@ type SearchableSelectProps = {
   disabled?: boolean;
   /** Allow keeping a value that is not in the options list (legacy data). */
   allowCustomValue?: boolean;
+  /** When false, hide the in-menu search field (short lists). Default true. */
+  searchable?: boolean;
 };
 
 /**
- * Click to open a dropdown, type to filter options, click (or Enter) to select.
+ * CRM-style searchable dropdown: trigger + popover list
+ * (`rounded-lg border border-border bg-popover shadow-md`).
  */
 export function SearchableSelect({
   value,
@@ -35,6 +41,7 @@ export function SearchableSelect({
   className,
   disabled,
   allowCustomValue = true,
+  searchable = true,
 }: SearchableSelectProps) {
   const listId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -57,7 +64,10 @@ export function SearchableSelect({
     const q = query.trim().toLowerCase();
     if (!q) return options;
     return options.filter(
-      (o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q),
+      (o) =>
+        o.label.toLowerCase().includes(q) ||
+        o.value.toLowerCase().includes(q) ||
+        (o.description ?? "").toLowerCase().includes(q),
     );
   }, [options, query]);
 
@@ -69,9 +79,10 @@ export function SearchableSelect({
     if (!open) return;
     setQuery("");
     setHighlight(0);
+    if (!searchable) return;
     const t = window.setTimeout(() => searchRef.current?.focus(), 20);
     return () => window.clearTimeout(t);
-  }, [open]);
+  }, [open, searchable]);
 
   useEffect(() => {
     setHighlight(0);
@@ -82,8 +93,8 @@ export function SearchableSelect({
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
     const menu = menuRef.current;
-    const menuHeight = menu?.offsetHeight || 280;
-    const gap = 6;
+    const menuHeight = menu?.offsetHeight || 220;
+    const gap = 4;
     const pad = 8;
 
     let top = rect.bottom + gap;
@@ -146,7 +157,7 @@ export function SearchableSelect({
     } else if (e.key === "Enter") {
       e.preventDefault();
       const hit = filtered[highlight];
-      if (hit) pick(hit.value);
+      if (hit && !hit.disabled) pick(hit.value);
       else if (allowCustomValue && query.trim()) pick(query.trim());
     }
   }
@@ -162,11 +173,11 @@ export function SearchableSelect({
         aria-controls={open ? listId : undefined}
         title={displayLabel}
         className={cn(
-          "flex h-8.5 w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-input/80 bg-background/60 px-3 text-left text-sm outline-none transition-all duration-150",
-          "hover:bg-muted/60 hover:border-border",
+          "flex h-8.5 w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-input/80 bg-background/60 px-3 text-left text-sm outline-none transition-all duration-150",
+          "hover:bg-muted/20",
           "focus-visible:border-primary/60 focus-visible:ring-3 focus-visible:ring-primary/15",
           "shadow-[0_1px_2px_0_rgba(0,0,0,0.02)] backdrop-blur-xs",
-          open && "border-primary/60 ring-3 ring-primary/15",
+          open && "border-ring ring-3 ring-ring/50",
           "disabled:cursor-not-allowed disabled:opacity-50",
         )}
         onClick={() => setOpen((v) => !v)}
@@ -176,7 +187,7 @@ export function SearchableSelect({
         </span>
         <ChevronDown
           className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
             open && "rotate-180",
           )}
         />
@@ -184,68 +195,76 @@ export function SearchableSelect({
 
       {mounted && open
         ? createPortal(
-            <div
-              ref={menuRef}
-              id={listId}
+          <div
+            ref={menuRef}
+            id={listId}
+            className="fixed z-[200] overflow-hidden rounded-lg border border-border bg-popover shadow-md"
+            style={{
+              top: coords?.top ?? 0,
+              left: coords?.left ?? 0,
+              width: coords?.width ?? 220,
+              visibility: coords ? "visible" : "hidden",
+            }}
+          >
+            {searchable ? (
+              <div className="border-b border-border/80 p-2">
+                <Input
+                  ref={searchRef}
+                  value={query}
+                  placeholder={searchPlaceholder}
+                  className="h-8"
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={onSearchKeyDown}
+                  onMouseDown={(e) => e.stopPropagation()}
+                />
+              </div>
+            ) : null}
+            <ul
               role="listbox"
               aria-label={placeholder}
-              className="fixed z-[200] overflow-hidden rounded-2xl border border-border/70 bg-card/95 shadow-2xl backdrop-blur-2xl animate-in fade-in-0 zoom-in-95 duration-150"
-              style={{
-                top: coords?.top ?? 0,
-                left: coords?.left ?? 0,
-                width: coords?.width ?? 220,
-                visibility: coords ? "visible" : "hidden",
-              }}
+              className="max-h-48 overflow-y-auto py-1"
             >
-              <div className="border-b border-border/60 p-1.5">
-                <div className="flex h-8 items-center gap-2 rounded-xl border border-border/60 bg-muted/40 px-2.5">
-                  <Search className="size-3.5 shrink-0 text-muted-foreground" />
-                  <input
-                    ref={searchRef}
-                    type="text"
-                    value={query}
-                    placeholder={searchPlaceholder}
-                    className="h-full w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
-                    onChange={(e) => setQuery(e.target.value)}
-                    onKeyDown={onSearchKeyDown}
-                  />
-                </div>
-              </div>
-              <div className="erp-scroll max-h-52 overflow-y-auto overscroll-contain p-1.5 space-y-0.5">
-                {filtered.length === 0 ? (
-                  <p className="px-2.5 py-2 text-xs text-muted-foreground">No matches</p>
-                ) : (
-                  filtered.map((opt, i) => {
-                    const active = opt.value === value;
-                    const focused = i === highlight;
-                    return (
+              {filtered.length === 0 ? (
+                <li className="px-3 py-2 text-xs text-muted-foreground">No matches</li>
+              ) : (
+                filtered.map((opt, i) => {
+                  const active = opt.value === value;
+                  const focused = i === highlight;
+                  return (
+                    <li key={opt.value || `__empty_${i}`}>
                       <button
-                        key={opt.value}
                         type="button"
                         role="option"
                         aria-selected={active}
+                        disabled={opt.disabled}
                         title={opt.label}
                         className={cn(
-                          "flex w-full cursor-pointer items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-sm font-medium transition-all duration-150 active:scale-[0.99]",
-                          active
-                            ? "bg-primary text-primary-foreground shadow-xs"
-                            : focused
-                              ? "bg-muted/80 text-foreground"
-                              : "text-foreground hover:bg-muted/50",
+                          "flex w-full cursor-pointer flex-col px-3 py-1.5 text-left text-sm transition-colors duration-200 hover:bg-muted/80",
+                          active && "bg-muted/60 font-medium",
+                          focused && !active && "bg-muted/40",
+                          opt.disabled && "cursor-not-allowed opacity-50",
                         )}
                         onMouseEnter={() => setHighlight(i)}
-                        onClick={() => pick(opt.value)}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          if (!opt.disabled) pick(opt.value);
+                        }}
                       >
-                        <span className="min-w-0 flex-1 truncate">{opt.label}</span>
-                        {active ? <Check className="size-3.5 shrink-0" /> : null}
+                        <span className="min-w-0 truncate">{opt.label}</span>
+                        {opt.description ? (
+                          <span className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-muted-foreground">
+                            {opt.description}
+                          </span>
+                        ) : null}
                       </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>,
-            document.body,
-          )
+                    </li>
+                  );
+                })
+              )}
+            </ul>
+          </div>,
+          document.body,
+        )
         : null}
     </div>
   );

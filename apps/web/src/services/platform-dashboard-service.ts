@@ -782,7 +782,8 @@ function buildExecutive(results: ModuleLoaderResult[]): PlatformKpi[] {
 }
 
 /** Cap parallel module overview loads so the API DB pool is not exhausted. */
-const MODULE_LOAD_CONCURRENCY = 6;
+/** Cap parallel module overview loads so nginx/API rate limits are not exhausted. */
+const MODULE_LOAD_CONCURRENCY = 3;
 
 async function mapWithConcurrency<T, R>(
   items: T[],

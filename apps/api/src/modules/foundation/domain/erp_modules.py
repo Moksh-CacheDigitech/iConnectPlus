@@ -91,7 +91,19 @@ def default_module_member_role(module_key: str) -> str:
 PERMISSION_MODULE_ALIASES: dict[str, str] = {
     "project": "projects",
     "asset": "assets",
+    "master": "master-data",
 }
+
+# HRMS sidebar nests Org Setup / Payroll / Hire under the `hr` module assignment.
+# Those APIs use organization.* / payroll.* / recruitment.* / master.* permission codes.
+HRMS_NESTED_MODULE_KEYS = frozenset(
+    {
+        "organization",
+        "payroll",
+        "recruitment",
+        "master-data",
+    }
+)
 
 
 def resolve_erp_module_key(module_or_permission_prefix: str) -> str | None:
@@ -109,6 +121,20 @@ def module_key_for_permission_code(permission_code: str) -> str | None:
     """Best-effort module key from `module.resource:action` permission codes."""
     head = permission_code.split(".", 1)[0].strip().lower()
     return resolve_erp_module_key(head)
+
+
+def assignment_module_keys_for_permission(permission_code: str) -> list[str]:
+    """``sec_user_module`` keys that unlock this permission for non-role users.
+
+    Direct module key first; HRMS assignees also unlock nested workspace modules.
+    """
+    key = module_key_for_permission_code(permission_code)
+    if key is None:
+        return []
+    if key == "hr" or key in HRMS_NESTED_MODULE_KEYS:
+        # Deduplicate while keeping stable order for tests / debugging.
+        return list(dict.fromkeys([key, "hr"]))
+    return [key]
 
 
 def has_platform_module_access(user_type: str, role_codes: list[str] | None = None) -> bool:

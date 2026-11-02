@@ -89,7 +89,7 @@ class OpsEventService:
         return row
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktOpsEvent, ctx, cid)
 
 
@@ -108,7 +108,7 @@ class TaskService:
         campaign_id: UUID | None = None,
         deliverables_only: bool = False,
     ):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         rows = self._repo.list_by_company(MktTask, ctx, cid, branch_scoped=True)
         if campaign_id is not None:
             rows = [r for r in rows if r.campaign_id == campaign_id]
@@ -452,7 +452,7 @@ class ApprovalService:
         self._ops = OpsEventService(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktApproval, ctx, cid)
 
     def act(
@@ -515,15 +515,15 @@ class M365Service:
         self._ops = OpsEventService(db)
 
     def list_workspaces(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktM365Workspace, ctx, cid)
 
     def list_files(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktM365File, ctx, cid)
 
     def list_meetings(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktM365Meeting, ctx, cid)
 
     def provision_for_campaign(self, ctx: TenantContext, campaign: MktCampaign) -> MktM365Workspace:

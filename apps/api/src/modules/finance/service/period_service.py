@@ -42,7 +42,7 @@ class PeriodService:
         sort_by: str = "period_number",
         sort_dir: str = "asc",
     ) -> list[PeriodResponse]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         periods = self._repo.list_periods(
             ctx,
             company_id=cid,

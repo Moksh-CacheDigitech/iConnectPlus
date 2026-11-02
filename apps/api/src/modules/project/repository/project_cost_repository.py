@@ -19,11 +19,11 @@ class ProjectCostRepository(PrjScopedRepository):
         stmt = self.apply_prj_filter(stmt, PrjProjectCost, ctx, branch_scoped=True)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(PrjProjectCost).where(
-            PrjProjectCost.company_id == company_id,
             PrjProjectCost.is_deleted.is_(False),
         )
+        stmt = self.apply_optional_company_filter(stmt, PrjProjectCost, company_id)
         stmt = self.apply_prj_filter(stmt, PrjProjectCost, ctx, branch_scoped=True)
         return list(self.db.scalars(stmt).all())
 

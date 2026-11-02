@@ -90,7 +90,7 @@ export const erpModules: ErpModule[] = [
   {
     key: "email",
     title: "Email",
-    description: "SMTP email notifications, templates, and delivery logs.",
+    description: "Compose, send, and track SMTP email delivery.",
     href: "/email",
     group: "foundation",
     icon: "mail",
@@ -110,12 +110,6 @@ export const erpModules: ErpModule[] = [
         listable: false,
       },
       {
-        key: "templates",
-        title: "Templates",
-        description: "Email notification templates",
-        apiPath: "/notifications/templates",
-      },
-      {
         key: "deliveries",
         title: "Deliveries",
         description: "Email delivery attempts and status",
@@ -124,7 +118,7 @@ export const erpModules: ErpModule[] = [
       {
         key: "events",
         title: "Events",
-        description: "Notification events queue",
+        description: "Outbound email event log",
         apiPath: "/notifications/events",
       },
     ],

@@ -1,6 +1,7 @@
 """Authentication service (ERP user id + password)."""
 
 import logging
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
@@ -35,6 +36,16 @@ logger = logging.getLogger(__name__)
 # Users deactivated by HRMS sync (exited employees) cannot sign in.
 BLOCKED_LOGIN_STATUSES = frozenset({"inactive"})
 
+# Zero-width / BOM / NBSP often sneak in when copying credentials from HTML email.
+_INVISIBLE_RE = re.compile(r"[\u200b\u200c\u200d\ufeff\u00a0]")
+
+
+def _sanitize_login_text(value: str) -> str:
+    text = _INVISIBLE_RE.sub("", value or "")
+    # Fullwidth @ / digits sometimes appear after Outlook linkify + copy.
+    text = text.replace("\uff20", "@").replace("＠", "@")
+    return text.strip()
+
 
 class AuthService:
     def __init__(self, db: Session) -> None:
@@ -47,7 +58,7 @@ class AuthService:
 
     def resolve_login_user(self, identifier: str) -> SecUser | None:
         """Resolve a sign-in id: work email, or an HRMS employee code linked to one login."""
-        value = (identifier or "").strip()
+        value = _sanitize_login_text(identifier)
         if not value:
             return None
         if "@" in value:
@@ -117,9 +128,11 @@ class AuthService:
             "tenant.admin@example.com",
         }
         allow_demo = settings.allow_demo_login
+        identifier = _sanitize_login_text(identifier)
+        password = _sanitize_login_text(password)
         if (
             not allow_demo
-            and identifier.strip().lower() in demo_emails
+            and identifier.lower() in demo_emails
             and password == demo_password
         ):
             self._audit.log_security_event(
@@ -131,7 +144,24 @@ class AuthService:
             raise InvalidCredentialsException()
 
         user = self.resolve_login_user(identifier)
-        if user is None or not PasswordHasher.verify_password(password, user.password_hash):
+        password_ok = bool(user) and PasswordHasher.verify_password(password, user.password_hash)
+        # Temp-password email clients often linkify Cache@123; accept legacy typed temp against
+        # either the stored legacy hash or the current default temp hash (migration window).
+        if user is not None and not password_ok and user.must_change_password:
+            from modules.foundation.service.user_service import DEFAULT_TEMPORARY_PASSWORD
+
+            typed_temps = {
+                DEFAULT_TEMPORARY_PASSWORD,
+                "Cache@123",
+                "cache@123",
+                "CACHE@123",
+            }
+            if password in typed_temps:
+                for stored in (DEFAULT_TEMPORARY_PASSWORD, "Cache@123"):
+                    if PasswordHasher.verify_password(stored, user.password_hash):
+                        password_ok = True
+                        break
+        if user is None or not password_ok:
             if user is not None:
                 self._users.record_failed_login(user)
                 if user.failed_login_count >= settings.account_lockout_threshold:
@@ -413,7 +443,24 @@ class AuthService:
         user = self._db.get(SecUser, user_id)
         if user is None or user.is_deleted:
             raise UnauthorizedException("User not found")
-        if not PasswordHasher.verify_password(current_password, user.password_hash):
+        current_password = _sanitize_login_text(current_password)
+        current_ok = PasswordHasher.verify_password(current_password, user.password_hash)
+        # Same temp-password migration window as login (legacy Cache@123 vs CacheDigi#123).
+        if not current_ok and user.must_change_password:
+            from modules.foundation.service.user_service import DEFAULT_TEMPORARY_PASSWORD
+
+            typed_temps = {
+                DEFAULT_TEMPORARY_PASSWORD,
+                "Cache@123",
+                "cache@123",
+                "CACHE@123",
+            }
+            if current_password in typed_temps:
+                for stored in (DEFAULT_TEMPORARY_PASSWORD, "Cache@123"):
+                    if PasswordHasher.verify_password(stored, user.password_hash):
+                        current_ok = True
+                        break
+        if not current_ok:
             raise InvalidCredentialsException("Current password is incorrect")
         if current_password == new_password:
             raise InvalidCredentialsException("Choose a password you have not used just now")

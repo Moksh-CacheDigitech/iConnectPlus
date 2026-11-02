@@ -15,6 +15,7 @@ import { resolveSalesStageLabel } from "@/lib/crm/sales-blueprint-stages";
 import { CrmDetailEditLink } from "@/components/crm/sales/crm-detail-edit-link";
 import { CrmRecordActionsMenu } from "@/components/crm/sales/crm-record-actions-menu";
 import { LeadDetailsCard } from "@/components/crm/sales/lead-details-card";
+import { leadPresalesCallReady } from "@/components/crm/sales/lead-presales-call-section";
 import { PageHeader } from "@/components/layout/page-header";
 import { cloneLeadRecord, downloadLeadExport, printLeadPreview } from "@/lib/crm/crm-record-actions";
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
@@ -144,17 +145,19 @@ export function LeadDetailPage({ leadId }: { leadId: string }) {
       </div>
 
       <ApprovalBanner
-        locked={blueprint.locked}
+        locked={blueprint.locked || !leadPresalesCallReady(lead)}
         label="This lead"
         reason={
-          (lead.requires_boq && !lead.boq_attached) || (lead.requires_sow && !lead.sow_attached)
-            ? `waiting for ${[
-              lead.requires_boq && !lead.boq_attached ? "BOQ" : null,
-              lead.requires_sow && !lead.sow_attached ? "SOW" : null,
-            ]
-              .filter(Boolean)
-              .join(" and ")} attachment in My Jobs — converts to an opportunity automatically when complete.`
-            : null
+          !leadPresalesCallReady(lead)
+            ? "waiting for PreSales call alignment (Yes + contact person) before BOQ / SOW can be attached."
+            : (lead.requires_boq && !lead.boq_attached) || (lead.requires_sow && !lead.sow_attached)
+              ? `waiting for ${[
+                lead.requires_boq && !lead.boq_attached ? "BOQ" : null,
+                lead.requires_sow && !lead.sow_attached ? "SOW" : null,
+              ]
+                .filter(Boolean)
+                .join(" and ")} attachment in My Jobs — converts to an opportunity automatically when complete.`
+              : null
         }
       />
 
@@ -208,6 +211,10 @@ export function LeadDetailPage({ leadId }: { leadId: string }) {
         employees={employees}
         leadSources={leadSources}
         marketingEvents={marketingEvents}
+        showPresalesCallGate
+        onLeadUpdated={() => {
+          void load();
+        }}
       />
     </CrmPage>
   );

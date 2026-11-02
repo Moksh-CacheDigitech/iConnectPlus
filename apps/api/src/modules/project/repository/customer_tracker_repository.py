@@ -19,18 +19,18 @@ class CustomerTrackerRepository(PrjScopedRepository):
             PrjCustomerTracker.id == row_id,
             PrjCustomerTracker.is_deleted.is_(False),
         )
-        return self.db.scalar(self.apply_prj_filter(stmt, PrjCustomerTracker, ctx, branch_scoped=True))
+        stmt = self.apply_prj_filter(stmt, PrjCustomerTracker, ctx, branch_scoped=True)
+        return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID) -> list[PrjCustomerTracker]:
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None) -> list[PrjCustomerTracker]:
         stmt = (
             select(PrjCustomerTracker)
-            .where(
-                PrjCustomerTracker.company_id == company_id,
-                PrjCustomerTracker.is_deleted.is_(False),
-            )
+            .where(PrjCustomerTracker.is_deleted.is_(False))
             .order_by(PrjCustomerTracker.created_at.desc())
         )
-        return list(self.db.scalars(self.apply_prj_filter(stmt, PrjCustomerTracker, ctx, branch_scoped=True)).all())
+        stmt = self.apply_optional_company_filter(stmt, PrjCustomerTracker, company_id)
+        stmt = self.apply_prj_filter(stmt, PrjCustomerTracker, ctx, branch_scoped=True)
+        return list(self.db.scalars(stmt).all())
 
     def next_version(self, ctx: TenantContext, project_id: UUID) -> int:
         stmt = select(func.coalesce(func.max(PrjCustomerTracker.version_no), 0)).where(

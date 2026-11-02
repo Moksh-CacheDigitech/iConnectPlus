@@ -13,7 +13,6 @@ from modules.asset.domain.enums import (
     DOMAIN_MEMBERSHIP_ROLE_VALUES,
     DomainMembershipRole,
 )
-from modules.asset.repository.base import utcnow
 from modules.asset.repository.domain_membership_repository import DomainMembershipRepository
 from modules.asset.service.asset_module_admin import ASSET_MODULE_KEY
 from modules.asset.service.asset_scope_validator import AssetScopeValidator
@@ -21,7 +20,6 @@ from modules.foundation.domain.erp_modules import MODULE_ROLE_ADMIN, MODULE_ROLE
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.repository.user_module_repository import UserModuleRepository
 from modules.platform.compat.audit_facade import PlatformAuditFacade
-from modules.foundation.service.hrms_user_directory import HrmsUserDirectory
 from modules.foundation.service.rbac_service import RBACService
 from modules.organization.models.company import OrgCompany
 
@@ -128,7 +126,7 @@ class DomainMembershipService:
         # Tenant-scoped list; company_id is an optional explicit filter only.
         cid: UUID | None = None
         if company_id is not None:
-            cid = self._scope.resolve_company_id(ctx, company_id)
+            cid = self._scope.resolve_list_company_id(ctx, company_id)
 
         if domain is not None:
             self.ensure_can_manage_domain(ctx, domain)
@@ -161,9 +159,7 @@ class DomainMembershipService:
         return out
 
     def list_assignable_users(self, ctx: TenantContext) -> list[dict]:
-        """HRMS onboarded employees only (same pool as every module Users tab)."""
         self.ensure_can_manage_any(ctx)
-        valid_ids = HrmsUserDirectory(self._db).valid_user_ids(ctx.tenant_id)
         return [
             {
                 "user_id": u.id,
@@ -171,7 +167,6 @@ class DomainMembershipService:
                 "email": u.email,
             }
             for u in self._repo.list_assignable_users(ctx)
-            if u.id in valid_ids
         ]
 
     def create(
@@ -321,51 +316,6 @@ class DomainMembershipService:
         if (existing.role or MODULE_ROLE_MEMBER) == MODULE_ROLE_ADMIN:
             return
         self._modules.delete_assignment(existing)
-
-    def deactivate_all_for_user(
-        self,
-        tenant_id: UUID,
-        user_id: UUID,
-        *,
-        actor_id: UUID | None,
-    ) -> int:
-        """Soft-delete every active domain membership for a user (Org revoke path).
-
-        Organization → Users can remove Assets module access; without clearing these
-        rows, ``sync_all_active_to_org_modules`` re-adds the assets member on list.
-        """
-        from modules.asset.models.domain_membership import AstDomainMembership
-
-        rows = list(
-            self._db.scalars(
-                select(AstDomainMembership).where(
-                    AstDomainMembership.tenant_id == tenant_id,
-                    AstDomainMembership.user_id == user_id,
-                    AstDomainMembership.is_deleted.is_(False),
-                )
-            ).all()
-        )
-        if not rows:
-            return 0
-        now = utcnow()
-        for row in rows:
-            row.is_deleted = True
-            row.deleted_at = now
-            row.deleted_by = actor_id
-            row.updated_at = now
-            row.updated_by = actor_id
-            if hasattr(row, "version"):
-                row.version = int(row.version or 1) + 1
-            self._audit.log_entity_change(
-                tenant_id=tenant_id,
-                entity_name="ast_domain_membership",
-                entity_id=row.id,
-                operation="delete",
-                performed_by=actor_id,
-                new_value={"domain": row.domain, "user_id": str(user_id), "via": "org_module_revoke"},
-            )
-        self._db.flush()
-        return len(rows)
 
     def sync_all_active_to_org_modules(self, tenant_id: UUID) -> int:
         """Backfill sec_user_module assets member for every active domain membership."""

@@ -75,7 +75,7 @@ class NonItLocationService:
         location_kind: str | None = None,
     ) -> list[dict]:
         ensure_nonit_member_or_permission(ctx, self._db, "asset.nonit_asset:read")
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         kind = None
         if location_kind:
             kind = self._normalize_kind(location_kind)

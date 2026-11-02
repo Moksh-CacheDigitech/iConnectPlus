@@ -111,12 +111,12 @@ _ACTION_MILESTONE: dict[str, str] = {
     "approve_sow": "SOW Attached",
     "deal_reg": "Deal Registration Submitted",
     "oem_received": "Vendor Quotation Received",
-    "attach_oem_quote": "Vendor Quote Attached",
+    "attach_oem_quote": "Vendor Quotation Attached",
     "create_quote": "Quote Created",
     "send_for_approval": "Quote Sent for Approval",  # quote/ovf disambiguated by entity
     "approve_internally": "Quote Approved",
     "send_to_customer": "Quote Sent",
-    "negotiate": "Quote Sent",
+    "negotiate": "Quote Negotiation (new revision)",
     "follow_up": "Quote Sent",
     "accept": "Quote Accepted",
     "quote_accepted": "Quote Accepted",
@@ -145,9 +145,9 @@ _TO_STATE_MILESTONE: dict[str, dict[str, str]] = {
         "sow_approval": "SOW Sent for Approval",
         "boq_approval": "BOQ Sent for Approval",
         "deal_reg": "Deal Registration",
-        "oem_pending": "Deal Registration Submitted",
-        "oem_attached": "Vendor Quotation Received",
-        "quote_ready": "Vendor Quote Attached",
+        "oem_pending": "Attach Vendor Quotation",
+        "oem_attached": "Attach Vendor Quotation",
+        "quote_ready": "Vendor Quotation Attached",
         "quote_in_progress": "Quote Created",
         "po_pending": "Quote Accepted",
         "po_approval": "Customer PO Sent for Approval",
@@ -166,7 +166,7 @@ _TO_STATE_MILESTONE: dict[str, dict[str, str]] = {
         "lost": "Lost Deal",
     },
     "ovf": {
-        "draft": "OVF Created · Draft",
+        "draft": "OVF Created",
         "approval": "OVF Sent for Approval",
         "approved": "OVF Approved",
         "shared_scm": "OVF Shared to SCM",
@@ -720,15 +720,8 @@ class OpportunityTimelineService:
                 summary=opp.deal_reg_number,
             )
 
-        if opp.oem_quotation_received or opp.blueprint_state in {
-            "oem_attached",
-            "quote_ready",
-            "quote_in_progress",
-            "po_pending",
-            "po_approval",
-            "ovf_ready",
-            "won",
-        }:
+        # Legacy acknowledgement click only — new flow attaches the quotation directly.
+        if hist_time("oem_received"):
             add_milestone(
                 "Vendor Quotation Received",
                 occurred_at=hist_time("oem_received")
@@ -749,7 +742,7 @@ class OpportunityTimelineService:
             "won",
         }:
             add_milestone(
-                "Vendor Quote Attached",
+                "Vendor Quotation Attached",
                 occurred_at=hist_time("attach_oem_quote")
                 or hist_to_state("quote_ready")
                 or bump(opp.updated_at, 6),
@@ -852,7 +845,7 @@ class OpportunityTimelineService:
         if ovf is not None:
             oid = ovf.id
             ovf_stage = (ovf.blueprint_state or "draft").lower()
-            created_title = "OVF Created · Draft" if ovf_stage == "draft" else "OVF Created"
+            created_title = "OVF Created"
             add_milestone(
                 created_title,
                 occurred_at=ovf.created_at or hist_time("create_ovf"),

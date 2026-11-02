@@ -41,7 +41,7 @@ class SiteLocationService:
         search: str | None = None,
     ) -> list[dict]:
         ensure_site_read(ctx, self._db)
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return [self._loc_dict(r) for r in self._locs.list_rows(ctx, cid, search=search)]
 
     def create_location(self, ctx: TenantContext, **fields) -> dict:
@@ -142,7 +142,7 @@ class SiteLocationService:
         search: str | None = None,
     ) -> list[dict]:
         ensure_site_read(ctx, self._db)
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return [
             self._bldg_dict(r)
             for r in self._bldgs.list_rows(

@@ -136,14 +136,20 @@ export function AssetAddForm({
     void (async () => {
       if (!isAuthenticated()) return;
       try {
+        const sessionCompanyId = getStoredOrgContext()?.companyId || undefined;
         const [categoryPayload, locs, types, buildings] = await Promise.all([
           assetCategoryService.search({
             page: 1,
             page_size: 200,
             status: "active",
+            company_id: sessionCompanyId,
           }),
-          listSiteLocations().catch(() => [] as SiteLocation[]),
-          listItAssetTypes({ active: true }).catch(() => [] as ItAssetType[]),
+          listSiteLocations(undefined, { company_id: sessionCompanyId }).catch(
+            () => [] as SiteLocation[],
+          ),
+          listItAssetTypes({ active: true, company_id: sessionCompanyId }).catch(
+            () => [] as ItAssetType[],
+          ),
           listSiteBuildings().catch(() => [] as SiteBuilding[]),
         ]);
         const active = filterActiveCategories(categoryPayload.items);
@@ -325,11 +331,11 @@ export function AssetAddForm({
       if (isEdit && assetId) {
         const configuration = requiresHardware
           ? buildConfigurationString({
-              processor: form.processor,
-              generation: showGeneration ? form.generation : "",
-              ram: form.ram,
-              storage: form.storage,
-            })
+            processor: form.processor,
+            generation: showGeneration ? form.generation : "",
+            ram: form.ram,
+            storage: form.storage,
+          })
           : undefined;
         const updateBody: Record<string, unknown> = {
           asset_name: form.asset_name.trim(),
@@ -362,11 +368,11 @@ export function AssetAddForm({
       if (!id) {
         const configuration = requiresHardware
           ? buildConfigurationString({
-              processor: form.processor,
-              generation: showGeneration ? form.generation : "",
-              ram: form.ram,
-              storage: form.storage,
-            })
+            processor: form.processor,
+            generation: showGeneration ? form.generation : "",
+            ram: form.ram,
+            storage: form.storage,
+          })
           : undefined;
         // branch_id omitted — API resolves from the authenticated user's org scope / session.
         const createBody: Record<string, unknown> = {

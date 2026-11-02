@@ -27,7 +27,7 @@ class ContentService:
         self._audit = PlatformAuditFacade(db)
 
     def list_requests(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktContentRequest, ctx, cid, branch_scoped=True)
 
     def get_request(self, ctx: TenantContext, row_id: UUID) -> MktContentRequest:
@@ -79,7 +79,7 @@ class ContentService:
         return row
 
     def list_content(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktGeneratedContent, ctx, cid, branch_scoped=True)
 
     def get_content(self, ctx: TenantContext, row_id: UUID) -> MktGeneratedContent:
@@ -264,7 +264,7 @@ class ContentService:
             marketing_module_role,
         )
 
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         requests = self._repo.list_by_company(MktContentRequest, ctx, cid, branch_scoped=True)
         contents = {
             c.content_request_id: c

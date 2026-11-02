@@ -22,6 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException, ForbiddenException, NotFoundException, ValidationException
+from modules.foundation.domain.org_data_scope import apply_company_scope
 from modules.foundation.domain.value_objects import TenantContext
 from modules.procurement.adapters.crm_adapter import ProcurementCrmAdapter
 from modules.procurement.models.delivery_project import ProcDeliveryProject, ProcDeliveryProjectSite
@@ -185,12 +186,17 @@ class DeliveryProjectService:
         }
 
     def list_projects(self, ctx: TenantContext, *, company_account_id: UUID | None = None) -> list[dict[str, Any]]:
-        cid = self._company(ctx)
+        cid = self._scope.resolve_list_company_id(ctx, None)
         stmt = select(ProcDeliveryProject).where(
             ProcDeliveryProject.tenant_id == ctx.tenant_id,
-            ProcDeliveryProject.company_id == cid,
             ProcDeliveryProject.is_deleted.is_(False),
         )
+        if cid is not None:
+            stmt = stmt.where(ProcDeliveryProject.company_id == cid)
+        else:
+            stmt = apply_company_scope(
+                stmt, ProcDeliveryProject, ctx, module_key="procurement"
+            )
         if company_account_id is not None:
             stmt = stmt.where(ProcDeliveryProject.company_account_id == company_account_id)
         rows = self._db.scalars(stmt.order_by(ProcDeliveryProject.created_at.desc())).all()

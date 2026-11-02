@@ -36,7 +36,7 @@ class PlatformService:
         self._repo = MktScopedRepository(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         rows = self._repo.list_by_company(MktPlatform, ctx, cid)
         if not rows:
             rows = self.ensure_defaults(ctx, cid)
@@ -85,7 +85,7 @@ class PillarService:
         self._repo = MktScopedRepository(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktContentPillar, ctx, cid)
 
     def create(self, ctx: TenantContext, **fields) -> MktContentPillar:
@@ -106,7 +106,7 @@ class BrandVoiceService:
         self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktBrandVoice, ctx, cid)
 
     def get(self, ctx: TenantContext, row_id: UUID) -> MktBrandVoice:
@@ -214,7 +214,7 @@ class SocialAccountService:
         self._repo = MktScopedRepository(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktSocialAccount, ctx, cid)
 
     def create(self, ctx: TenantContext, **fields) -> MktSocialAccount:
@@ -234,7 +234,7 @@ class ResearchService:
         self._numbers = MarketingNumberService(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktResearchReport, ctx, cid, branch_scoped=True)
 
     def create(self, ctx: TenantContext, **fields) -> MktResearchReport:
@@ -270,7 +270,7 @@ class TrendService:
         self._numbers = MarketingNumberService(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktTrendReport, ctx, cid, branch_scoped=True)
 
     def create(self, ctx: TenantContext, **fields) -> MktTrendReport:
@@ -299,7 +299,7 @@ class CompetitorService:
         self._repo = MktScopedRepository(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         return self._repo.list_by_company(MktCompetitor, ctx, cid)
 
     def create(self, ctx: TenantContext, **fields) -> MktCompetitor:
@@ -319,7 +319,7 @@ class CalendarService:
         self._repo = MktScopedRepository(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None, campaign_id: UUID | None = None):
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         rows = self._repo.list_by_company(MktCalendarEntry, ctx, cid, branch_scoped=True)
         if campaign_id is not None:
             rows = [row for row in rows if row.campaign_id == campaign_id]
@@ -465,7 +465,7 @@ class PublishService:
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
         from modules.marketing.service.publish_truth import public_publish_status
 
-        cid = self._repo.resolve_company_id(ctx, company_id)
+        cid = self._repo.resolve_list_company_id(ctx, company_id)
         rows = self._repo.list_by_company(MktPublishJob, ctx, cid, branch_scoped=True)
         for row in rows:
             row.status = public_publish_status(row.status, row.result_payload)

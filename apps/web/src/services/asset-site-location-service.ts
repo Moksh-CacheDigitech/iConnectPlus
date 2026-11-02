@@ -22,9 +22,15 @@ export type SiteBuilding = {
 const LOC_BASE = "/assets/site-locations";
 const BLD_BASE = "/assets/site-buildings";
 
-export async function listSiteLocations(search?: string): Promise<SiteLocation[]> {
+export async function listSiteLocations(
+  search?: string,
+  opts?: { company_id?: string },
+): Promise<SiteLocation[]> {
+  const query: Record<string, string> = {};
+  if (search) query.search = search;
+  if (opts?.company_id) query.company_id = opts.company_id;
   const res = await apiClient<SiteLocation[]>(LOC_BASE, {
-    query: search ? { search } : undefined,
+    query: Object.keys(query).length ? query : undefined,
   });
   return res.data ?? [];
 }

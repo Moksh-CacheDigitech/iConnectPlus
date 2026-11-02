@@ -7,7 +7,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from modules.asset.domain.enums import (
@@ -29,7 +29,7 @@ from modules.foundation.domain.value_objects import TenantContext
 
 @dataclass(frozen=True)
 class IncomingAssetListFilters:
-    company_id: UUID
+    company_id: UUID | None
     branch_id: UUID | None = None
     status: str | None = None
     grn_id: UUID | None = None
@@ -41,7 +41,7 @@ class IncomingAssetListFilters:
 
 @dataclass(frozen=True)
 class IncomingRegistrationQueueFilters:
-    company_id: UUID
+    company_id: UUID | None
     branch_id: UUID | None = None
     grn_id: UUID | None = None
     purchase_order_id: UUID | None = None
@@ -80,7 +80,7 @@ def compute_line_qc_status(
 
 @dataclass(frozen=True)
 class IncomingAssetQcListFilters:
-    company_id: UUID
+    company_id: UUID | None
     branch_id: UUID | None = None
     qc_status: str | None = None
     grn_id: UUID | None = None
@@ -123,10 +123,10 @@ class IncomingAssetRepository(AstScopedRepository):
         return self.db.scalar(stmt)
 
     def find_by_grn_line(
-        self, ctx: TenantContext, company_id: UUID, grn_line_id: UUID
+        self, ctx: TenantContext, company_id: UUID | None, grn_line_id: UUID
     ) -> AstIncomingAssetLine | None:
         stmt = select(AstIncomingAssetLine).where(
-            AstIncomingAssetLine.company_id == company_id,
+            (AstIncomingAssetLine.company_id == company_id if company_id is not None else true()),
             AstIncomingAssetLine.grn_line_id == grn_line_id,
             AstIncomingAssetLine.is_deleted.is_(False),
         )
@@ -142,7 +142,7 @@ class IncomingAssetRepository(AstScopedRepository):
         limit: int,
     ) -> tuple[list[AstIncomingAssetLine], int]:
         stmt = select(AstIncomingAssetLine).where(
-            AstIncomingAssetLine.company_id == filters.company_id,
+            (AstIncomingAssetLine.company_id == filters.company_id if filters.company_id is not None else true()),
             AstIncomingAssetLine.is_deleted.is_(False),
         )
         if filters.branch_id is not None:
@@ -183,10 +183,10 @@ class IncomingAssetRepository(AstScopedRepository):
         return rows, total
 
     def summary_counts(
-        self, ctx: TenantContext, company_id: UUID, *, branch_id: UUID | None = None
+        self, ctx: TenantContext, company_id: UUID | None, *, branch_id: UUID | None = None
     ) -> dict[str, int]:
         stmt = select(AstIncomingAssetLine.status, func.count()).where(
-            AstIncomingAssetLine.company_id == company_id,
+            (AstIncomingAssetLine.company_id == company_id if company_id is not None else true()),
             AstIncomingAssetLine.is_deleted.is_(False),
         )
         if branch_id is not None:
@@ -202,7 +202,7 @@ class IncomingAssetRepository(AstScopedRepository):
             func.coalesce(func.sum(AstIncomingAssetLine.expected_quantity), 0),
             func.coalesce(func.sum(AstIncomingAssetLine.arrived_quantity), 0),
         ).where(
-            AstIncomingAssetLine.company_id == company_id,
+            (AstIncomingAssetLine.company_id == company_id if company_id is not None else true()),
             AstIncomingAssetLine.is_deleted.is_(False),
         )
         if branch_id is not None:
@@ -366,7 +366,7 @@ class IncomingAssetRepository(AstScopedRepository):
         limit: int,
     ) -> tuple[list[AstIncomingAssetLine], int]:
         stmt = select(AstIncomingAssetLine).where(
-            AstIncomingAssetLine.company_id == filters.company_id,
+            (AstIncomingAssetLine.company_id == filters.company_id if filters.company_id is not None else true()),
             AstIncomingAssetLine.is_deleted.is_(False),
         )
         if filters.require_arrived:
@@ -704,7 +704,7 @@ class IncomingAssetRepository(AstScopedRepository):
             .where(
                 AstIncomingAssetUnit.is_deleted.is_(False),
                 AstIncomingAssetLine.is_deleted.is_(False),
-                AstIncomingAssetLine.company_id == filters.company_id,
+                (AstIncomingAssetLine.company_id == filters.company_id if filters.company_id is not None else true()),
                 AstIncomingAssetUnit.qc_status == IncomingAssetUnitQcStatus.ACCEPTED.value,
             )
             .options(selectinload(AstIncomingAssetUnit.incoming_line))
@@ -753,7 +753,7 @@ class IncomingAssetRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         branch_id: UUID | None = None,
     ) -> dict[str, int]:
         base = (
@@ -765,7 +765,7 @@ class IncomingAssetRepository(AstScopedRepository):
             .where(
                 AstIncomingAssetUnit.is_deleted.is_(False),
                 AstIncomingAssetLine.is_deleted.is_(False),
-                AstIncomingAssetLine.company_id == company_id,
+                (AstIncomingAssetLine.company_id == company_id if company_id is not None else true()),
                 AstIncomingAssetUnit.qc_status == IncomingAssetUnitQcStatus.ACCEPTED.value,
             )
         )

@@ -70,8 +70,10 @@ class AssetTypeService:
         search: str | None = None,
     ) -> list[dict]:
         self._ensure_read(ctx)
-        cid = self._scope.resolve_company_id(ctx, company_id)
-        self.ensure_defaults(ctx, cid)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
+        # Seed defaults against the write/session company; list may be tenant-wide (cid=None).
+        seed_cid = cid if cid is not None else self._scope.resolve_company_id(ctx, None)
+        self.ensure_defaults(ctx, seed_cid)
         rows = self._repo.list_rows(ctx, cid, active=active, search=search)
         return [self._to_dict(r) for r in rows]
 

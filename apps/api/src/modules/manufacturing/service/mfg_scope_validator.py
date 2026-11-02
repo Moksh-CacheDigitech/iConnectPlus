@@ -13,6 +13,11 @@ class MfgScopeValidator:
     def __init__(self, db: Session) -> None:
         self._db = db
 
+    def resolve_list_company_id(
+        self, ctx: TenantContext, company_id: UUID | None
+    ) -> UUID | None:
+        return MfgScopedRepository.resolve_list_company_id(ctx, company_id)
+
     def resolve_company_id(self, ctx: TenantContext, company_id: UUID | None) -> UUID:
         return MfgScopedRepository.resolve_company_id(ctx, company_id)
 

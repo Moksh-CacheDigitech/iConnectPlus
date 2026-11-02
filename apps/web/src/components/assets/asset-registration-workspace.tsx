@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { isAuthenticated } from "@/lib/auth";
+import { getStoredOrgContext } from "@/lib/org-context-storage";
 import {
   filterActiveCategories,
   type AssetCategoryRow,
@@ -115,9 +116,18 @@ export function AssetRegistrationWorkspace() {
   const loadCategories = useCallback(async () => {
     if (!isAuthenticated()) return;
     try {
+      const sessionCompanyId = getStoredOrgContext()?.companyId || undefined;
+      const categoryQuery = new URLSearchParams({
+        status: "active",
+        page: "1",
+        page_size: "500",
+      });
+      if (sessionCompanyId) categoryQuery.set("company_id", sessionCompanyId);
       const [catRes, types] = await Promise.all([
-        resourceService.list(`${categoryPath}?status=active&page=1&page_size=500`),
-        listItAssetTypes({ active: true }).catch(() => [] as ItAssetType[]),
+        resourceService.list(`${categoryPath}?${categoryQuery.toString()}`),
+        listItAssetTypes({ active: true, company_id: sessionCompanyId }).catch(
+          () => [] as ItAssetType[],
+        ),
       ]);
       const items = parseListItems<CategoryRow | AssetCategoryRow>(catRes.data);
       setCategories(filterActiveCategories(items));
@@ -350,10 +360,10 @@ export function AssetRegistrationWorkspace() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
-                    <th className={tableSerialHeaderClassName()} scope="col">
-                      {TABLE_SERIAL_HEADER_LABEL}
-                    </th>
-                    <th className="py-2 pr-2" scope="col">
+                      <th className={tableSerialHeaderClassName()} scope="col">
+                        {TABLE_SERIAL_HEADER_LABEL}
+                      </th>
+                      <th className="py-2 pr-2" scope="col">
                         Code
                       </th>
                       <th className="py-2 pr-2" scope="col">
@@ -371,9 +381,8 @@ export function AssetRegistrationWorkspace() {
                     {rows.map((row, index) => (
                       <tr
                         key={row.id}
-                        className={`cursor-pointer border-b transition-colors hover:bg-muted/50 ${
-                          selected?.id === row.id ? "bg-muted/60" : ""
-                        }`}
+                        className={`cursor-pointer border-b transition-colors hover:bg-muted/50 ${selected?.id === row.id ? "bg-muted/60" : ""
+                          }`}
                         onClick={() => setSelected(row)}
                       >
                         <td className={tableSerialCellClassName()}>{tableRowSerialFromIndex(index)}</td>

@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmLeadSource
@@ -19,11 +19,11 @@ class LeadSourceRepository(CrmScopedRepository):
         stmt = self.apply_crm_filter(stmt, CrmLeadSource, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_sources(self, ctx: TenantContext, company_id: UUID):
+    def list_sources(self, ctx: TenantContext, company_id: UUID | None):
         stmt = (
             select(CrmLeadSource)
             .where(
-                CrmLeadSource.company_id == company_id,
+                (CrmLeadSource.company_id == company_id if company_id is not None else true()),
                 CrmLeadSource.is_deleted.is_(False),
                 CrmLeadSource.status == "active",
             )

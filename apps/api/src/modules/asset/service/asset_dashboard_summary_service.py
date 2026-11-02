@@ -30,7 +30,10 @@ class AssetDashboardSummaryService:
         location_id: UUID | None = None,
         asset_domain: str | None = None,
     ) -> AssetDashboardSummaryResponse:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
+        # Response schema requires a company_id; use session/write company for the label
+        # while aggregating across all visible companies when cid is None.
+        response_company_id = cid if cid is not None else self._scope.resolve_company_id(ctx, None)
         if branch_id is not None:
             self._scope.validate_branch_access(ctx, branch_id)
 
@@ -59,7 +62,7 @@ class AssetDashboardSummaryService:
             ]
 
         return AssetDashboardSummaryResponse(
-            company_id=cid,
+            company_id=response_company_id,
             branch_id=branch_id,
             location_id=location_id,
             total_assets=counts.total_assets,

@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, time
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
@@ -142,6 +143,7 @@ class SalesLeadUpdate(BaseModel):
     distributor_department: str | None = None
     end_customer_name: str | None = None
     end_customer_location: str | None = None
+    sale_type: str | None = None
     entity_name: str | None = None
     entity_email: str | None = None
     entity_address: str | None = None
@@ -151,6 +153,9 @@ class SalesLeadUpdate(BaseModel):
     requires_sow: bool | None = None
     notes: str | None = None
     presales_owner_id: UUID | None = None
+    presales_call_aligned: bool | None = None
+    presales_call_contact_name: str | None = None
+    presales_call_by_product: str | None = None
 
 
 class LeadAssignRequest(BaseModel):
@@ -234,12 +239,16 @@ class LeadResponse(OrmModel):
     distributor_department: str | None = None
     end_customer_name: str | None = None
     end_customer_location: str | None = None
+    sale_type: str | None = None
     notes: str | None
     convert_remark: str | None = None
     lost_reason: str | None = None
     customer_id: UUID | None
     converted_opportunity_id: UUID | None
     presales_owner_id: UUID | None = None
+    presales_call_aligned: bool | None = None
+    presales_call_contact_name: str | None = None
+    presales_call_by_product: str | None = None
     version: int
 
 
@@ -326,6 +335,9 @@ class OpportunityResponse(OrmModel):
     po_terms_at: datetime | None = None
     cloud_blueprint_variant: str | None = None
     product_type: str | None = None
+    has_hardware: bool = False
+    has_software: bool = False
+    has_services: bool = False
     cloud_sub_product: str | None = None
     customer_mrr: Decimal | None = None
     customer_arr: Decimal | None = None
@@ -1104,6 +1116,7 @@ class LeadCreateFromCompany(BaseModel):
     distributor_department: str | None = None
     end_customer_name: str | None = None
     end_customer_location: str | None = None
+    sale_type: str | None = None
     entity_name: str | None = None
     entity_email: str | None = None
     entity_address: str | None = None
@@ -1113,6 +1126,9 @@ class LeadCreateFromCompany(BaseModel):
     requires_sow: bool = False
     notes: str | None = None
     presales_owner_id: UUID | None = None
+    presales_call_aligned: bool | None = None
+    presales_call_contact_name: str | None = None
+    presales_call_by_product: str | None = None
 
 
 class LeadLostRequest(BaseModel):
@@ -1166,9 +1182,13 @@ class SalesLeadResponse(OrmModel):
     distributor_department: str | None = None
     end_customer_name: str | None = None
     end_customer_location: str | None = None
+    sale_type: str | None = None
     notes: str | None = None
     converted_opportunity_id: UUID | None
     presales_owner_id: UUID | None = None
+    presales_call_aligned: bool | None = None
+    presales_call_contact_name: str | None = None
+    presales_call_by_product: str | None = None
     version: int
 
 
@@ -1442,6 +1462,7 @@ class QuoteLineCreate(BaseModel):
     product_name: str
     hsn_sac: str | None = None
     description: str | None = None
+    sub_product_category: str | None = None
     line_type: str = "hardware"
     qty: Decimal = Decimal("1")
     unit_cost: Decimal = Decimal("0")
@@ -1453,6 +1474,7 @@ class QuoteLineUpdate(BaseModel):
     product_name: str | None = None
     hsn_sac: str | None = None
     description: str | None = None
+    sub_product_category: str | None = None
     line_type: str | None = None
     qty: Decimal | None = None
     unit_cost: Decimal | None = None
@@ -1469,6 +1491,7 @@ class QuoteLineResponse(OrmModel):
     product_name: str
     hsn_sac: str | None
     description: str | None = None
+    sub_product_category: str | None = None
     line_type: str
     qty: Decimal
     unit_cost: Decimal
@@ -1492,11 +1515,32 @@ class QuoteMarginSummaryResponse(BaseModel):
     line_types_present: list[str]
 
 
+class QuoteRevisionRow(BaseModel):
+    revision_no: int
+    avg_margin_pct: Decimal
+    grand_total: Decimal
+    total_margin_amount: Decimal
+    negotiation_pct: Decimal
+    is_current: bool = False
+    snapshotted_at: datetime | None = None
+    remark: str | None = None
+    has_print_payload: bool = False
+
+
+class QuoteRevisionPrintPayload(BaseModel):
+    revision_no: int
+    is_current: bool = False
+    quote: dict[str, Any]
+    lines: list[dict[str, Any]]
+
+
 class QuoteSendForApprovalRequest(BaseModel):
     team_role: str = "management"
     assigned_user_id: UUID | None = None
     assigned_user_ids: list[UUID] | None = None
     remarks: str | None = None
+    quotation_pdf_base64: str | None = None
+    quotation_pdf_filename: str | None = None
 
 
 class QuoteActionRequest(BaseModel):
@@ -1658,8 +1702,9 @@ class OvfFreightRequest(BaseModel):
 
 
 class OvfSupportingItemInput(BaseModel):
-    product_name: str = Field(min_length=1, max_length=255)
-    qty: Decimal = Field(gt=0)
+    line_id: UUID | None = None
+    product_name: str = Field(default="", max_length=255)
+    qty: Decimal = Field(default=Decimal("1"), gt=0)
     unit_price: Decimal = Field(ge=0)
     distributor_name: str | None = Field(default=None, max_length=255)
     description: str | None = None
@@ -2001,6 +2046,8 @@ class OvfSendForApprovalRequest(BaseModel):
     assigned_user_id: UUID | None = None
     assigned_user_ids: list[UUID] | None = None
     remarks: str | None = None
+    ovf_pdf_base64: str | None = None
+    ovf_pdf_filename: str | None = None
 
 
 class OvfDealWonRequest(BaseModel):
@@ -2203,6 +2250,9 @@ class BlueprintActionRequest(BaseModel):
     operations_user_ids: list[UUID] | None = None
     # send_po_approval: Sales confirms they checked and verified the PO T&C.
     terms_accepted: bool | None = None
+    # Accepted quote print PDF attached to PO approval emails.
+    quotation_pdf_base64: str | None = None
+    quotation_pdf_filename: str | None = None
 
     def to_payload(self) -> dict:
         return self.model_dump(exclude_none=True)

@@ -21,6 +21,7 @@ import {
   validateChargeAttachments,
   vendorRowsFromOvfLines,
   vendorRowsFromQuoteLines,
+  dedupeAttachmentsByFileName,
   supportingRowsFromOvfLines,
   serviceRowsFromOvfLines,
   type CustomerChargeRow,
@@ -41,7 +42,7 @@ import { Input } from "@/components/ui/input";
 import { ApiClientError } from "@/services/api-client";
 import { extractCustomerPo } from "@/services/crm-deal-controls-service";
 import { useAuthUser } from "@/hooks/use-auth-user";
-import { buildLeadDistributorDropdownOptions } from "@/lib/crm/lead-distributor-options";
+import { loadCrmDistributorOptions } from "@/lib/crm/lead-distributor-options";
 import { computeFinanceCostPct } from "@/lib/crm/ovf-finance-cost";
 import { resolveSessionEmployeeLabel } from "@/lib/crm/session-employee";
 import {
@@ -116,6 +117,25 @@ function weeksFromDeliveryPeriod(value: string | null | undefined): [string, str
   return [match[1], match[2] ?? match[1]];
 }
 
+function productTypeIncludesServices(productType: string | null | undefined): boolean {
+  return (productType || "")
+    .replace(/&/g, ",")
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .includes("services");
+}
+
+/** Prefer opp.has_services; fall back to opp/lead product_type (legacy rows often lack the flag). */
+function opportunityIncludesServices(
+  opportunity: Opportunity | null,
+  leadProductType?: string | null,
+): boolean {
+  if (!opportunity) return false;
+  if (opportunity.has_services) return true;
+  if (productTypeIncludesServices(opportunity.product_type)) return true;
+  return productTypeIncludesServices(leadProductType);
+}
+
 const NUMBER_NO_SPIN =
   "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
 
@@ -146,12 +166,12 @@ async function extractPoFieldsFromAttachments(
 }
 
 async function distributorOptionsForOpportunity(opportunityRow: Opportunity): Promise<string[]> {
-  if (!opportunityRow.lead_id) return buildLeadDistributorDropdownOptions(null);
+  if (!opportunityRow.lead_id) return loadCrmDistributorOptions(null);
   try {
     const lead = await getSalesLead(opportunityRow.lead_id);
-    return buildLeadDistributorDropdownOptions(lead.distributor_name);
+    return loadCrmDistributorOptions(lead.distributor_name);
   } catch {
-    return buildLeadDistributorDropdownOptions(null);
+    return loadCrmDistributorOptions(null);
   }
 }
 
@@ -204,6 +224,7 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
   const [poReadNote, setPoReadNote] = useState<string | null>(null);
   const [freightPending, setFreightPending] = useState(false);
   const [supportingPending, setSupportingPending] = useState(false);
+  const [supportingPricesPending, setSupportingPricesPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mandateOpen, setMandateOpen] = useState(false);
   const [mandateMessage, setMandateMessage] = useState("");
@@ -211,7 +232,9 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
   const [vendorRows, setVendorRows] = useState<VendorChargeRow[]>([]);
   const [supportingRows, setSupportingRows] = useState<SupportingItemRow[]>([]);
   const [serviceChargeTotal, setServiceChargeTotal] = useState(0);
+  const [leadProductType, setLeadProductType] = useState<string | null>(null);
   const [marginInputsDirty, setMarginInputsDirty] = useState(false);
+  const showSupportingItems = opportunityIncludesServices(opportunity, leadProductType);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -222,6 +245,12 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
         const ovfRow = await getOvf(ovfId);
         if (ovfRow.locked) {
           throw new ApiClientError("This OVF is locked and cannot be edited.", 409);
+        }
+        if (ovfRow.blueprint_state !== "draft") {
+          throw new ApiClientError(
+            "OVF cannot be edited after it has been sent for approval.",
+            409,
+          );
         }
         if (ovfRow.deal_won || ovfRow.shared_to_scm) {
           throw new ApiClientError(
@@ -238,12 +267,16 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
             listAttachments("ovf", ovfId).catch(() => []),
             listAttachments("opportunity", ovfRow.opportunity_id).catch(() => []),
           ]);
-        const ovfPoAttachments = attachments.filter((row) => row.category === "customer_po");
+        const ovfPoAttachments = dedupeAttachmentsByFileName(
+          attachments.filter((row) => row.category === "customer_po"),
+        );
         const ovfQuoteAttachments = attachments.filter((row) => row.category === "vendor_quote");
         const poAttachments =
           ovfPoAttachments.length > 0
             ? ovfPoAttachments
-            : opportunityAttachments.filter((row) => row.category === "customer_po");
+            : dedupeAttachmentsByFileName(
+              opportunityAttachments.filter((row) => row.category === "customer_po"),
+            );
         const quoteAttachments =
           ovfQuoteAttachments.length > 0
             ? ovfQuoteAttachments
@@ -255,6 +288,12 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
         setOvf(ovfRow);
         setQuote(quoteRow);
         setOpportunity(opportunityRow);
+        if (opportunityRow.lead_id) {
+          const leadRow = await getSalesLead(opportunityRow.lead_id).catch(() => null);
+          setLeadProductType(leadRow?.product_type ?? null);
+        } else {
+          setLeadProductType(null);
+        }
         const pendingTasks = await listMyJobs({
           entity_type: "ovf",
           entity_id: ovfId,
@@ -263,6 +302,9 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
         setFreightPending(pendingTasks.some((task) => task.action === "provide_freight"));
         setSupportingPending(
           pendingTasks.some((task) => task.action === "provide_supporting_items"),
+        );
+        setSupportingPricesPending(
+          pendingTasks.some((task) => task.action === "price_supporting_items"),
         );
         setVendorNameOptions(await distributorOptionsForOpportunity(opportunityRow));
         setCustomerRows(
@@ -428,7 +470,9 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
           .filter(Boolean)
           .join(", ")
         : "";
-      const priorCustomerPos = opportunityAttachments.filter((row) => row.category === "customer_po");
+      const priorCustomerPos = dedupeAttachmentsByFileName(
+        opportunityAttachments.filter((row) => row.category === "customer_po"),
+      );
       const vendorQuoteById = new Map(
         [
           ...opportunityAttachments.filter(
@@ -456,6 +500,12 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
       const priorVendorQuotes = [...vendorQuoteById.values()];
       setQuote(displayQuote);
       setOpportunity(opportunityRow);
+      if (opportunityRow.lead_id) {
+        const leadRow = await getSalesLead(opportunityRow.lead_id).catch(() => null);
+        setLeadProductType(leadRow?.product_type ?? null);
+      } else {
+        setLeadProductType(null);
+      }
       setVendorNameOptions(await distributorOptionsForOpportunity(opportunityRow));
       setCustomerRows(
         mergeCustomerRowsWithPoAttachments(
@@ -472,6 +522,7 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
       setSupportingRows([]);
       setFreightPending(false);
       setSupportingPending(false);
+      setSupportingPricesPending(false);
       const extracted = await extractPoFieldsFromAttachments(
         quoteRow.opportunity_id,
         opportunityAttachments,
@@ -979,25 +1030,35 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
         onCustomerRowsChange={onCustomerRowsChange}
         onVendorRowsChange={onVendorRowsChange}
         vendorNameOptions={vendorNameOptions}
-        supportingRows={supportingRows}
-        supportingDescription={supportingDescriptionNote}
+        supportingRows={showSupportingItems ? supportingRows : undefined}
+        supportingDescription={
+          showSupportingItems ? supportingDescriptionNote : undefined
+        }
         supportingHeaderRight={
-          supportingPending ? (
-            <p className="text-xs text-muted-foreground">
-              Waiting on Operations to enter items in My Jobs.
-            </p>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="w-fit cursor-pointer"
-              disabled={requestingSupporting || saving || !quote || !opportunity}
-              onClick={() => void onAskOpsSupportingItems()}
-            >
-              {requestingSupporting ? "Requesting…" : "Ask Operations for supporting items"}
-            </Button>
-          )
+          showSupportingItems ? (
+            supportingPending ? (
+              <p className="text-xs text-muted-foreground">
+                Waiting on Operations to enter items in My Jobs.
+              </p>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-fit cursor-pointer"
+                disabled={requestingSupporting || saving || !quote || !opportunity}
+                onClick={() => void onAskOpsSupportingItems()}
+              >
+                {requestingSupporting ? "Requesting…" : "Ask Operations for supporting items"}
+              </Button>
+            )
+          ) : undefined
+        }
+        supportingAwaitingScmPrices={
+          showSupportingItems &&
+          supportingRows.length > 0 &&
+          (supportingPricesPending ||
+            supportingRows.every((row) => (Number(row.unit_price) || 0) <= 0))
         }
         additionalChargeRows={additionalChargeRows}
         readOnlyLines

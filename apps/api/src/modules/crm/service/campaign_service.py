@@ -28,7 +28,7 @@ class CampaignService:
         self._audit = PlatformAuditFacade(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_campaigns(ctx, cid)
 
     def get(self, ctx: TenantContext, row_id: UUID):
@@ -68,5 +68,5 @@ class CampaignService:
         return member
 
     def list_members(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._members.list_members(ctx, cid)

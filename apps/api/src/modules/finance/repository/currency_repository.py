@@ -3,7 +3,7 @@
 from datetime import date
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.finance.models.currency import FinCurrencyRate
@@ -15,8 +15,8 @@ class CurrencyRepository(FinanceScopedRepository):
     def __init__(self, db: Session) -> None:
         super().__init__(db)
 
-    def list_rates(self, ctx: TenantContext, company_id: UUID) -> list[FinCurrencyRate]:
-        stmt = select(FinCurrencyRate).where(FinCurrencyRate.company_id == company_id)
+    def list_rates(self, ctx: TenantContext, company_id: UUID | None) -> list[FinCurrencyRate]:
+        stmt = select(FinCurrencyRate).where((FinCurrencyRate.company_id == company_id if company_id is not None else true()))
         stmt = self.apply_finance_filter(stmt, FinCurrencyRate, ctx)
         return list(self.db.scalars(stmt).all())
 
@@ -29,12 +29,12 @@ class CurrencyRepository(FinanceScopedRepository):
         return self.db.scalar(stmt)
 
     def get_effective_rate(
-        self, ctx: TenantContext, company_id: UUID, currency_code: str, on_date: date
+        self, ctx: TenantContext, company_id: UUID | None, currency_code: str, on_date: date
     ) -> FinCurrencyRate | None:
         stmt = (
             select(FinCurrencyRate)
             .where(
-                FinCurrencyRate.company_id == company_id,
+                (FinCurrencyRate.company_id == company_id if company_id is not None else true()),
                 FinCurrencyRate.tenant_id == ctx.tenant_id,
                 FinCurrencyRate.currency_code == currency_code,
                 FinCurrencyRate.status == "active",
@@ -49,7 +49,7 @@ class CurrencyRepository(FinanceScopedRepository):
                 return rate
         return None
 
-    def create_rate(self, ctx: TenantContext, *, company_id: UUID, **fields: object) -> FinCurrencyRate:
+    def create_rate(self, ctx: TenantContext, *, company_id: UUID | None, **fields: object) -> FinCurrencyRate:
         row = FinCurrencyRate(
             id=uuid4(),
             tenant_id=ctx.tenant_id,

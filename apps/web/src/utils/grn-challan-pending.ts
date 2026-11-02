@@ -8,7 +8,11 @@ import {
 
 export type GrnChallanStatus = "pending" | "saved";
 
-export type PendingGrnChallanSource = "grn" | "ovf_stock" | "ovf_grn_stock";
+export type PendingGrnChallanSource =
+  | "grn"
+  | "ovf_stock"
+  | "ovf_grn_stock"
+  | "po_grn_stock";
 
 export type PendingGrnChallan = {
   id: string;
@@ -70,6 +74,7 @@ function inferChallanSource(record: DeliveryChallanRecord): PendingGrnChallanSou
   const key = record.selectedGrnKeys[0] || "";
   if (key.startsWith("ovf-stock:")) return "ovf_stock";
   if (key.startsWith("ovf-grn-stock:")) return "ovf_grn_stock";
+  if (key.startsWith("po-grn-stock:")) return "po_grn_stock";
   if (record.selectedGrnNumbers.length > 0) return "grn";
   if (record.orderId && record.selectedGrnKeys.length === 0) return "ovf_grn_stock";
   return "grn";
@@ -267,6 +272,16 @@ export function pendingGrnChallanHref(row: PendingGrnChallan): string {
       returnTo: "/procurement/delivery-challan",
     });
     if (ovfId) params.set("ovfId", ovfId);
+    return `/procurement/delivery-challan/new?${params.toString()}`;
+  }
+  if (row.source === "po_grn_stock" || row.batchKey.startsWith("po-grn-stock:")) {
+    const params = new URLSearchParams({
+      source: "po_grn_stock",
+      orderId: row.orderId,
+      kind: row.kind,
+      returnTo: "/procurement/delivery-challan",
+    });
+    if (row.batchKey) params.set("batchKey", row.batchKey);
     return `/procurement/delivery-challan/new?${params.toString()}`;
   }
   const params = new URLSearchParams({

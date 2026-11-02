@@ -7,6 +7,7 @@ import { ArrowLeft, Building2, FileText, MapPin } from "lucide-react";
 
 import { CrmErrorBanner, CrmPage, CrmSection } from "@/components/crm/crm-ui";
 import { CrmSessionEmployeeField } from "@/components/crm/sales/crm-session-employee-field";
+import { KycContactDesignationField } from "@/components/crm/sales/kyc-contact-designation-field";
 import {
   FinanceField,
   FinanceSelect,
@@ -120,7 +121,7 @@ const EMPTY_FORM: CompanyFormInput = {
   website: "",
   account_ownership_id: "",
   customer_id_ext: "",
-  role: "User",
+  role: "",
   billing_street: "",
   billing_city: "",
   billing_state: "",
@@ -191,7 +192,7 @@ export function CompanyFormPage({ companyId }: { companyId?: string }) {
           website: companyRow.website ?? "",
           account_ownership_id: companyRow.account_ownership_id ?? "",
           customer_id_ext: companyRow.customer_id_ext ?? "",
-          role: companyRow.role ?? "User",
+          role: companyRow.role ?? "",
           billing_street: companyRow.billing_street,
           billing_city: companyRow.billing_city,
           billing_state: companyRow.billing_state,
@@ -305,6 +306,7 @@ export function CompanyFormPage({ companyId }: { companyId?: string }) {
     if (form.source === "event" && !form.marketing_event_id) missing.push("Event");
     if (!form.first_name?.trim()) missing.push("First Name");
     if (!form.last_name?.trim()) missing.push("Last Name");
+    if (!form.role?.trim()) missing.push("Designation");
     if (!form.customer_email?.trim()) missing.push("Customer Email");
     if (!form.phone?.trim()) missing.push("Phone");
     if (!form.website?.trim()) missing.push("Website");
@@ -325,6 +327,7 @@ export function CompanyFormPage({ companyId }: { companyId?: string }) {
       ["Company Name", form.customer_name],
       ["First Name", form.first_name],
       ["Last Name", form.last_name],
+      ["Designation", form.role],
       ["Customer Email", form.customer_email],
       ["Phone", form.phone],
       ["Website", form.website],
@@ -469,8 +472,8 @@ export function CompanyFormPage({ companyId }: { companyId?: string }) {
               label="Account Manager Owner"
               value={accountManagerLabel}
             />
-            <FinanceField label="Company Name *">
-              <Input value={form.customer_name} onChange={(e) => set("customer_name", e.target.value)} />
+            <FinanceField label="First Name *">
+              <Input value={form.first_name ?? ""} onChange={(e) => set("first_name", e.target.value)} />
             </FinanceField>
             <FinanceField label="Company ID">
               <Input
@@ -580,11 +583,17 @@ export function CompanyFormPage({ companyId }: { companyId?: string }) {
           </div>
 
           <div className="space-y-3">
-            <FinanceField label="First Name *">
-              <Input value={form.first_name ?? ""} onChange={(e) => set("first_name", e.target.value)} />
+            <FinanceField label="Company Name *">
+              <Input value={form.customer_name} onChange={(e) => set("customer_name", e.target.value)} />
             </FinanceField>
             <FinanceField label="Last Name *">
               <Input value={form.last_name ?? ""} onChange={(e) => set("last_name", e.target.value)} />
+            </FinanceField>
+            <FinanceField label="Designation *">
+              <KycContactDesignationField
+                value={form.role ?? ""}
+                onChange={(designation) => set("role", designation)}
+              />
             </FinanceField>
             <FinanceField
               label="Customer Email *"

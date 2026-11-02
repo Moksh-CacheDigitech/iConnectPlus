@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -140,6 +141,8 @@ class CrmQuoteLine(Base, *CrmTransactionMixin):
     product_name: Mapped[str] = mapped_column(String(255), nullable=False)
     hsn_sac: Mapped[str | None] = mapped_column(String(20), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Selected from the lead's sub-product categor(ies) at quote line entry.
+    sub_product_category: Mapped[str | None] = mapped_column(String(150), nullable=True)
     line_type: Mapped[str] = mapped_column(String(20), nullable=False, default="hardware")
     qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=1)
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
@@ -156,3 +159,28 @@ class CrmQuoteLine(Base, *CrmTransactionMixin):
         nullable=True,
         index=True,
     )
+
+
+class CrmQuoteRevisionSnapshot(Base, *CrmTransactionMixin):
+    """Frozen totals for a quote revision when negotiation starts a new cycle."""
+
+    __tablename__ = "crm_quote_revision_snapshot"
+    __table_args__ = (
+        UniqueConstraint("quote_id", "revision_no", name="uk_crm_quote_rev_snap_quote_rev"),
+        {"schema": "crm"},
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    quote_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("crm.crm_quote.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    revision_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    avg_margin_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False, default=0)
+    grand_total: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    total_margin_amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Frozen quote header + lines for regenerating that version's print PDF.
+    payload_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

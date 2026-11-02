@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import or_, select
+from sqlalchemy import true, or_, select
 from sqlalchemy.orm import Session
 
 from modules.asset.models import AstAssetCategory
@@ -25,11 +25,11 @@ class AssetCategoryRepository(AstScopedRepository):
     def get_by_code(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         category_code: str,
     ) -> AstAssetCategory | None:
         stmt = select(AstAssetCategory).where(
-            AstAssetCategory.company_id == company_id,
+            (AstAssetCategory.company_id == company_id if company_id is not None else true()),
             AstAssetCategory.category_code == category_code,
             AstAssetCategory.is_deleted.is_(False),
         )
@@ -39,14 +39,14 @@ class AssetCategoryRepository(AstScopedRepository):
     def list_rows(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         status: str | None = None,
         search: str | None = None,
         asset_domain: str | None = "IT",
     ):
         stmt = select(AstAssetCategory).where(
-            AstAssetCategory.company_id == company_id,
+            (AstAssetCategory.company_id == company_id if company_id is not None else true()),
             AstAssetCategory.is_deleted.is_(False),
         )
         if status:

@@ -86,7 +86,7 @@ class TransferService:
         effective_from: date | None = None,
         effective_to: date | None = None,
     ) -> tuple[list[AstAssetTransfer], int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         filters = AssetTransferListFilters(
             company_id=cid,
             asset_id=asset_id,
@@ -99,7 +99,7 @@ class TransferService:
         return self._repo.search(ctx, filters, offset=offset, limit=limit)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_rows(ctx, cid)
 
     def get(self, ctx: TenantContext, row_id: UUID) -> AstAssetTransfer:

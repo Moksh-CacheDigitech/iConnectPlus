@@ -8,6 +8,7 @@ import { GrnsListPage } from "@/components/procurement/grns-list-page";
 import { InstallationPage } from "@/components/procurement/installation-page";
 import { InventoryAgingPage } from "@/components/procurement/inventory-aging-page";
 import { OrdersListPage } from "@/components/procurement/orders-list-page";
+import { ProcurementAdminOnly } from "@/components/procurement/procurement-admin-only";
 import { ProcurementApprovalsPage } from "@/components/procurement/procurement-approvals-page";
 import {
   ProcurementAnalyticsPage,
@@ -27,23 +28,53 @@ interface PageProps {
 
 export default async function ProcurementResourcePage({ params }: PageProps) {
   const { resource: resourceKey } = await params;
-  if (resourceKey === "tracker") return <ProcurementTrackerPage />;
+  if (resourceKey === "tracker") {
+    return (
+      <ProcurementAdminOnly>
+        <ProcurementTrackerPage />
+      </ProcurementAdminOnly>
+    );
+  }
   if (resourceKey === "scm") return <ScmQueuePage />;
   // Legacy "Vendors & PO" route - same unified Purchase Orders list.
   if (resourceKey === "vendor-po" || resourceKey === "orders") return <OrdersListPage />;
   if (resourceKey === "grns") return <GrnsListPage />;
   if (resourceKey === "delivery-challan") return <DeliveryChallanListPage />;
   if (resourceKey === "delivery-status") return <DeliveryStatusPage />;
-  if (resourceKey === "correspondence") return <CorrespondenceListPage />;
+  if (resourceKey === "correspondence") {
+    return (
+      <ProcurementAdminOnly>
+        <CorrespondenceListPage />
+      </ProcurementAdminOnly>
+    );
+  }
   if (resourceKey === "installation") return <InstallationPage />;
   if (resourceKey === "vendors") return <VendorsListPage />;
   if (resourceKey === "inventory") return <ProcurementInventoryListPage />;
   if (resourceKey === "inventory-aging") return <InventoryAgingPage />;
   if (resourceKey === "service-contracts") return <ServiceContractsPage />;
   if (resourceKey === "approval" || resourceKey === "approvals") return <ProcurementApprovalsPage />;
-  if (resourceKey === "reports") return <ProcurementReportsPage />;
-  if (resourceKey === "analytics") return <ProcurementAnalyticsPage />;
-  if (resourceKey === "timeline") return <ProcurementTimelineListPage />;
+  if (resourceKey === "reports") {
+    return (
+      <ProcurementAdminOnly>
+        <ProcurementReportsPage />
+      </ProcurementAdminOnly>
+    );
+  }
+  if (resourceKey === "analytics") {
+    return (
+      <ProcurementAdminOnly>
+        <ProcurementAnalyticsPage />
+      </ProcurementAdminOnly>
+    );
+  }
+  if (resourceKey === "timeline") {
+    return (
+      <ProcurementAdminOnly>
+        <ProcurementTimelineListPage />
+      </ProcurementAdminOnly>
+    );
+  }
 
   const mod = getModule("procurement");
   const resource = getResource("procurement", resourceKey);

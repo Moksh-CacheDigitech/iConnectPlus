@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmMeeting
@@ -22,12 +22,12 @@ class MeetingRepository(CrmScopedRepository):
     def list_meetings(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         company_account_id: UUID | None = None,
     ):
         stmt = select(CrmMeeting).where(
-            CrmMeeting.company_id == company_id,
+            (CrmMeeting.company_id == company_id if company_id is not None else true()),
             CrmMeeting.is_deleted.is_(False),
         )
         if company_account_id is not None:

@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmQuote, CrmQuoteLine
@@ -19,17 +19,27 @@ class QuoteRepository(CrmScopedRepository):
         stmt = self.apply_crm_filter(stmt, CrmQuote, ctx, branch_scoped=True)
         return self.db.scalar(stmt)
 
+    def get_for_update(self, ctx: TenantContext, row_id: UUID) -> CrmQuote | None:
+        """Lock the quote row so concurrent line recomputes cannot race on version."""
+        stmt = (
+            select(CrmQuote)
+            .where(CrmQuote.id == row_id, CrmQuote.is_deleted.is_(False))
+            .with_for_update()
+        )
+        stmt = self.apply_crm_filter(stmt, CrmQuote, ctx, branch_scoped=True)
+        return self.db.scalar(stmt)
+
     def list_quotes(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         opportunity_id: UUID | None = None,
         opportunity_ids: list[UUID] | None = None,
         created_by: UUID | None = None,
     ):
         stmt = select(CrmQuote).where(
-            CrmQuote.company_id == company_id,
+            (CrmQuote.company_id == company_id if company_id is not None else true()),
             CrmQuote.is_deleted.is_(False),
         )
         if opportunity_id is not None:

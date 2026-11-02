@@ -20,7 +20,7 @@ class WorkCenterService:
         self._scope = MfgScopeValidator(db)
 
     def list_work_centers(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_work_centers(ctx, cid)
 
     def get_work_center(self, ctx: TenantContext, work_center_id: UUID) -> MfgWorkCenter:
@@ -47,7 +47,7 @@ class MachineService:
         self._scope = MfgScopeValidator(db)
 
     def list_machines(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_machines(ctx, cid)
 
     def get_machine(self, ctx: TenantContext, machine_id: UUID) -> MfgMachine:

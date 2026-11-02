@@ -7,7 +7,7 @@ consider a future PostgreSQL ``pg_trgm`` index on ``checklist_name``.
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException
@@ -18,7 +18,7 @@ from modules.foundation.domain.value_objects import TenantContext
 
 @dataclass(frozen=True)
 class AssetChecklistListFilters:
-    company_id: UUID
+    company_id: UUID | None
     asset_id: UUID | None = None
     maintenance_id: UUID | None = None
     audit_id: UUID | None = None
@@ -39,7 +39,7 @@ class AssetChecklistRepository(AstScopedRepository):
         stmt = self.apply_ast_filter(stmt, AstAssetChecklist, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
         """Unpaginated company listing for internal callers (e.g. ApplicationService.list)."""
         items, _ = self.search(
             ctx,
@@ -52,13 +52,13 @@ class AssetChecklistRepository(AstScopedRepository):
     def find_by_code(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         checklist_code: str,
         *,
         exclude_id: UUID | None = None,
     ) -> AstAssetChecklist | None:
         stmt = select(AstAssetChecklist).where(
-            AstAssetChecklist.company_id == company_id,
+            (AstAssetChecklist.company_id == company_id if company_id is not None else true()),
             AstAssetChecklist.checklist_code == checklist_code,
             AstAssetChecklist.is_deleted.is_(False),
         )
@@ -76,7 +76,7 @@ class AssetChecklistRepository(AstScopedRepository):
         limit: int,
     ) -> tuple[list[AstAssetChecklist], int]:
         stmt = select(AstAssetChecklist).where(
-            AstAssetChecklist.company_id == filters.company_id,
+            (AstAssetChecklist.company_id == filters.company_id if filters.company_id is not None else true()),
             AstAssetChecklist.is_deleted.is_(False),
         )
         if filters.asset_id is not None:

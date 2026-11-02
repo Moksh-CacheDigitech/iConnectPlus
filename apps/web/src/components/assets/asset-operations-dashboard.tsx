@@ -21,11 +21,9 @@ import {
 
 import {
   BRANCH_ALL_VALUE,
-  BranchSelector,
   QuickActionCard,
   StatCard,
   StatusBadge,
-  type BranchOption,
   type StatCardTrend,
   TABLE_SERIAL_HEADER_LABEL,
   tableRowSerial,
@@ -55,9 +53,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 export type AssetOperationsDashboardProps = {
-  locationId: string;
-  locations: BranchOption[];
-  onLocationChange: (locationId: string) => void;
   kpisLoading?: boolean;
   transfersLoading?: boolean;
   kpis?: AssetOperationsKpiModel | null;
@@ -110,10 +105,10 @@ function LocationBreakdownSection({
           <table className="w-full min-w-[520px] text-left text-sm">
             <thead>
               <tr className="border-b border-border/60 text-[11px] uppercase tracking-wide text-muted-foreground">
-                    <th className={tableSerialHeaderClassName()} scope="col">
-                      {TABLE_SERIAL_HEADER_LABEL}
-                    </th>
-                    <th className="pb-1.5 pr-2 font-semibold">Location</th>
+                <th className={tableSerialHeaderClassName()} scope="col">
+                  {TABLE_SERIAL_HEADER_LABEL}
+                </th>
+                <th className="pb-1.5 pr-2 font-semibold">Location</th>
                 <th className="pb-1.5 pr-2 font-semibold text-right">Total</th>
                 <th className="pb-1.5 pr-2 font-semibold text-right">Ready</th>
                 <th className="pb-1.5 pr-2 font-semibold text-right">Assigned</th>
@@ -215,10 +210,10 @@ function TransferListSection({
             <table className="w-full min-w-[960px] text-left text-sm">
               <thead>
                 <tr className="border-b border-border/60 bg-muted/20 text-[11px] uppercase tracking-wide text-muted-foreground">
-                    <th className={tableSerialHeaderClassName()} scope="col">
-                      {TABLE_SERIAL_HEADER_LABEL}
-                    </th>
-                    <th className="px-3 py-2 font-semibold">Document</th>
+                  <th className={tableSerialHeaderClassName()} scope="col">
+                    {TABLE_SERIAL_HEADER_LABEL}
+                  </th>
+                  <th className="px-3 py-2 font-semibold">Document</th>
                   <th className="px-3 py-2 font-semibold">Asset</th>
                   <th className="px-3 py-2 font-semibold">From location</th>
                   <th className="px-3 py-2 font-semibold">To location</th>
@@ -290,9 +285,6 @@ function TransferListSection({
 }
 
 export function AssetOperationsDashboard({
-  locationId,
-  locations,
-  onLocationChange,
   kpisLoading = false,
   transfersLoading = false,
   kpis = null,
@@ -308,7 +300,7 @@ export function AssetOperationsDashboard({
 }: AssetOperationsDashboardProps) {
   const router = useRouter();
   const kpiEmpty = !kpisLoading && !kpis;
-  const showLocationBreakdown = locationId === BRANCH_ALL_VALUE && byLocationRows.length > 0;
+  const showLocationBreakdown = byLocationRows.length > 0;
   const push = (href: string) => {
     router.push(href);
   };
@@ -317,7 +309,7 @@ export function AssetOperationsDashboard({
     kpiTrends?.[key];
 
   const openKpi = (kpi: DashboardKpiId) => {
-    navigateDashboardKpi(push, kpi, locationId);
+    navigateDashboardKpi(push, kpi, BRANCH_ALL_VALUE);
   };
 
   return (
@@ -329,33 +321,24 @@ export function AssetOperationsDashboard({
         title="IT Asset Operations"
         description="Operational status, location mix, and transfer activity — click a KPI to open All Assets filtered."
         actions={
-          <div className="flex flex-col items-stretch gap-2.5 sm:items-end">
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="cursor-pointer gap-2 transition-colors duration-200"
-                onClick={() => openKpi("total")}
-              >
-                <Package className="size-4" aria-hidden />
-                All assets
-              </Button>
-              <Button
-                type="button"
-                className={ASSETS_ACCENT_BTN}
-                onClick={() => push("/assets/assets/new")}
-              >
-                <Plus className="size-4" aria-hidden />
-                Add asset
-              </Button>
-            </div>
-            <BranchSelector
-              value={locationId}
-              onChange={onLocationChange}
-              branches={locations}
-              aria-label="Location"
-              allLabel="All"
-            />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="cursor-pointer gap-2 transition-colors duration-200"
+              onClick={() => openKpi("total")}
+            >
+              <Package className="size-4" aria-hidden />
+              All assets
+            </Button>
+            <Button
+              type="button"
+              className={ASSETS_ACCENT_BTN}
+              onClick={() => push("/assets/assets/new")}
+            >
+              <Plus className="size-4" aria-hidden />
+              Add asset
+            </Button>
           </div>
         }
       />
@@ -507,28 +490,28 @@ export function AssetOperationsDashboard({
             title="Register Asset"
             icon={PackagePlus}
             description="Add a new asset to inventory"
-            onPress={() => navigateDashboardQuickAction(push, "register", locationId)}
+            onPress={() => navigateDashboardQuickAction(push, "register", BRANCH_ALL_VALUE)}
           />
           <QuickActionCard
             compact
             title="Assign Asset"
             icon={UserPlus}
             description="Issue asset to an employee"
-            onPress={() => navigateDashboardQuickAction(push, "assign", locationId)}
+            onPress={() => navigateDashboardQuickAction(push, "assign", BRANCH_ALL_VALUE)}
           />
           <QuickActionCard
             compact
             title="Return Asset"
             icon={Undo2}
             description="Process a return from holder"
-            onPress={() => navigateDashboardQuickAction(push, "return", locationId)}
+            onPress={() => navigateDashboardQuickAction(push, "return", BRANCH_ALL_VALUE)}
           />
           <QuickActionCard
             compact
             title="Discovery"
             icon={ScanSearch}
             description="Review discovery signals"
-            onPress={() => navigateDashboardQuickAction(push, "discovery", locationId)}
+            onPress={() => navigateDashboardQuickAction(push, "discovery", BRANCH_ALL_VALUE)}
           />
           <QuickActionCard
             compact
@@ -536,7 +519,7 @@ export function AssetOperationsDashboard({
             icon={Globe}
             description="Open asset information portal"
             onPress={() =>
-              navigateDashboardQuickAction(push, "informationPortal", locationId)
+              navigateDashboardQuickAction(push, "informationPortal", BRANCH_ALL_VALUE)
             }
           />
         </div>

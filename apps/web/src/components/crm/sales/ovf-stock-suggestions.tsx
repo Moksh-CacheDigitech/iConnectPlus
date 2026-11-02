@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Boxes } from "lucide-react";
 
 import { CrmSection } from "@/components/crm/crm-ui";
+import { useAuthUser } from "@/hooks/use-auth-user";
+import { canManageModuleUsers } from "@/lib/module-access";
 import { suggestInventory, type InventoryUnit } from "@/services/crm-deal-controls-service";
 import { formatInr, listOvfLines, type Ovf } from "@/services/sales-crm-service";
 
@@ -15,6 +17,8 @@ type Match = { product: string; units: InventoryUnit[] };
  * match this OVF - at today's value (cost plus carrying cost).
  */
 export function OvfStockSuggestions({ ovf }: { ovf: Ovf }) {
+  const { user, adminModuleKeys } = useAuthUser();
+  const canOpenStockAging = canManageModuleUsers("crm", adminModuleKeys, user?.userType);
   const relevant = !ovf.deal_won && !ovf.closed_at;
   const [matches, setMatches] = useState<Match[]>([]);
 
@@ -61,12 +65,14 @@ export function OvfStockSuggestions({ ovf }: { ovf: Ovf }) {
           );
         })}
       </ul>
-      <Link
-        href="/crm/inventory-aging"
-        className="mt-2 inline-block cursor-pointer text-xs font-medium text-primary underline underline-offset-2"
-      >
-        Open stock &amp; request units
-      </Link>
+      {canOpenStockAging ? (
+        <Link
+          href="/crm/inventory-aging"
+          className="mt-2 inline-block cursor-pointer text-xs font-medium text-primary underline underline-offset-2"
+        >
+          Open stock &amp; request units
+        </Link>
+      ) : null}
     </CrmSection>
   );
 }

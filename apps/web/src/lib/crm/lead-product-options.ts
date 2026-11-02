@@ -172,6 +172,22 @@ export function formatLeadProductTypes(types: readonly string[]): string {
   return types.join(LEAD_PRODUCT_TYPE_SEPARATOR);
 }
 
+/** Parse comma-separated sub-product categories (same storage shape as product types). */
+export function parseLeadSubProductCategories(value: string | null | undefined): string[] {
+  if (!value?.trim()) return [];
+  const out: string[] = [];
+  for (const part of value.split(",")) {
+    const trimmed = part.trim();
+    if (!trimmed || out.includes(trimmed)) continue;
+    out.push(trimmed);
+  }
+  return out;
+}
+
+export function formatLeadSubProductCategories(categories: readonly string[]): string {
+  return categories.join(LEAD_PRODUCT_TYPE_SEPARATOR);
+}
+
 export function subProductOptionsForType(productType: string | null | undefined): readonly string[] {
   const normalized = normalizeLeadProductType(productType);
   if (normalized) return LEAD_SUB_PRODUCT_CATEGORIES[normalized];

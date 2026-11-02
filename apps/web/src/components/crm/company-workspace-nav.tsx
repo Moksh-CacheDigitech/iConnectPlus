@@ -10,7 +10,7 @@ import { FollowupFormDialog } from "@/components/crm/sales/followup-form-dialog"
 import { MeetingFormDialog } from "@/components/crm/sales/meeting-form-dialog";
 import { OpportunityAttachmentsPanel } from "@/components/crm/sales/opportunity-attachments-panel";
 import { OpportunityTimelinePanel } from "@/components/crm/sales/opportunity-timeline-panel";
-import { TaskAssignmentFormDialog } from "@/components/crm/sales/task-assignment-form-dialog";
+import { OpportunityTasksPanel } from "@/components/crm/sales/opportunity-tasks-panel";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -387,7 +387,11 @@ export function CompanyWorkspaceNav({
         <nav
           aria-label={isOpportunityScope ? "Opportunity workspace" : "Company workspace"}
           data-sidebar-scroll
-          className="erp-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 py-2"
+          className={cn(
+            "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-1.5 py-2",
+            "scrollbar-none [-ms-overflow-style:none] [scrollbar-width:none]",
+            "[&::-webkit-scrollbar]:hidden",
+          )}
         >
           <ul className="space-y-0.5">
             {items.map((item) => {
@@ -486,15 +490,14 @@ export function CompanyWorkspaceNav({
 
       {isOpportunityScope && opportunityId ? (
         <>
-          <TaskAssignmentFormDialog
+          <OpportunityTasksPanel
             open={taskOpen}
             opportunityId={opportunityId}
             companyAccountId={companyAccountId}
             opportunity={opportunity ?? null}
             company={company}
             onClose={() => setTaskOpen(false)}
-            onSaved={() => {
-              setTaskOpen(false);
+            onChanged={() => {
               void loadCompanyNavCounts(companyAccountId, opportunityId).then(setCounts);
             }}
           />

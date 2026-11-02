@@ -48,7 +48,7 @@ class SheetTrackerService:
         return branches[0].id
 
     def list(self, ctx: TenantContext):
-        return self._repo.list_rows(ctx, self._scope.resolve_company_id(ctx, None))
+        return self._repo.list_rows(ctx, self._scope.resolve_list_company_id(ctx, None))
 
     def get(self, ctx: TenantContext, tracker_id: UUID):
         row = self._repo.get(ctx, tracker_id)

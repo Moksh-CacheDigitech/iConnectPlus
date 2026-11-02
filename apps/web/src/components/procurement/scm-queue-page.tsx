@@ -10,6 +10,7 @@ import {
   Search,
   ShoppingCart,
   CircleCheckBig,
+  CircleDashed,
 } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
@@ -23,20 +24,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import {
-  latestPoApprovalByOrderId,
-  PROCUREMENT_APPROVALS_EVENT,
-  type PoApprovalRequest,
-} from "@/lib/procurement-approvals";
 import { ApiClientError } from "@/services/api-client";
 import {
   formatInr,
+  listScmFinalizeApprovals,
   listScmQueue,
   invalidateProcurementListCache,
   peekScmQueueFromCache,
   type ScmQueueItem,
 } from "@/services/procurement-service";
-import { resolveVendorDisplayName } from "@/utils/vendor-oem-match";
 import { textTokenMatch } from "@/utils/procurement-search";
 import { getUnseenScmOvfIds, markScmQueueSeen } from "@/utils/scm-queue-seen";
 import {
@@ -45,7 +41,7 @@ import {
   type ScmOvfQueueStatus,
 } from "@/utils/scm-queue-ovf-status";
 
-type QueueFilter = "all" | "open" | "close" | "hold";
+type QueueFilter = "all" | "open" | "partial" | "close" | "hold";
 type OvfStatus = ScmOvfQueueStatus;
 
 function formatReceivedDate(value?: string | null): string {
@@ -70,12 +66,20 @@ function queueDateMs(value?: string | null): number {
 const QUEUE_FILTERS: { key: QueueFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "open", label: "Open" },
+  { key: "partial", label: "Partial" },
   { key: "close", label: "Close" },
   { key: "hold", label: "Hold" },
 ];
 
 function parseQueueFilter(value: string | null): QueueFilter {
-  if (value === "open" || value === "close" || value === "hold") return value;
+  if (
+    value === "open" ||
+    value === "partial" ||
+    value === "close" ||
+    value === "hold"
+  ) {
+    return value;
+  }
   // Legacy deep-links from older KPI cards.
   if (value === "awaiting" || value === "with_po") return "open";
   if (value === "closed") return "close";
@@ -97,45 +101,6 @@ function queuePoNumberLabels(row: ScmQueueItem): string[] {
   }
   const single = (row.company_po_number || "").trim();
   return single ? [single] : [];
-}
-
-/** Created vs required vendor POs for an OVF (one PO per distributor group). */
-function queuePoCreationProgress(row: ScmQueueItem): { created: number; total: number } {
-  const groups = row.po_groups || [];
-  if (groups.length > 0) {
-    const created = groups.filter((g) => g.has_po).length;
-    return { created, total: groups.length };
-  }
-  const created = (row.purchase_orders || []).length;
-  const open = (row.open_distributor_names || []).length;
-  const linkedFallback =
-    created === 0 && Boolean(row.company_po_number || row.purchase_order_id) ? 1 : 0;
-  const createdCount = created || linkedFallback;
-  return { created: createdCount, total: createdCount + open };
-}
-
-function PoCreationStatusBadge({ created, total }: { created: number; total: number }) {
-  const incomplete = total > 0 && created !== total;
-  const label = `${created}/${total}`;
-  return (
-    <span
-      title={
-        incomplete
-          ? `${created} of ${total} purchase orders created`
-          : total === 0
-            ? "No vendor purchase orders required"
-            : `All ${total} purchase orders created`
-      }
-      className={cn(
-        "inline-flex w-fit items-center rounded border px-1.5 py-0.5 text-[11px] font-semibold tabular-nums tracking-tight transition-colors duration-200",
-        incomplete
-          ? "border-red-300 bg-red-50 text-red-800"
-          : "border-emerald-300 bg-emerald-50 text-emerald-900",
-      )}
-    >
-      {label}
-    </span>
-  );
 }
 
 function scmQueueRowMatchesSearch(
@@ -185,27 +150,39 @@ function scmQueueRowMatchesSearch(
   });
 }
 
+function ovfStatusLabel(status: OvfStatus): string {
+  switch (status) {
+    case "open":
+      return "Open";
+    case "partial":
+      return "Partial";
+    case "close":
+      return "Close";
+    case "draft":
+      return "Draft";
+    case "hold":
+      return "Hold";
+    default: {
+      const _exhaustive: never = status;
+      return _exhaustive;
+    }
+  }
+}
+
 function OvfStatusBadge({ status }: { status: OvfStatus }) {
-  const label =
-    status === "open"
-      ? "Open"
-      : status === "close"
-        ? "Close"
-        : status === "draft"
-          ? "Draft"
-          : "Hold";
   return (
     <Badge
       variant="outline"
       className={cn(
         "font-medium",
         status === "open" && "border-amber-300 bg-amber-50 text-amber-900",
+        status === "partial" && "border-orange-300 bg-orange-50 text-orange-900",
         status === "close" && "border-emerald-300 bg-emerald-50 text-emerald-900",
         status === "draft" && "border-sky-300 bg-sky-50 text-sky-900",
         status === "hold" && "border-red-300 bg-red-50 text-red-800",
       )}
     >
-      {label}
+      {ovfStatusLabel(status)}
     </Badge>
   );
 }
@@ -223,8 +200,8 @@ export function ScmQueuePage() {
   const [error, setError] = useState<string | null>(null);
   const [newOvfIds, setNewOvfIds] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState(() => searchParams.get("q")?.trim() ?? "");
-  const [approvalsByOrder, setApprovalsByOrder] = useState<Map<string, PoApprovalRequest>>(
-    () => latestPoApprovalByOrderId(),
+  const [pendingApprovalOrderIds, setPendingApprovalOrderIds] = useState<Set<string>>(
+    () => new Set(),
   );
   const queueOvfIdsRef = useRef<string[]>([]);
 
@@ -267,17 +244,21 @@ export function ScmQueuePage() {
   }, [load]);
 
   useEffect(() => {
-    const syncApprovals = () => {
-      setApprovalsByOrder(latestPoApprovalByOrderId());
-    };
-    syncApprovals();
-    window.addEventListener(PROCUREMENT_APPROVALS_EVENT, syncApprovals);
-    window.addEventListener("storage", syncApprovals);
+    let cancelled = false;
+    void listScmFinalizeApprovals()
+      .then((rows) => {
+        if (cancelled) return;
+        setPendingApprovalOrderIds(
+          new Set(rows.filter((row) => row.status === "pending").map((row) => row.order_id)),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setPendingApprovalOrderIds(new Set());
+      });
     return () => {
-      window.removeEventListener(PROCUREMENT_APPROVALS_EVENT, syncApprovals);
-      window.removeEventListener("storage", syncApprovals);
+      cancelled = true;
     };
-  }, []);
+  }, [rows]);
 
   useEffect(() => {
     if (loading) return;
@@ -295,20 +276,23 @@ export function ScmQueuePage() {
   }, []);
 
   const enriched = useMemo(() => {
-    const pendingIds = pendingFinalizeOrderIds(approvalsByOrder);
+    const pendingIds = pendingFinalizeOrderIds(
+      new Map([...pendingApprovalOrderIds].map((id) => [id, { status: "pending" as const }])),
+    );
     return rows.map((row) => ({
       ...row,
       ovf_status: deriveScmOvfQueueStatus(row, pendingIds),
     }));
-  }, [rows, approvalsByOrder]);
+  }, [rows, pendingApprovalOrderIds]);
 
   const kpis = useMemo(() => {
     const open = enriched.filter(
       (r) => r.ovf_status === "open" || r.ovf_status === "draft",
     ).length;
+    const partial = enriched.filter((r) => r.ovf_status === "partial").length;
     const close = enriched.filter((r) => r.ovf_status === "close").length;
     const hold = enriched.filter((r) => r.ovf_status === "hold").length;
-    return { open, close, hold, total: rows.length };
+    return { open, partial, close, hold, total: rows.length };
   }, [enriched, rows]);
 
   const filtered = useMemo(() => {
@@ -317,7 +301,7 @@ export function ScmQueuePage() {
       list = enriched.filter(
         (r) => r.ovf_status === "open" || r.ovf_status === "draft",
       );
-    } else if (filter === "close" || filter === "hold") {
+    } else if (filter === "partial" || filter === "close" || filter === "hold") {
       list = enriched.filter((r) => r.ovf_status === filter);
     }
     const q = query.trim();
@@ -369,7 +353,7 @@ export function ScmQueuePage() {
         }
       />
 
-      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
         <ProcurementKpiCard
           label="TOTAL OVF"
           value={String(kpis.total)}
@@ -382,6 +366,13 @@ export function ScmQueuePage() {
           tone="warning"
           icon={ShoppingCart}
           href="/procurement/scm?filter=open"
+        />
+        <ProcurementKpiCard
+          label="PARTIAL OVF"
+          value={String(kpis.partial)}
+          tone="warning"
+          icon={CircleDashed}
+          href="/procurement/scm?filter=partial"
         />
         <ProcurementKpiCard
           label="CLOSE OVF"
@@ -422,7 +413,7 @@ export function ScmQueuePage() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search PO # or customer / vendor name…"
+            placeholder="Search PO # or customer name…"
             aria-label="Search SCM queue"
             className="h-8 bg-card pl-8 shadow-none transition-colors duration-200"
           />
@@ -439,9 +430,6 @@ export function ScmQueuePage() {
                 <th className="px-3 py-2 font-bold">PO number</th>
                 <th className="px-3 py-2 font-bold">Customer name</th>
                 <th className="px-3 py-2 font-bold">Customer pay terms</th>
-                <th className="px-3 py-2 font-bold" title="From CRM lead distributor name(s)">
-                  Vendor name
-                </th>
                 <th className="px-3 py-2 font-bold">Vendor pay terms</th>
                 <th className="px-3 py-2 font-bold">OVF date</th>
                 <th className="px-3 py-2 font-bold text-right">Customer amt</th>
@@ -453,30 +441,31 @@ export function ScmQueuePage() {
             <tbody>
               {loading && filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-3 py-8 text-center text-muted-foreground">
+                  <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
                     Loading SCM queue…
                   </td>
                 </tr>
               ) : null}
               {!loading && filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-3 py-8 text-center text-muted-foreground">
+                  <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
                     {query.trim()
                       ? "No queue rows match your search."
                       : filter === "open"
-                        ? "No open OVFs awaiting a finalized purchase order."
-                        : filter === "close"
-                          ? "No closed (finalized) POs in the queue."
-                          : filter === "hold"
-                            ? "No held (cancelled) POs in the queue."
-                            : "No OVFs shared to SCM yet. Share an approved OVF from CRM Sales."}
+                        ? "No open OVFs awaiting Create PO."
+                        : filter === "partial"
+                          ? "No OVFs with partial Create PO coverage."
+                          : filter === "close"
+                            ? "No closed OVFs (all Create PO done) in the queue."
+                            : filter === "hold"
+                              ? "No held (cancelled) POs in the queue."
+                              : "No OVFs shared to SCM yet. Share an approved OVF from CRM Sales."}
                   </td>
                 </tr>
               ) : null}
               {filtered.map((row) => {
                 const isNew = newOvfIds.has(row.ovf_id);
                 const ovfStatus = row.ovf_status;
-                const poProgress = queuePoCreationProgress(row);
                 return (
                   <tr
                     key={row.ovf_id}
@@ -495,40 +484,31 @@ export function ScmQueuePage() {
                     )}
                   >
                     <td className="px-3 py-2 font-medium tabular-nums">
-                      <span className="inline-flex flex-col items-start gap-1">
-                        <span className="inline-flex flex-wrap items-center gap-1.5">
-                          {(() => {
-                            const labels = queuePoNumberLabels(row);
-                            if (labels.length === 0) return <span>-</span>;
-                            return (
-                              <span className="flex flex-col gap-0.5">
-                                {labels.map((label) => (
-                                  <span key={label}>{label}</span>
-                                ))}
-                              </span>
-                            );
-                          })()}
-                          {isNew ? (
-                            <span
-                              className="text-xs font-semibold tracking-tight text-sky-700"
-                              title="Recently shared to SCM"
-                            >
-                              [New]
+                      <span className="inline-flex flex-wrap items-center gap-1.5">
+                        {(() => {
+                          const labels = queuePoNumberLabels(row);
+                          if (labels.length === 0) return <span>-</span>;
+                          return (
+                            <span className="flex flex-col gap-0.5">
+                              {labels.map((label) => (
+                                <span key={label}>{label}</span>
+                              ))}
                             </span>
-                          ) : null}
-                        </span>
-                        <PoCreationStatusBadge
-                          created={poProgress.created}
-                          total={poProgress.total}
-                        />
+                          );
+                        })()}
+                        {isNew ? (
+                          <span
+                            className="text-xs font-semibold tracking-tight text-sky-700"
+                            title="Recently shared to SCM"
+                          >
+                            [New]
+                          </span>
+                        ) : null}
                       </span>
                     </td>
                     <td className="px-3 py-2">{row.customer_name || "-"}</td>
                     <td className="px-3 py-2 text-muted-foreground">
                       {payTermsLabel(row.customer_payment_days)}
-                    </td>
-                    <td className="px-3 py-2">
-                      {resolveVendorDisplayName(row)}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">
                       {payTermsLabel(row.vendor_payment_days)}

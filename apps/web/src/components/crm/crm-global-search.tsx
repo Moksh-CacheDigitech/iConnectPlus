@@ -17,8 +17,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { CRM_NAV } from "@/components/crm/crm-workspace-nav";
+import { CRM_ADMIN_ONLY_HREFS, CRM_NAV } from "@/components/crm/crm-workspace-nav";
 import { Input } from "@/components/ui/input";
+import { useAuthUser } from "@/hooks/use-auth-user";
+import { canManageModuleUsers } from "@/lib/module-access";
 import { cn } from "@/lib/utils";
 import {
   fullName,
@@ -144,7 +146,11 @@ function matches(q: string, ...parts: Array<string | null | undefined>): boolean
   return haystack(...parts).includes(q);
 }
 
-function buildHits(index: CrmSearchIndex, rawQuery: string): CrmSearchHit[] {
+function buildHits(
+  index: CrmSearchIndex,
+  rawQuery: string,
+  includeAdminPanes: boolean,
+): CrmSearchHit[] {
   const q = rawQuery.trim().toLowerCase();
   if (q.length < 2) return [];
 
@@ -161,6 +167,7 @@ function buildHits(index: CrmSearchIndex, rawQuery: string): CrmSearchHit[] {
   };
 
   for (const pane of CRM_NAV) {
+    if (!includeAdminPanes && CRM_ADMIN_ONLY_HREFS.has(pane.href)) continue;
     if (!matches(q, pane.title, pane.href)) continue;
     buckets.pane.push({
       id: `pane-${pane.href}`,
@@ -315,6 +322,8 @@ export function CrmGlobalSearch({ className }: { className?: string }) {
   const router = useRouter();
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const { user, adminModuleKeys } = useAuthUser();
+  const includeAdminPanes = canManageModuleUsers("crm", adminModuleKeys, user?.userType);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -348,7 +357,7 @@ export function CrmGlobalSearch({ className }: { className?: string }) {
       void (async () => {
         const index = await ensureIndex();
         if (cancelled) return;
-        setHits(buildHits(index, q));
+        setHits(buildHits(index, q, includeAdminPanes));
         setActiveIndex(0);
         setOpen(true);
       })();
@@ -357,7 +366,7 @@ export function CrmGlobalSearch({ className }: { className?: string }) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, ensureIndex]);
+  }, [query, ensureIndex, includeAdminPanes]);
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {

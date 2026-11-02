@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from modules.asset.models import AstAsset, AstAssetType
@@ -23,10 +23,10 @@ class AssetTypeRepository(AstScopedRepository):
         return self.db.scalar(stmt)
 
     def get_by_name(
-        self, ctx: TenantContext, company_id: UUID, name: str
+        self, ctx: TenantContext, company_id: UUID | None, name: str
     ) -> AstAssetType | None:
         stmt = select(AstAssetType).where(
-            AstAssetType.company_id == company_id,
+            (AstAssetType.company_id == company_id if company_id is not None else true()),
             AstAssetType.name.ilike(name.strip()),
             AstAssetType.is_deleted.is_(False),
         )
@@ -36,13 +36,13 @@ class AssetTypeRepository(AstScopedRepository):
     def list_rows(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         active: bool | None = None,
         search: str | None = None,
     ) -> list[AstAssetType]:
         stmt = select(AstAssetType).where(
-            AstAssetType.company_id == company_id,
+            (AstAssetType.company_id == company_id if company_id is not None else true()),
             AstAssetType.is_deleted.is_(False),
         )
         if active is not None:
@@ -89,11 +89,11 @@ class AssetTypeRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         asset_type_id: UUID,
     ) -> int:
         stmt = select(func.count()).select_from(AstAsset).where(
-            AstAsset.company_id == company_id,
+            (AstAsset.company_id == company_id if company_id is not None else true()),
             AstAsset.asset_type_id == asset_type_id,
             AstAsset.is_deleted.is_(False),
         )

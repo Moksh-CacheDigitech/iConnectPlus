@@ -48,6 +48,17 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async headers() {
+    // Auth HTML must not be cached — stale documents keep old login JS (422 email required).
+    const noStore = [{ key: "Cache-Control", value: "no-store, no-cache, must-revalidate" }];
+    return [
+      { source: "/login", headers: noStore },
+      { source: "/login/:path*", headers: noStore },
+      { source: "/change-password", headers: noStore },
+      { source: "/forgot-password", headers: noStore },
+      { source: "/reset-password", headers: noStore },
+    ];
+  },
 };
 
 export default nextConfig;

@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmLeadActivity
@@ -19,9 +19,9 @@ class LeadActivityRepository(CrmScopedRepository):
         stmt = self.apply_crm_filter(stmt, CrmLeadActivity, ctx, branch_scoped=True)
         return self.db.scalar(stmt)
 
-    def list_activities(self, ctx: TenantContext, company_id: UUID):
+    def list_activities(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(CrmLeadActivity).where(
-            CrmLeadActivity.company_id == company_id,
+            (CrmLeadActivity.company_id == company_id if company_id is not None else true()),
             CrmLeadActivity.is_deleted.is_(False),
         )
         stmt = self.apply_crm_filter(stmt, CrmLeadActivity, ctx, branch_scoped=True)

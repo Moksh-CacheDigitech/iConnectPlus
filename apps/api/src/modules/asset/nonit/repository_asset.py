@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from modules.asset.models import AstNonitAsset, AstNonitAssetType, AstNonitLocation
@@ -24,11 +24,11 @@ class NonItAssetRepository(AstScopedRepository):
         return self.db.scalar(stmt)
 
     def max_seq_for_prefix(
-        self, company_id: UUID, prefix: str, *, include_deleted: bool = True
+        self, company_id: UUID | None, prefix: str, *, include_deleted: bool = True
     ) -> int:
         """Highest numeric suffix for codes with this prefix (includes disposed/deleted)."""
         stmt = select(AstNonitAsset.asset_code).where(
-            AstNonitAsset.company_id == company_id,
+            (AstNonitAsset.company_id == company_id if company_id is not None else true()),
             AstNonitAsset.asset_code.like(f"{prefix}%"),
         )
         if not include_deleted:
@@ -45,7 +45,7 @@ class NonItAssetRepository(AstScopedRepository):
     def search(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         asset_type_id: UUID | None = None,
         location_id: UUID | None = None,
@@ -56,7 +56,7 @@ class NonItAssetRepository(AstScopedRepository):
         limit: int = 25,
     ) -> tuple[list[AstNonitAsset], int]:
         stmt = select(AstNonitAsset).where(
-            AstNonitAsset.company_id == company_id,
+            (AstNonitAsset.company_id == company_id if company_id is not None else true()),
             AstNonitAsset.is_deleted.is_(False),
         )
         if asset_type_id is not None:
@@ -92,12 +92,12 @@ class NonItAssetRepository(AstScopedRepository):
                 ),
             )
             loc_ids = select(AstNonitLocation.id).where(
-                AstNonitLocation.company_id == company_id,
+                (AstNonitLocation.company_id == company_id if company_id is not None else true()),
                 AstNonitLocation.is_deleted.is_(False),
                 AstNonitLocation.name.ilike(term),
             )
             type_ids = select(AstNonitAssetType.id).where(
-                AstNonitAssetType.company_id == company_id,
+                (AstNonitAssetType.company_id == company_id if company_id is not None else true()),
                 AstNonitAssetType.is_deleted.is_(False),
                 or_(
                     AstNonitAssetType.name.ilike(term),
@@ -178,15 +178,16 @@ class NonItAssetRepository(AstScopedRepository):
         return {r.id: r for r in self.db.scalars(stmt).all()}
 
     def employees_by_ids(
-        self, company_id: UUID, ids: list[UUID]
+        self, company_id: UUID | None, ids: list[UUID]
     ) -> dict[UUID, EmployeeRead]:
         if not ids:
             return {}
         stmt = select(EmployeeRead).where(
             EmployeeRead.id.in_(ids),
-            EmployeeRead.company_id == company_id,
             EmployeeRead.is_deleted.is_(False),
         )
+        if company_id is not None:
+            stmt = stmt.where(EmployeeRead.company_id == company_id)
         return {r.id: r for r in self.db.scalars(stmt).all()}
 
     def types_by_ids(
@@ -204,13 +205,13 @@ class NonItAssetRepository(AstScopedRepository):
     def dashboard_summary(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         top_locations: int = 8,
     ) -> dict:
         """Aggregate Non-IT counts by status, active type, and top locations."""
         total_stmt = select(func.count()).select_from(AstNonitAsset).where(
-            AstNonitAsset.company_id == company_id,
+            (AstNonitAsset.company_id == company_id if company_id is not None else true()),
             AstNonitAsset.is_deleted.is_(False),
         )
         total_stmt = self.apply_ast_filter(
@@ -221,7 +222,7 @@ class NonItAssetRepository(AstScopedRepository):
         status_stmt = (
             select(AstNonitAsset.status, func.count().label("cnt"))
             .where(
-                AstNonitAsset.company_id == company_id,
+                (AstNonitAsset.company_id == company_id if company_id is not None else true()),
                 AstNonitAsset.is_deleted.is_(False),
             )
             .group_by(AstNonitAsset.status)
@@ -237,7 +238,7 @@ class NonItAssetRepository(AstScopedRepository):
         type_count_stmt = (
             select(AstNonitAsset.asset_type_id, func.count().label("cnt"))
             .where(
-                AstNonitAsset.company_id == company_id,
+                (AstNonitAsset.company_id == company_id if company_id is not None else true()),
                 AstNonitAsset.is_deleted.is_(False),
             )
             .group_by(AstNonitAsset.asset_type_id)
@@ -253,7 +254,7 @@ class NonItAssetRepository(AstScopedRepository):
         types_stmt = (
             select(AstNonitAssetType)
             .where(
-                AstNonitAssetType.company_id == company_id,
+                (AstNonitAssetType.company_id == company_id if company_id is not None else true()),
                 AstNonitAssetType.is_deleted.is_(False),
                 AstNonitAssetType.active.is_(True),
             )
@@ -284,7 +285,7 @@ class NonItAssetRepository(AstScopedRepository):
                 AstNonitLocation.id == AstNonitAsset.current_location_id,
             )
             .where(
-                AstNonitAsset.company_id == company_id,
+                (AstNonitAsset.company_id == company_id if company_id is not None else true()),
                 AstNonitAsset.is_deleted.is_(False),
                 AstNonitAsset.current_location_id.is_not(None),
                 AstNonitLocation.is_deleted.is_(False),

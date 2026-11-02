@@ -2,6 +2,9 @@ import { Suspense } from "react";
 
 import LoginPage from "./login-page";
 
+/** Always fresh HTML so browsers pick up new auth client chunks after deploy. */
+export const dynamic = "force-dynamic";
+
 export default function Page() {
   return (
     <Suspense

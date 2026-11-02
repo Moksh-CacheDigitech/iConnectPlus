@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { FileSpreadsheet, MapPinned, Receipt, RefreshCw } from "lucide-react";
+import { FileSpreadsheet, MapPinned, RefreshCw } from "lucide-react";
 
-import { DeliveryStatusBillDialog } from "@/components/procurement/delivery-status-bill-dialog";
 import { DeliveryStatusOutcomeDialog } from "@/components/procurement/delivery-status-outcome-dialog";
 import { PageHeader } from "@/components/layout/page-header";
 import { ListSearch } from "@/components/shared/list-toolbar";
@@ -13,12 +12,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { listProcurementInventory } from "@/services/procurement-service";
-import {
-  challanDeliveredQuantity,
-  deliveryBillStatusBadgeVariant,
-  formatDeliveryBillStatusLabel,
-  resolveDeliveryBillStatus,
-} from "@/utils/delivery-challan-bill";
 import {
   getDeliveryChallan,
   listDeliveryChallans,
@@ -45,27 +38,17 @@ import {
 import { formatUniquePoLabels } from "@/utils/format-po-labels";
 
 type DeliveryStatusListRow = DeliveryStatusRow & {
-  billStatusLabel: string;
-  billStatusKey: ReturnType<typeof resolveDeliveryBillStatus>;
   canUpdateOutcome: boolean;
-  canUpdateBill: boolean;
 };
 
 function loadDeliveryStatusRows(): DeliveryStatusListRow[] {
   return listDeliveryChallans().flatMap((challan) => {
     try {
       const row = deliveryStatusRowFromChallan(challan);
-      const billStatusKey = resolveDeliveryBillStatus(
-        row,
-        challanDeliveredQuantity(challan),
-      );
       return [
         {
           ...row,
-          billStatusLabel: formatDeliveryBillStatusLabel(billStatusKey),
-          billStatusKey,
           canUpdateOutcome: deliveryStatusUiMode(row) === "tracking",
-          canUpdateBill: billStatusKey === "fully_billed",
         },
       ];
     } catch {
@@ -108,7 +91,6 @@ export function DeliveryStatusListPage() {
   const [flash, setFlash] = useState<ReturnType<typeof consumeDeliveryStatusFlash>>(null);
   const [rows, setRows] = useState<DeliveryStatusListRow[]>([]);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [billChallanId, setBillChallanId] = useState<string | null>(null);
   const [outcomeChallan, setOutcomeChallan] = useState<DeliveryChallanRecord | null>(null);
 
   const load = useCallback(() => {
@@ -133,7 +115,6 @@ export function DeliveryStatusListPage() {
         row.cacheInvoiceNumber,
         row.billInvoiceNumber,
         row.shipmentStatus,
-        row.billStatusLabel,
         row.docketNumber,
         row.deliveryBoyName,
       ]
@@ -188,7 +169,7 @@ export function DeliveryStatusListPage() {
 
       <p className="text-sm text-muted-foreground">
         After dispatch is saved, use <span className="font-medium text-foreground">Update status</span>{" "}
-        to mark Delivered or Failed. Update bill is available only for fully billed DCs.
+        to mark Delivered, Delayed, or Failed.
       </p>
 
       {flash ? (
@@ -214,28 +195,27 @@ export function DeliveryStatusListPage() {
         <ListSearch
           value={query}
           onChange={setQuery}
-          placeholder="Search PO, GRN, invoice, or bill status…"
+          placeholder="Search PO, GRN, invoice, or status…"
           aria-label="Search delivery status"
         />
       </div>
 
       <div className={procurementUi.tableShell}>
         <div className={procurementUi.tableScroll}>
-          <table className={cn(procurementUi.table, "min-w-[980px]")}>
+          <table className={cn(procurementUi.table, "min-w-[820px]")}>
             <thead className={procurementUi.thead}>
               <tr>
                 <th className={procurementUi.th}>PO number</th>
                 <th className={procurementUi.th}>GRN number</th>
                 <th className={procurementUi.th}>Invoice</th>
                 <th className={procurementUi.th}>Delivery status</th>
-                <th className={procurementUi.th}>Bill taken</th>
                 <th className={procurementUi.th}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className={procurementUi.empty}>
+                  <td colSpan={5} className={procurementUi.empty}>
                     {rows.length === 0
                       ? "No GRNs to track yet."
                       : "No rows match your search."}
@@ -262,43 +242,37 @@ export function DeliveryStatusListPage() {
                     </Badge>
                   </td>
                   <td className={procurementUi.td}>
-                    <Badge
-                      variant={deliveryBillStatusBadgeVariant(row.billStatusKey)}
-                      className={procurementUi.statusBadge}
-                    >
-                      {row.billStatusLabel}
-                    </Badge>
-                  </td>
-                  <td className={procurementUi.td}>
                     <div className="flex flex-wrap items-center gap-1">
-                      <Link
-                        href={deliveryStatusUpdateHref(row.challanId)}
-                        className={cn(
-                          buttonVariants({ size: "sm", variant: "ghost" }),
-                          procurementUi.actionBtn,
-                          "text-[#0369A1] hover:text-[#0369A1]",
-                        )}
-                      >
-                        View
-                      </Link>
                       {row.canUpdateOutcome ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className={cn(
-                            procurementUi.actionBtn,
-                            "cursor-pointer text-[#0369A1] hover:text-[#0369A1]",
-                          )}
-                          onClick={() => {
-                            const challan = getDeliveryChallan(row.challanId);
-                            if (!challan) return;
-                            setOutcomeChallan(challan);
-                          }}
-                        >
-                          <MapPinned className="mr-1 size-3.5" />
-                          Update status
-                        </Button>
+                        <>
+                          <Link
+                            href={deliveryStatusUpdateHref(row.challanId)}
+                            className={cn(
+                              buttonVariants({ size: "sm", variant: "ghost" }),
+                              procurementUi.actionBtn,
+                              "text-[#0369A1] hover:text-[#0369A1]",
+                            )}
+                          >
+                            View
+                          </Link>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className={cn(
+                              procurementUi.actionBtn,
+                              "cursor-pointer text-[#0369A1] hover:text-[#0369A1]",
+                            )}
+                            onClick={() => {
+                              const challan = getDeliveryChallan(row.challanId);
+                              if (!challan) return;
+                              setOutcomeChallan(challan);
+                            }}
+                          >
+                            <MapPinned className="mr-1 size-3.5" />
+                            Update status
+                          </Button>
+                        </>
                       ) : (
                         <Link
                           href={deliveryStatusUpdateHref(row.challanId)}
@@ -311,24 +285,6 @@ export function DeliveryStatusListPage() {
                           Set dispatch
                         </Link>
                       )}
-                      {row.canUpdateBill ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className={cn(
-                            procurementUi.actionBtn,
-                            "cursor-pointer text-[#0369A1] hover:text-[#0369A1]",
-                          )}
-                          onClick={() => {
-                            if (!getDeliveryChallan(row.challanId)) return;
-                            setBillChallanId(row.challanId);
-                          }}
-                        >
-                          <Receipt className="mr-1 size-3.5" />
-                          Update bill
-                        </Button>
-                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -338,13 +294,6 @@ export function DeliveryStatusListPage() {
         </div>
       </div>
 
-      <DeliveryStatusBillDialog
-        open={Boolean(billChallanId)}
-        challanId={billChallanId}
-        onClose={() => setBillChallanId(null)}
-        onSaved={load}
-      />
-
       <DeliveryStatusOutcomeDialog
         open={Boolean(outcomeChallan)}
         challan={outcomeChallan}
@@ -353,7 +302,7 @@ export function DeliveryStatusListPage() {
           setDeliveryStatusFlash({ variant: "success", message });
           load();
         }}
-    />
+      />
     </div>
   );
 }

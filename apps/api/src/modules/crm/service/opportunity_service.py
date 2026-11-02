@@ -31,7 +31,7 @@ class PipelineService:
         self._engine = PipelineEngine()
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_pipelines(ctx, cid)
 
     def get(self, ctx: TenantContext, row_id: UUID):
@@ -70,7 +70,7 @@ class OpportunityService:
         self._visibility = CrmRecordVisibility(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         allowed_ids = self._visibility.filter_opportunity_ids_for_user(ctx, cid)
         return self._repo.list_opportunities(ctx, cid, opportunity_ids=allowed_ids)
 
@@ -185,8 +185,8 @@ class OpportunityService:
         opp = self.get(ctx, opportunity_id)
         if opp.blueprint_state and opp.blueprint_state not in {"won", "lost"}:
             raise ConflictException(
-                "This opportunity is on the sales blueprint. Mark Deal Won from the "
-                "OVF after Share to SCM - do not use legacy close-won."
+                "This opportunity is on the sales blueprint. Deal outcome is driven by "
+                "quote accept / OVF → Share to SCM - do not use legacy close-won."
             )
         self._engine.apply_win(opp)
         now = datetime.now(timezone.utc)
@@ -232,7 +232,7 @@ class OpportunityStageService:
         self._scope = CrmScopeValidator(db)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_stages(ctx, cid)
 
     def get(self, ctx: TenantContext, row_id: UUID):

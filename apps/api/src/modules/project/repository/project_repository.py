@@ -19,20 +19,20 @@ class ProjectRepository(PrjScopedRepository):
         stmt = self.apply_prj_filter(stmt, PrjProject, ctx, branch_scoped=True)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(PrjProject).where(
-            PrjProject.company_id == company_id,
             PrjProject.is_deleted.is_(False),
         )
+        stmt = self.apply_optional_company_filter(stmt, PrjProject, company_id)
         stmt = self.apply_prj_filter(stmt, PrjProject, ctx, branch_scoped=True)
         return list(self.db.scalars(stmt).all())
 
-    def list_linked_proc_order_ids(self, ctx: TenantContext, company_id: UUID) -> set[UUID]:
+    def list_linked_proc_order_ids(self, ctx: TenantContext, company_id: UUID | None) -> set[UUID]:
         stmt = select(PrjProject.proc_order_id).where(
-            PrjProject.company_id == company_id,
             PrjProject.is_deleted.is_(False),
             PrjProject.proc_order_id.is_not(None),
         )
+        stmt = self.apply_optional_company_filter(stmt, PrjProject, company_id)
         stmt = self.apply_prj_filter(stmt, PrjProject, ctx, branch_scoped=True)
         return {row for row in self.db.scalars(stmt).all() if row is not None}
 

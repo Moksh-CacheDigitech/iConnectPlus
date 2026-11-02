@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils";
 const EMAIL_NAV = [
   { title: "Overview", href: "/email" },
   { title: "Compose", href: "/email/compose" },
-  { title: "Templates", href: "/email/templates" },
   { title: "Deliveries", href: "/email/deliveries" },
   { title: "Events", href: "/email/events" },
 ] as const;

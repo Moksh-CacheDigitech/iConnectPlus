@@ -50,7 +50,7 @@ class AssetNotificationService:
         offset: int = 0,
         limit: int = 25,
     ) -> tuple[list[AstAssetNotification], int]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         if sort not in {"created_at", "sent_at"}:
             sort = "created_at"
         filters = AssetNotificationListFilters(
@@ -67,7 +67,7 @@ class AssetNotificationService:
         return self._repo.search(ctx, filters, offset=offset, limit=limit)
 
     def list(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_rows(ctx, cid)
 
     def get(self, ctx: TenantContext, row_id: UUID) -> AstAssetNotification:

@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException
@@ -26,7 +26,7 @@ SORT_COLUMNS = {
 
 @dataclass(frozen=True)
 class AssetComponentListFilters:
-    company_id: UUID
+    company_id: UUID | None
     asset_id: UUID | None = None
     status: str | None = None
     product_id: UUID | None = None
@@ -47,7 +47,7 @@ class AssetComponentRepository(AstScopedRepository):
         stmt = self.apply_ast_filter(stmt, AstAssetComponent, ctx, branch_scoped=False)
         return self.db.scalar(stmt)
 
-    def list_rows(self, ctx: TenantContext, company_id: UUID):
+    def list_rows(self, ctx: TenantContext, company_id: UUID | None):
         items, _ = self.search(
             ctx,
             AssetComponentListFilters(company_id=company_id),
@@ -65,7 +65,7 @@ class AssetComponentRepository(AstScopedRepository):
         limit: int,
     ) -> tuple[list[AstAssetComponent], int]:
         stmt = select(AstAssetComponent).where(
-            AstAssetComponent.company_id == filters.company_id,
+            (AstAssetComponent.company_id == filters.company_id if filters.company_id is not None else true()),
             AstAssetComponent.is_deleted.is_(False),
         )
         if filters.asset_id is not None:
@@ -160,12 +160,12 @@ class AssetComponentRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         serial_number: str,
         exclude_id: UUID | None = None,
     ) -> AstAssetComponent | None:
         stmt = select(AstAssetComponent).where(
-            AstAssetComponent.company_id == company_id,
+            (AstAssetComponent.company_id == company_id if company_id is not None else true()),
             AstAssetComponent.serial_number == serial_number,
             AstAssetComponent.status == AssetComponentStatus.ACTIVE.value,
             AstAssetComponent.is_deleted.is_(False),
@@ -242,14 +242,14 @@ class AssetComponentRepository(AstScopedRepository):
         self,
         ctx: TenantContext,
         *,
-        company_id: UUID,
+        company_id: UUID | None,
         asset_ids: list[UUID],
         status: str | None = AssetComponentStatus.ACTIVE.value,
     ) -> list[AstAssetComponent]:
         if not asset_ids:
             return []
         stmt = select(AstAssetComponent).where(
-            AstAssetComponent.company_id == company_id,
+            (AstAssetComponent.company_id == company_id if company_id is not None else true()),
             AstAssetComponent.asset_id.in_(asset_ids),
             AstAssetComponent.is_deleted.is_(False),
         )

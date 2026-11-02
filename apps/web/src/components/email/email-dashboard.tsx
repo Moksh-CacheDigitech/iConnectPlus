@@ -123,8 +123,8 @@ export function EmailDashboard() {
     <div className="space-y-5">
       <EmailWorkspaceNav />
       <PageHeader
-        title="Email Notifications"
-        description="SMTP delivery through the Foundation Notification Engine."
+        title="Email"
+        description="Compose and send mail, then track SMTP delivery."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button
@@ -213,10 +213,10 @@ export function EmailDashboard() {
           icon={MailWarning}
           tone="warning"
         />
-        <FinanceKpiCard variant="hero" 
-          label="Templates"
-          value={String(counts?.email_templates ?? 0)}
-          hint="Email channel templates"
+        <FinanceKpiCard variant="hero"
+          label="Deliveries"
+          value={String(counts?.deliveries ?? 0)}
+          hint="Total SMTP attempts"
           icon={Mail}
         />
       </div>

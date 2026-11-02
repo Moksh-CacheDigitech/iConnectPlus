@@ -15,6 +15,11 @@ logger = get_logger(__name__)
 
 _EXEMPT_SUFFIXES = (
     "/health",
+    "/auth/me",
+    "/auth/microsoft/config",
+    "/auth/microsoft/login",
+    "/auth/microsoft/callback",
+    "/auth/microsoft/exchange",
     "/auth/login",
     "/auth/logout",
     "/auth/refresh",

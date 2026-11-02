@@ -65,6 +65,8 @@ export type EmailDeliveryRow = {
   status: string;
   provider_response: string | null;
   delivered_at: string | null;
+  /** Attempt time: delivered_at, or event.created_at when delivery has no stamp yet. */
+  occurred_at?: string | null;
   event_type: string | null;
   recipient_address: string | null;
   event_status: string | null;
@@ -83,17 +85,6 @@ export type EmailEventRow = {
   payload_json: Record<string, unknown> | null;
 };
 
-export type EmailTemplateRow = {
-  id: string;
-  tenant_id: string;
-  template_code: string;
-  template_name: string;
-  channel: string;
-  subject_template: string | null;
-  body_template: string;
-  locale: string;
-  is_active: boolean;
-};
 
 export type EmailOverview = {
   provider: EmailProviderStatus;
@@ -120,17 +111,8 @@ export type EmailComposePayload = {
   subject: string;
   body_html: string;
   event_type?: string;
-  template_id?: string | null;
   payload_json?: Record<string, unknown> | null;
   attachments?: EmailAttachmentPayload[];
-};
-
-export type EmailTemplateCreatePayload = {
-  template_code: string;
-  template_name: string;
-  channel: string;
-  body_template: string;
-  subject_template?: string | null;
 };
 
 export async function loadEmailOverview() {
@@ -235,34 +217,21 @@ export async function sendEmailCompose(body: EmailComposePayload): Promise<Email
   return next;
 }
 
-export async function listEmailTemplates() {
-  const res = await apiClient<EmailTemplateRow[]>("/notifications/templates", {
-    method: "GET",
-    query: { channel: "email" },
-  });
-  return res.data ?? [];
-}
-
-export async function createEmailTemplate(body: EmailTemplateCreatePayload) {
-  const res = await apiClient<EmailTemplateRow>("/notifications/templates", {
-    method: "POST",
-    body: { ...body, channel: "email" },
-  });
-  return res.data;
-}
-
 export async function listEmailDeliveries(limit = 100) {
+  // API Query(ge=1, le=200) — clamp so the UI never trips a 422 validation error.
+  const capped = Math.min(Math.max(1, limit), 200);
   const res = await apiClient<EmailDeliveryRow[]>("/notifications/deliveries", {
     method: "GET",
-    query: { limit },
+    query: { limit: capped },
   });
   return (res.data ?? []).filter((d) => d.channel === "email");
 }
 
 export async function listEmailEvents(limit = 100) {
+  const capped = Math.min(Math.max(1, limit), 200);
   const res = await apiClient<EmailEventRow[]>("/notifications/events", {
     method: "GET",
-    query: { limit },
+    query: { limit: capped },
   });
   return res.data ?? [];
 }

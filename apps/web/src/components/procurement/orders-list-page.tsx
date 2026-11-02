@@ -47,18 +47,33 @@ import { deriveGrnStatus, filterOrdersByPoBucket, parsePoOverviewBucket, countPo
 type StatusFilter = "all" | "draft" | "open" | "partial" | "closed" | "cancelled";
 
 /** List Status column: approval state only (not GRN / receipt lifecycle). */
-function formatPoApprovalStatusLabel(status: string | null | undefined): string {
+function formatPoApprovalStatusLabel(
+  status: string | null | undefined,
+  stage?: string | null,
+): string {
   const raw = (status || "").trim().toLowerCase();
   if (!raw) return "-";
   if (raw === "cancelled" || raw === "canceled") return "Cancelled";
-  if (raw === "draft" || raw === "submitted") return "Pending approval";
+  if (raw === "draft") return "Draft";
+  if (raw === "submitted") {
+    if ((stage || "").trim().toLowerCase() === "management") {
+      return "Management approval left";
+    }
+    return "Admin approval left";
+  }
   return "Approved";
 }
 
-function poApprovalStatusBadgeClass(status: string | null | undefined): string {
-  const label = formatPoApprovalStatusLabel(status);
-  if (label === "Pending approval") {
+function poApprovalStatusBadgeClass(
+  status: string | null | undefined,
+  stage?: string | null,
+): string {
+  const label = formatPoApprovalStatusLabel(status, stage);
+  if (label === "Admin approval left" || label === "Management approval left") {
     return "border-amber-200 bg-amber-50 text-amber-900";
+  }
+  if (label === "Draft") {
+    return "border-slate-200 bg-slate-50 text-slate-700";
   }
   if (label === "Approved") {
     return "border-emerald-200 bg-emerald-50 text-emerald-900";
@@ -124,7 +139,10 @@ function orderMatchesQuery(
       textTokenMatch(approved, token) ||
       textTokenMatch(vendor, token) ||
       textTokenMatch(row.status, token) ||
-      textTokenMatch(formatPoApprovalStatusLabel(row.status), token) ||
+      textTokenMatch(
+        formatPoApprovalStatusLabel(row.status, row.scm_approval_stage),
+        token,
+      ) ||
       grnStatusMatchesSearch(row.grn_status ?? "pending", token)
     );
   });
@@ -253,10 +271,24 @@ export function OrdersListPage() {
     }
 
     const q = query.trim();
-    if (!q) return list;
-    return list.filter((row) =>
-      orderMatchesQuery(row, vendors[row.vendor_id]?.label || "", q),
-    );
+    if (q) {
+      list = list.filter((row) =>
+        orderMatchesQuery(row, vendors[row.vendor_id]?.label || "", q),
+      );
+    }
+
+    // Latest company PO number at top (numeric-aware, e.g. PO/CDT/012 before PO/CDT/003).
+    return [...list].sort((a, b) => {
+      const poA = (a.company_po_number || a.document_number || "").trim();
+      const poB = (b.company_po_number || b.document_number || "").trim();
+      if (poA !== poB) {
+        return poB.localeCompare(poA, undefined, { numeric: true, sensitivity: "base" });
+      }
+      const dateA = (a.document_date || "").slice(0, 10);
+      const dateB = (b.document_date || "").slice(0, 10);
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+      return String(b.id).localeCompare(String(a.id));
+    });
   }, [enriched, statusFilter, bucketFilter, query, vendors]);
 
   async function onExport() {
@@ -447,9 +479,12 @@ export function OrdersListPage() {
                   <td className="px-3 py-3.5">
                     <Badge
                       variant="outline"
-                      className={cn("font-medium", poApprovalStatusBadgeClass(row.status))}
+                      className={cn(
+                        "font-medium",
+                        poApprovalStatusBadgeClass(row.status, row.scm_approval_stage),
+                      )}
                     >
-                      {formatPoApprovalStatusLabel(row.status)}
+                      {formatPoApprovalStatusLabel(row.status, row.scm_approval_stage)}
                     </Badge>
                   </td>
                   <td className="px-3 py-3.5 tabular-nums">{formatInr(row.total_amount)}</td>

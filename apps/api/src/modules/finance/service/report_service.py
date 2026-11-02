@@ -445,9 +445,9 @@ class ReportService:
             signed = self._signed_closing(line.closing - line.opening, acct.account_type, acct.normal_balance)
             _ = signed
             if acct.account_type == "revenue":
-                movement = line.credit - line.debit
+                movement = line.credit_total - line.debit_total
             elif acct.account_type == "expense":
-                movement = line.debit - line.credit
+                movement = line.debit_total - line.credit_total
             else:
                 continue
             prev_line = prev_map.get(line.account_id)
@@ -554,7 +554,7 @@ class ReportService:
                 continue
             label = f"{acct.account_code} {acct.account_name}"
             is_cash = bool(CASH_RE.search(label))
-            period_mov = line.debit - line.credit  # raw debit net
+            period_mov = line.debit_total - line.credit_total  # raw debit net
             if is_cash and acct.account_type == "asset":
                 opening_cash += line.opening
                 closing_cash += line.closing

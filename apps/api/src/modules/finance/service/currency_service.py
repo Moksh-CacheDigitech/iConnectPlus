@@ -19,7 +19,7 @@ class CurrencyService:
         self._audit = PlatformAuditFacade(db)
 
     def list_rates(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_rates(ctx, cid)
 
     def create_rate(self, ctx: TenantContext, company_id: UUID | None = None, **fields):

@@ -9,7 +9,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException
@@ -124,7 +124,7 @@ class AssetMeterReadingRepository(AstScopedRepository):
         limit: int,
     ) -> tuple[list[AstAssetMeterReading], int]:
         stmt = select(AstAssetMeterReading).where(
-            AstAssetMeterReading.company_id == filters.company_id,
+            (AstAssetMeterReading.company_id == filters.company_id if filters.company_id is not None else true()),
             AstAssetMeterReading.is_deleted.is_(False),
         )
         if filters.asset_id is not None:

@@ -2,8 +2,14 @@
 
 Rules:
 - Platform admin (super_admin / tenant_admin): entire tenant (no company/branch filter).
-- Org-assigned module admin: same as platform for that module only.
+- Module admin (admin_module_keys): full read/write for that module across the tenant
+  (all companies/branches). Entity scopes do not shrink module-admin elevation.
 - Module member: scoped_company_ids / session company (+ session branch when branch_scoped).
+
+List vs write company resolution:
+- resolve_list_company_id  → None when the user can see multiple/all companies.
+  Never pin list APIs to the parked session company alone (CDPL must not hide CT).
+- resolve_write_company_id → always a concrete company for create/update.
 """
 
 from __future__ import annotations
@@ -12,6 +18,7 @@ from uuid import UUID
 
 from sqlalchemy import false
 
+from core.exceptions import ForbiddenException
 from modules.foundation.domain.erp_modules import ADMIN_USER_TYPES
 from modules.foundation.domain.value_objects import TenantContext
 
@@ -21,7 +28,11 @@ def is_platform_admin(ctx: TenantContext) -> bool:
 
 
 def has_module_wide_data_access(ctx: TenantContext, module_key: str) -> bool:
-    """True when list/read queries for this module should span the whole tenant."""
+    """True when list/read/write for this module should span the whole tenant.
+
+    Org-assigned module admins get full module data access (all companies), even if
+    they also have SecUserOrgScope rows for other member workflows.
+    """
     if is_platform_admin(ctx):
         return True
     key = (module_key or "").strip().lower()
@@ -85,6 +96,44 @@ def effective_company_ids(
     return []
 
 
+def resolve_list_company_id(
+    ctx: TenantContext,
+    company_id: UUID | None,
+    *,
+    module_key: str,
+) -> UUID | None:
+    """Optional company filter for list/read APIs.
+
+    Returns None when the caller should see every company they can access for
+    this module (platform admin, module-wide admin, or multi-entity org scope).
+    Do not pin lists to the parked session company alone.
+    """
+    if company_id is not None:
+        return company_id
+    if has_module_wide_data_access(ctx, module_key):
+        return None
+    ids = effective_company_ids(ctx, module_key=module_key)
+    if ids is None:
+        return None
+    if len(ids) == 0:
+        return ctx.company_id
+    if len(ids) == 1:
+        return ids[0]
+    return None
+
+
+def resolve_write_company_id(
+    ctx: TenantContext,
+    company_id: UUID | None,
+) -> UUID:
+    """Concrete company for create/update - always requires a single company."""
+    if company_id is not None:
+        return company_id
+    if ctx.company_id is None:
+        raise ForbiddenException("Company context required")
+    return ctx.company_id
+
+
 def apply_company_scope(stmt, model, ctx: TenantContext, *, module_key: str | None = None):
     """Restrict a query to the user's companies unless module/platform elevated."""
     ids = effective_company_ids(ctx, module_key=module_key)
@@ -106,10 +155,20 @@ def apply_branch_scope(
     module_key: str,
     branch_scoped: bool = False,
 ):
-    """Apply session branch filter for members; skip for platform/module admins."""
+    """Apply session branch filter for single-company members only.
+
+    Platform admins, module admins, and multi-entity assignments must not be pinned
+    to the session branch — that branch belongs to one company and would hide the
+    other assigned entities across HR/master lists.
+    """
     if not branch_scoped or not ctx.branch_id or not hasattr(model, "branch_id"):
         return stmt
     if has_module_wide_data_access(ctx, module_key):
+        return stmt
+    key = (module_key or "").strip().lower()
+    if key and key in ctx.admin_module_keys:
+        return stmt
+    if len(ctx.scoped_company_ids or ()) > 1:
         return stmt
     return stmt.where(model.branch_id == ctx.branch_id)
 

@@ -6,8 +6,9 @@
  * All calls go through the shared `apiClient` / `resourceService` - the UI
  * never talks to the database directly (DG-01).
  */
-import { ApiClientError, apiClient, resourceService } from "@/services/api-client";
+import { ApiClientError, apiClient, contextService, resourceService } from "@/services/api-client";
 import { getAccessToken } from "@/lib/auth";
+import { getStoredOrgContext } from "@/lib/org-context-storage";
 import { isInlineSafeAttachment, triggerBlobDownload } from "@/lib/safe-attachment";
 import { loadCrmOverview } from "@/services/crm-service";
 import { env } from "@/utils/env";
@@ -326,6 +327,8 @@ export type LeadCreateFromCompanyInput = {
   distributor_department?: string | null;
   end_customer_name?: string | null;
   end_customer_location?: string | null;
+  /** sell_through | sell_to */
+  sale_type?: string | null;
   entity_name?: string | null;
   entity_email?: string | null;
   entity_address?: string | null;
@@ -335,6 +338,10 @@ export type LeadCreateFromCompanyInput = {
   requires_sow?: boolean;
   notes?: string | null;
   presales_owner_id?: string | null;
+  presales_call_aligned?: boolean | null;
+  presales_call_contact_name?: string | null;
+  /** JSON map of product type → { aligned, contact_name }. */
+  presales_call_by_product?: string | null;
 };
 
 export async function createLeadFromCompany(
@@ -574,6 +581,10 @@ export type SalesLead = {
   requires_sow?: boolean;
   boq_attached?: boolean;
   sow_attached?: boolean;
+  presales_call_aligned?: boolean | null;
+  presales_call_contact_name?: string | null;
+  /** JSON map of product type → { aligned, contact_name }. */
+  presales_call_by_product?: string | null;
   oem_name?: string | null;
   oem_contact_person?: string | null;
   oem_contact_number?: string | null;
@@ -585,6 +596,8 @@ export type SalesLead = {
   distributor_department?: string | null;
   end_customer_name?: string | null;
   end_customer_location?: string | null;
+  /** sell_through | sell_to */
+  sale_type?: string | null;
   notes: string | null;
   convert_remark?: string | null;
   lost_reason?: string | null;
@@ -674,6 +687,7 @@ export type Opportunity = {
   expected_revenue: number;
   probability_percent: number;
   forecast_amount: number | null;
+  deal_won_amount?: number | null;
   customer_id: string | null;
   sales_quotation_id: string | null;
   sales_order_id: string | null;
@@ -688,6 +702,9 @@ export type Opportunity = {
   customer_po_approved?: boolean;
   cloud_blueprint_variant?: string | null;
   product_type?: string | null;
+  has_hardware?: boolean;
+  has_software?: boolean;
+  has_services?: boolean;
   cloud_sub_product?: string | null;
   customer_mrr?: number | null;
   customer_arr?: number | null;
@@ -958,6 +975,7 @@ export type QuoteLine = {
   product_name: string;
   hsn_sac: string | null;
   description?: string | null;
+  sub_product_category?: string | null;
   line_type: string;
   qty: number;
   unit_cost: number;
@@ -976,6 +994,7 @@ export type QuoteLineFormInput = {
   product_name: string;
   hsn_sac?: string | null;
   description?: string | null;
+  sub_product_category?: string | null;
   line_type?: string;
   qty?: number;
   unit_cost?: number;
@@ -1056,6 +1075,41 @@ export async function getQuoteMargin(quoteId: string): Promise<QuoteMarginSummar
   return unwrap(await apiClient<QuoteMarginSummary>(`${CRM_QUOTES_API}/${quoteId}/margin`));
 }
 
+export type QuoteRevisionRow = {
+  revision_no: number;
+  avg_margin_pct: number;
+  grand_total: number;
+  total_margin_amount: number;
+  negotiation_pct: number;
+  is_current: boolean;
+  snapshotted_at?: string | null;
+  remark?: string | null;
+  has_print_payload?: boolean;
+};
+
+export type QuoteRevisionPrintPayload = {
+  revision_no: number;
+  is_current: boolean;
+  quote: Quote;
+  lines: QuoteLine[];
+};
+
+export async function listQuoteRevisions(quoteId: string): Promise<QuoteRevisionRow[]> {
+  const res = await apiClient<QuoteRevisionRow[]>(`${CRM_QUOTES_API}/${quoteId}/revisions`);
+  return asArray(res.data);
+}
+
+export async function getQuoteRevisionPrintPayload(
+  quoteId: string,
+  revisionNo: number,
+): Promise<QuoteRevisionPrintPayload> {
+  return unwrap(
+    await apiClient<QuoteRevisionPrintPayload>(
+      `${CRM_QUOTES_API}/${quoteId}/revisions/${revisionNo}/print-payload`,
+    ),
+  );
+}
+
 export async function getQuoteBlueprint(quoteId: string): Promise<BlueprintState> {
   return unwrap(await apiClient<BlueprintState>(`${CRM_QUOTES_API}/${quoteId}/blueprint`));
 }
@@ -1067,6 +1121,8 @@ export async function sendQuoteForApproval(
     assigned_user_id: string;
     assigned_user_ids?: string[];
     remarks?: string | null;
+    quotation_pdf_base64?: string | null;
+    quotation_pdf_filename?: string | null;
   },
 ): Promise<Quote> {
   return unwrap(
@@ -1386,6 +1442,8 @@ export async function sendOvfForApproval(
     remarks?: string | null;
     assigned_user_id?: string;
     assigned_user_ids?: string[];
+    ovf_pdf_base64?: string | null;
+    ovf_pdf_filename?: string | null;
   },
 ): Promise<Ovf> {
   return unwrap(
@@ -1484,7 +1542,10 @@ export async function listMyJobs(params?: {
   entity_type?: string;
   entity_id?: string;
 }): Promise<ApprovalTask[]> {
-  const res = await resourceService.list<ApprovalTask>(CRM_MY_JOBS_API, params);
+  const res = await resourceService.list<ApprovalTask>(CRM_MY_JOBS_API, {
+    page_size: 200,
+    ...params,
+  });
   return asArray(res.data);
 }
 
@@ -1498,6 +1559,7 @@ export async function decideMyJob(
     freight_weight_kg?: number;
     freight_insurance?: boolean;
     supporting_items?: Array<{
+      line_id?: string;
       product_name: string;
       qty: number;
       unit_price: number;
@@ -1579,6 +1641,18 @@ export async function requestOvfSupportingItems(
 ): Promise<Ovf> {
   return unwrap(
     await apiClient<Ovf>(`${CRM_OVF_API}/${ovfId}/request-supporting-items`, {
+      method: "POST",
+      body,
+    }),
+  );
+}
+
+export async function requestOvfSupportingItemPrices(
+  ovfId: string,
+  body: OvfSupportingItemsRequestInput = {},
+): Promise<Ovf> {
+  return unwrap(
+    await apiClient<Ovf>(`${CRM_OVF_API}/${ovfId}/request-supporting-item-prices`, {
       method: "POST",
       body,
     }),
@@ -1996,8 +2070,26 @@ export async function listPipelineOptions(): Promise<Option[]> {
   }));
 }
 
+/**
+ * Branches the signed-in user can access for their active company.
+ * Uses `/auth/context/branches` so CRM sales users do not need
+ * `organization.branch:read` (that permission is for Org Setup only).
+ */
 export async function listBranchOptions(): Promise<Option[]> {
-  const res = await resourceService.list("/branches");
+  const stored = getStoredOrgContext();
+  let companyId = stored?.companyId ?? null;
+  if (!companyId) {
+    const ctx = await contextService.getContext();
+    companyId = ctx.data?.company_id ?? null;
+  }
+  if (!companyId) {
+    const companies = await contextService.listCompanies();
+    const first = asArray(companies.data)[0];
+    companyId = first?.id ? String(first.id) : null;
+  }
+  if (!companyId) return [];
+
+  const res = await contextService.listBranches(companyId);
   const rows = asArray(res.data as Record<string, unknown>[] | Record<string, unknown> | null);
   return rows.map((r) => ({
     id: String(r.id),

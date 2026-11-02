@@ -67,13 +67,13 @@ class OrderService:
         self._crm = ProcurementCrmAdapter(db)
 
     def list_orders(self, ctx: TenantContext, company_id: UUID | None = None):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         return self._repo.list_orders(ctx, cid)
 
     def list_order_responses(
         self, ctx: TenantContext, company_id: UUID | None = None, *, enrich_commercial: bool = False
     ) -> list[OrderResponse]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         rows = self._repo.list_orders_with_lines(ctx, cid)
         return self._to_order_responses(ctx, rows, enrich_commercial=enrich_commercial)
 

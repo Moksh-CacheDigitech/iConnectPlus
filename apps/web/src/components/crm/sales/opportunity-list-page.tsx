@@ -137,15 +137,34 @@ export function OpportunityListPage({
                   <tr key={row.id} className="border-b border-border/50 last:border-0 hover:bg-accent/30">
                     <td className="px-4 py-2.5 font-medium text-foreground">
                       <Link href={`/crm/opportunities/${row.id}`} className="cursor-pointer hover:underline">
-                        {row.opportunity_name} · {formatCrmCode(row.opportunity_code)}
+                        {row.opportunity_name}
                       </Link>
+                      <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
+                        {formatCrmCode(row.opportunity_code)}
+                        {row.status === "won" && row.deal_won_amount != null
+                          ? ` · Won ${formatInr(row.deal_won_amount)}`
+                          : ""}
+                      </span>
                     </td>
                     <td className="px-4 py-2.5">
-                      <Badge variant="outline" className="capitalize">
-                        {row.current_stage.replaceAll("_", " ")}
+                      <Badge
+                        variant="outline"
+                        className={
+                          row.current_stage === "won"
+                            ? "border-emerald-200 bg-emerald-50 capitalize text-emerald-800"
+                            : "capitalize"
+                        }
+                      >
+                        {row.current_stage === "won"
+                          ? "Deal won"
+                          : row.current_stage.replaceAll("_", " ")}
                       </Badge>
                     </td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{formatInr(row.expected_revenue)}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground">
+                      {row.status === "won" && row.deal_won_amount != null
+                        ? formatInr(row.deal_won_amount)
+                        : formatInr(row.expected_revenue)}
+                    </td>
                     <td className="px-4 py-2.5 text-muted-foreground">{formatCreatedDate(row.created_at)}</td>
                     <td className="px-4 py-2.5">
                       <FinanceStatusBadge status={row.status} />

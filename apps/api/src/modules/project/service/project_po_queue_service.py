@@ -41,7 +41,7 @@ class ProjectPoQueueService:
     def list_queue(
         self, ctx: TenantContext, company_id: UUID | None = None
     ) -> list[ProjectPoQueueItem]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         linked = self._repo.list_linked_proc_order_ids(ctx, cid)
         out: list[ProjectPoQueueItem] = []
 

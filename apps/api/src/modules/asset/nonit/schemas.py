@@ -255,7 +255,8 @@ class NonItLocationCount(BaseModel):
 
 
 class NonItDashboardSummaryResponse(BaseModel):
-    company_id: UUID
+    # None when the caller has module/tenant-wide list scope (all companies).
+    company_id: UUID | None = None
     total_assets: int
     in_stock: int
     assigned: int

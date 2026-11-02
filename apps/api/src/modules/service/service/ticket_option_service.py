@@ -28,7 +28,7 @@ class TicketOptionService:
         company_id: UUID | None = None,
         active_only: bool = True,
     ) -> list[TicketOptionResponse]:
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
         stmt = select(SvcTicketOption).where(
             SvcTicketOption.company_id == cid,
             SvcTicketOption.is_deleted.is_(False),

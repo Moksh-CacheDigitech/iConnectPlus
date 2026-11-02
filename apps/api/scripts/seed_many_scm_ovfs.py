@@ -42,6 +42,16 @@ from modules.organization.models.branch import OrgBranch  # noqa: E402
 from modules.organization.models.company import OrgCompany  # noqa: E402
 
 TINY_PDF = base64.b64encode(b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n").decode("ascii")
+TINY_EML = base64.b64encode(
+    b"From: oem@example.com\r\n"
+    b"To: sales@example.com\r\n"
+    b"Subject: OEM quotation\r\n"
+    b"Date: Thu, 01 Jan 2026 10:00:00 +0000\r\n"
+    b"MIME-Version: 1.0\r\n"
+    b"Content-Type: text/plain; charset=utf-8\r\n"
+    b"\r\n"
+    b"OEM quote body for SCM seed.\r\n"
+).decode("ascii")
 
 PRODUCTS: list[tuple[str, str, Decimal]] = [
     ("USB-RJ45 Network Adapter", "hardware", Decimal("990.00")),
@@ -336,6 +346,16 @@ def tiny_file(name: str) -> dict:
     return {"file_name": name, "content_base64": TINY_PDF, "content_type": "application/pdf"}
 
 
+def tiny_oem_quote_file(name: str) -> dict:
+    """OEM vendor quotation must be an Outlook .eml/.msg export."""
+    safe = name if name.lower().endswith((".eml", ".msg")) else f"{name}.eml"
+    return {
+        "file_name": safe,
+        "content_base64": TINY_EML,
+        "content_type": "message/rfc822",
+    }
+
+
 def decide_pending(db, ctx: TenantContext, entity_id: UUID) -> None:
     tasks = ApprovalTaskService(db).list(ctx, entity_id=entity_id, status="pending")
     if not tasks:
@@ -490,7 +510,37 @@ def create_shared_ovf(
         entity_gst=deal["gst"],
         entity_contact=phone,
         notes=f"SCM demo lead #{index}",
+        presales_call_aligned=True,
+        presales_call_contact_name=f"{first} {last}",
     )
+
+    # Sales leads require BOQ + SOW on the lead before convert.
+    attachments.create(
+        sales_ctx,
+        entity_type="lead",
+        entity_id=lead.id,
+        file_name=f"Lead_BOQ_{index:02d}.pdf",
+        category="boq",
+        branch_id=branch.id,
+        company_id=org.id,
+        content_base64=TINY_PDF,
+        content_type="application/pdf",
+        replace_existing_category=True,
+    )
+    attachments.create(
+        sales_ctx,
+        entity_type="lead",
+        entity_id=lead.id,
+        file_name=f"Lead_SOW_{index:02d}.pdf",
+        category="sow",
+        branch_id=branch.id,
+        company_id=org.id,
+        content_base64=TINY_PDF,
+        content_type="application/pdf",
+        replace_existing_category=True,
+    )
+    # Clear pending attach tasks + unlock convert once docs are on the lead.
+    leads._sync_lead_doc_requests(sales_ctx, lead.id)
 
     opportunity = leads.convert(
         sales_ctx,
@@ -500,33 +550,48 @@ def create_shared_ovf(
         expected_revenue=float(amount),
         remark="SCM demo convert",
     )
-
-    blueprint.perform_action(sales_ctx, opportunity.id, "attach_boq", tiny_file(f"BOQ_{index:02d}.pdf"))
-    blueprint.perform_action(
-        sales_ctx,
-        opportunity.id,
-        "send_boq_approval",
-        {
-            "team_role": "presales",
-            "assigned_user_ids": [approver_id],
-            "remarks": f"Approve BOQ for SCM demo #{index}",
-        },
-    )
-    decide_pending(db, sales_ctx, opportunity.id)
-
-    blueprint.perform_action(
-        sales_ctx,
-        opportunity.id,
-        "deal_reg",
-        {"deal_reg_number": f"CT-DR-SCM-{index:04d}"},
-    )
-    blueprint.perform_action(sales_ctx, opportunity.id, "oem_received", {})
-    blueprint.perform_action(
-        sales_ctx,
-        opportunity.id,
-        "attach_oem_quote",
-        tiny_file(f"OEM_Quote_{index:02d}.pdf"),
-    )
+    # Lead BOQ/SOW + DR auto-advance the opportunity to oem_pending (or deal_reg).
+    opportunity = blueprint.get(sales_ctx, opportunity.id)
+    state = (opportunity.blueprint_state or "").strip()
+    if state in {"open", "boq_pending", "boq_approval", "sow_approval"}:
+        blueprint.perform_action(
+            sales_ctx, opportunity.id, "attach_boq", tiny_file(f"BOQ_{index:02d}.pdf")
+        )
+        blueprint.perform_action(
+            sales_ctx,
+            opportunity.id,
+            "send_boq_approval",
+            {
+                "team_role": "presales",
+                "assigned_user_ids": [approver_id],
+                "remarks": f"Approve BOQ for SCM demo #{index}",
+            },
+        )
+        decide_pending(db, sales_ctx, opportunity.id)
+        opportunity = blueprint.get(sales_ctx, opportunity.id)
+        state = (opportunity.blueprint_state or "").strip()
+    if state == "deal_reg":
+        blueprint.perform_action(
+            sales_ctx,
+            opportunity.id,
+            "deal_reg",
+            {"deal_reg_number": f"CT-DR-SCM-{index:04d}"},
+        )
+        opportunity = blueprint.get(sales_ctx, opportunity.id)
+        state = (opportunity.blueprint_state or "").strip()
+    if state in {"oem_pending", "oem_attached"}:
+        blueprint.perform_action(
+            sales_ctx,
+            opportunity.id,
+            "attach_oem_quote",
+            tiny_oem_quote_file(f"OEM_Quote_{index:02d}.eml"),
+        )
+        opportunity = blueprint.get(sales_ctx, opportunity.id)
+        state = (opportunity.blueprint_state or "").strip()
+    if state != "quote_ready":
+        raise RuntimeError(
+            f"Expected quote_ready after OEM attach for SCM demo #{index}, got {state}"
+        )
 
     hw = next((p for p in products if p.product_type == "hardware"), products[0])
     svc = next((p for p in products if p.product_type == "services"), products[-1])
@@ -586,12 +651,12 @@ def create_shared_ovf(
         sales_ctx,
         entity_type="quote",
         entity_id=quote.id,
-        file_name=f"Vendor_Quote_{index:02d}.pdf",
+        file_name=f"Vendor_Quote_{index:02d}.eml",
         category="vendor_quote",
         branch_id=branch.id,
         company_id=org.id,
-        content_base64=TINY_PDF,
-        content_type="application/pdf",
+        content_base64=TINY_EML,
+        content_type="message/rfc822",
     )
     quotes.send_for_approval(
         sales_ctx,
@@ -605,23 +670,16 @@ def create_shared_ovf(
     quotes.apply_blueprint_action(sales_ctx, quote.id, "accept", {"remark": "Accepted"})
     quote = quotes.get(sales_ctx, quote.id)
 
-    blueprint.perform_action(
-        sales_ctx,
-        opportunity.id,
-        "attach_po",
-        tiny_file(f"Customer_PO_{po_number}.pdf"),
-    )
-    blueprint.perform_action(
-        sales_ctx,
-        opportunity.id,
-        "send_po_approval",
-        {
-            "finance_user_ids": [approver_id],
-            "legal_user_ids": [approver_id],
-            "management_user_ids": [approver_id],
-            "remarks": f"PO chain SCM demo #{index}",
-        },
-    )
+    # attach_po also starts Finance → Legal → Management (terms_accepted required).
+    po_payload = {
+        **tiny_file(f"Customer_PO_{po_number}.pdf"),
+        "terms_accepted": True,
+        "finance_user_ids": [approver_id],
+        "legal_user_ids": [approver_id],
+        "management_user_ids": [approver_id],
+        "remarks": f"PO chain SCM demo #{index}",
+    }
+    blueprint.perform_action(sales_ctx, opportunity.id, "attach_po", po_payload)
     decide_pending(db, sales_ctx, opportunity.id)  # finance
     decide_pending(db, sales_ctx, opportunity.id)  # legal
     decide_pending(db, sales_ctx, opportunity.id)  # management

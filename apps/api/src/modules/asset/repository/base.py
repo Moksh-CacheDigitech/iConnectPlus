@@ -6,7 +6,11 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.exceptions import ForbiddenException
-from modules.foundation.domain.org_data_scope import apply_org_scope_filter
+from modules.foundation.domain.org_data_scope import (
+    apply_org_scope_filter,
+    resolve_list_company_id as shared_resolve_list_company_id,
+    resolve_write_company_id as shared_resolve_write_company_id,
+)
 from modules.foundation.domain.value_objects import TenantContext
 from modules.organization.repository.base import OrgScopedRepository
 
@@ -22,6 +26,13 @@ class AstScopedRepository(OrgScopedRepository):
         super().__init__(db)
 
     @staticmethod
+    def apply_optional_company_filter(stmt, model, company_id: UUID | None):
+        """Pin to one company when provided; skip when list scope is tenant-wide."""
+        if company_id is not None and hasattr(model, "company_id"):
+            stmt = stmt.where(model.company_id == company_id)
+        return stmt
+
+    @staticmethod
     def apply_ast_filter(stmt, model, ctx: TenantContext, *, branch_scoped: bool = False):
         stmt = AstScopedRepository.apply_tenant_filter(stmt, model, ctx)
         return apply_org_scope_filter(
@@ -29,12 +40,24 @@ class AstScopedRepository(OrgScopedRepository):
         )
 
     @staticmethod
+    def resolve_list_company_id(
+        ctx: TenantContext, company_id: UUID | None
+    ) -> UUID | None:
+        """Optional company filter for list/read APIs (never session-pin alone)."""
+        if company_id is not None:
+            AstScopedRepository.ensure_company_access(
+                ctx, company_id, module_key=ASSET_MODULE_KEY
+            )
+        return shared_resolve_list_company_id(
+            ctx, company_id, module_key=ASSET_MODULE_KEY
+        )
+
+    @staticmethod
     def resolve_company_id(ctx: TenantContext, company_id: UUID | None) -> UUID:
+        """Concrete company for create/update - always requires a single company."""
         if company_id is not None:
             AstScopedRepository.ensure_company_access(
                 ctx, company_id, module_key=ASSET_MODULE_KEY
             )
             return company_id
-        if ctx.company_id is None:
-            raise ForbiddenException("Company context required")
-        return ctx.company_id
+        return shared_resolve_write_company_id(ctx, None)

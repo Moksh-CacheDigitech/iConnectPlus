@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmApprovalTask
@@ -14,18 +14,30 @@ class ApprovalTaskRepository(CrmScopedRepository):
     def __init__(self, db: Session) -> None:
         super().__init__(db)
 
-    def get(self, ctx: TenantContext, row_id: UUID) -> CrmApprovalTask | None:
+    def _apply_job_scope(self, stmt, ctx: TenantContext, *, tenant_wide: bool):
+        """CRM/ERP admins see the full tenant My Jobs inbox; members stay company-scoped."""
+        if tenant_wide:
+            return self.apply_tenant_filter(stmt, CrmApprovalTask, ctx)
+        # Approval inbox is company-scoped - do not hide tasks from other branches.
+        return self.apply_crm_filter(stmt, CrmApprovalTask, ctx, branch_scoped=False)
+
+    def get(
+        self,
+        ctx: TenantContext,
+        row_id: UUID,
+        *,
+        tenant_wide: bool = False,
+    ) -> CrmApprovalTask | None:
         stmt = select(CrmApprovalTask).where(
             CrmApprovalTask.id == row_id, CrmApprovalTask.is_deleted.is_(False)
         )
-        # Approval inbox is company-scoped - do not hide tasks from other branches.
-        stmt = self.apply_crm_filter(stmt, CrmApprovalTask, ctx, branch_scoped=False)
+        stmt = self._apply_job_scope(stmt, ctx, tenant_wide=tenant_wide)
         return self.db.scalar(stmt)
 
     def list_tasks(
         self,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         team_role: str | None = None,
         status: str | None = None,
@@ -33,11 +45,11 @@ class ApprovalTaskRepository(CrmScopedRepository):
         requested_by: UUID | None = None,
         entity_type: str | None = None,
         entity_id: UUID | None = None,
+        tenant_wide: bool = False,
     ):
-        stmt = select(CrmApprovalTask).where(
-            CrmApprovalTask.company_id == company_id,
-            CrmApprovalTask.is_deleted.is_(False),
-        )
+        stmt = select(CrmApprovalTask).where(CrmApprovalTask.is_deleted.is_(False))
+        if company_id is not None:
+            stmt = stmt.where((CrmApprovalTask.company_id == company_id if company_id is not None else true()))
         if team_role is not None:
             stmt = stmt.where(CrmApprovalTask.team_role == team_role)
         if status is not None:
@@ -51,7 +63,7 @@ class ApprovalTaskRepository(CrmScopedRepository):
         if entity_id is not None:
             stmt = stmt.where(CrmApprovalTask.entity_id == entity_id)
         stmt = stmt.order_by(CrmApprovalTask.created_at.desc())
-        stmt = self.apply_crm_filter(stmt, CrmApprovalTask, ctx, branch_scoped=False)
+        stmt = self._apply_job_scope(stmt, ctx, tenant_wide=tenant_wide)
         return list(self.db.scalars(stmt).all())
 
     def cancel_pending_siblings(
@@ -61,7 +73,8 @@ class ApprovalTaskRepository(CrmScopedRepository):
         entity_id: UUID,
         action: str | None,
         *,
-        except_id: UUID,
+        except_id: UUID | None = None,
+        tenant_wide: bool = False,
     ) -> None:
         if not action:
             return
@@ -70,33 +83,41 @@ class ApprovalTaskRepository(CrmScopedRepository):
             CrmApprovalTask.entity_id == entity_id,
             CrmApprovalTask.action == action,
             CrmApprovalTask.status == "pending",
-            CrmApprovalTask.id != except_id,
             CrmApprovalTask.is_deleted.is_(False),
         )
-        stmt = self.apply_crm_filter(stmt, CrmApprovalTask, ctx, branch_scoped=False)
+        if except_id is not None:
+            stmt = stmt.where(CrmApprovalTask.id != except_id)
+        stmt = self._apply_job_scope(stmt, ctx, tenant_wide=tenant_wide)
         for row in self.db.scalars(stmt).all():
             row.status = "cancelled"
             row.updated_by = ctx.user_id
             row.updated_at = utcnow()
         self.db.flush()
 
-    def find_open_for_entity(self, ctx: TenantContext, entity_type: str, entity_id: UUID) -> CrmApprovalTask | None:
+    def find_open_for_entity(
+        self,
+        ctx: TenantContext,
+        entity_type: str,
+        entity_id: UUID,
+        *,
+        tenant_wide: bool = False,
+    ) -> CrmApprovalTask | None:
         stmt = select(CrmApprovalTask).where(
             CrmApprovalTask.entity_type == entity_type,
             CrmApprovalTask.entity_id == entity_id,
             CrmApprovalTask.status == "pending",
             CrmApprovalTask.is_deleted.is_(False),
         )
-        stmt = self.apply_crm_filter(stmt, CrmApprovalTask, ctx, branch_scoped=False)
+        stmt = self._apply_job_scope(stmt, ctx, tenant_wide=tenant_wide)
         return self.db.scalar(stmt)
 
-    def list_for_entity_ids(self, ctx: TenantContext, company_id: UUID, entity_ids: list[UUID]):
+    def list_for_entity_ids(self, ctx: TenantContext, company_id: UUID | None, entity_ids: list[UUID]):
         if not entity_ids:
             return []
         stmt = (
             select(CrmApprovalTask)
             .where(
-                CrmApprovalTask.company_id == company_id,
+                (CrmApprovalTask.company_id == company_id if company_id is not None else true()),
                 CrmApprovalTask.entity_id.in_(entity_ids),
                 CrmApprovalTask.is_deleted.is_(False),
             )
@@ -117,8 +138,15 @@ class ApprovalTaskRepository(CrmScopedRepository):
         self.db.flush()
         return row
 
-    def update(self, ctx: TenantContext, row_id: UUID, **fields) -> CrmApprovalTask | None:
-        row = self.get(ctx, row_id)
+    def update(
+        self,
+        ctx: TenantContext,
+        row_id: UUID,
+        *,
+        tenant_wide: bool = False,
+        **fields,
+    ) -> CrmApprovalTask | None:
+        row = self.get(ctx, row_id, tenant_wide=tenant_wide)
         if row is None:
             return None
         for k, v in fields.items():

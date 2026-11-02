@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import true, select
 from sqlalchemy.orm import Session
 
 from modules.crm.models import CrmCustomerFeedback
@@ -19,9 +19,9 @@ class CustomerFeedbackRepository(CrmScopedRepository):
         stmt = self.apply_crm_filter(stmt, CrmCustomerFeedback, ctx, branch_scoped=True)
         return self.db.scalar(stmt)
 
-    def list_feedback(self, ctx: TenantContext, company_id: UUID):
+    def list_feedback(self, ctx: TenantContext, company_id: UUID | None):
         stmt = select(CrmCustomerFeedback).where(
-            CrmCustomerFeedback.company_id == company_id,
+            (CrmCustomerFeedback.company_id == company_id if company_id is not None else true()),
             CrmCustomerFeedback.is_deleted.is_(False),
         )
         stmt = self.apply_crm_filter(stmt, CrmCustomerFeedback, ctx, branch_scoped=True)

@@ -155,6 +155,10 @@ class ModuleAdminService:
                 )
             except ValueError as exc:
                 raise AppException(str(exc)) from exc
+        if module_key == "crm":
+            OrgModuleAdminSyncService(self._db).promote_crm_member(
+                ctx.tenant_id, user_id, ctx.user_id
+            )
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,
             entity_name="sec_user_module",
@@ -232,6 +236,10 @@ class ModuleAdminService:
         self._modules.delete_assignment(row)
         if module_key == "service":
             OrgModuleAdminSyncService(self._db).demote_service_engineer(
+                ctx.tenant_id, user_id, ctx.user_id
+            )
+        if module_key == "crm":
+            OrgModuleAdminSyncService(self._db).demote_crm_member(
                 ctx.tenant_id, user_id, ctx.user_id
             )
         if module_key == "assets":

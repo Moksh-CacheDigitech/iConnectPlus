@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import true, func, or_, select
 from sqlalchemy.orm import Session
 
 from core.exceptions import ConflictException
@@ -55,7 +55,7 @@ class AssetAuditRepository(AstScopedRepository):
             select(AstAssetAudit)
             .outerjoin(AstAsset, AstAsset.id == AstAssetAudit.asset_id)
             .where(
-                AstAssetAudit.company_id == filters.company_id,
+                (AstAssetAudit.company_id == filters.company_id if filters.company_id is not None else true()),
                 AstAssetAudit.is_deleted.is_(False),
             )
         )

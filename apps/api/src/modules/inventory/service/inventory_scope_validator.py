@@ -13,6 +13,11 @@ class InventoryScopeValidator:
     def __init__(self, db: Session) -> None:
         self._db = db
 
+    def resolve_list_company_id(
+        self, ctx: TenantContext, company_id: UUID | None
+    ) -> UUID | None:
+        return InvScopedRepository.resolve_list_company_id(ctx, company_id)
+
     def resolve_company_id(self, ctx: TenantContext, company_id: UUID | None) -> UUID:
         return InvScopedRepository.resolve_company_id(ctx, company_id)
 
