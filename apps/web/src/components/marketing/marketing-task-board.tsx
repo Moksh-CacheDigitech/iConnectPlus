@@ -12,10 +12,13 @@ import { useAuthUser } from "@/hooks/use-auth-user";
 import { canViewAllModuleScreens } from "@/lib/module-access";
 import { formatApiError } from "@/services/api-client";
 import {
+  delegateMarketingTask,
   executeMarketingTask,
   listMarketingTasks,
+  listMarketingTeamMembers,
   submitDeliverableContent,
   type MarketingTask,
+  type MarketingTeamMember,
 } from "@/services/marketing-service";
 import { fileToBase64 } from "@/services/sales-crm-service";
 import { getAccessToken } from "@/lib/auth";
@@ -54,6 +57,9 @@ export function MarketingTaskBoard({ mineOnly = true }: { mineOnly?: boolean }) 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitMode, setSubmitMode] = useState<"link" | "file">("link");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selfChecked, setSelfChecked] = useState(false);
+  const [delegateTo, setDelegateTo] = useState("");
+  const [teamMembers, setTeamMembers] = useState<MarketingTeamMember[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -83,13 +89,15 @@ export function MarketingTaskBoard({ mineOnly = true }: { mineOnly?: boolean }) 
     });
   }, [rows]);
 
-  function isContentProvider(task: MarketingTask): boolean {
+  function isMaker(task: MarketingTask): boolean {
     const uid = user?.id;
     if (!uid) return false;
     const meta = task.metadata_json;
     return (
       sameUser(meta?.content_provider_user_id, uid) ||
-      sameUser(task.owner_user_id, uid)
+      sameUser(meta?.editor_user_id, uid) ||
+      sameUser(task.owner_user_id, uid) ||
+      sameUser(task.assignee_user_id, uid)
     );
   }
 
@@ -98,10 +106,26 @@ export function MarketingTaskBoard({ mineOnly = true }: { mineOnly?: boolean }) 
     if (["completed", "cancelled"].includes(task.status)) return false;
     const meta = task.metadata_json;
     if (meta?.submission_status === "approved") return false;
-    // Content provider, marketing head, or module admin can attach/submit.
     if (viewAll) return true;
-    if (moduleRoles.marketing === "marketing_head") return true;
-    return isContentProvider(task);
+    if (
+      moduleRoles.marketing === "marketing_head" ||
+      moduleRoles.marketing === "marketing_associate" ||
+      moduleRoles.marketing === "content_creator"
+    ) {
+      return true;
+    }
+    return isMaker(task);
+  }
+
+  function canTransfer(task: MarketingTask): boolean {
+    if (!isDeliverable(task)) return false;
+    if (["completed", "cancelled"].includes(task.status)) return false;
+    if (viewAll) return true;
+    const role = moduleRoles.marketing;
+    if (role === "marketing_head" || role === "marketing_associate" || role === "content_creator") {
+      return true;
+    }
+    return isMaker(task);
   }
 
   function openDeliverable(task: MarketingTask) {
@@ -113,7 +137,14 @@ export function MarketingTaskBoard({ mineOnly = true }: { mineOnly?: boolean }) 
     setNotes(meta?.submission_notes || "");
     setSubmitMode(meta?.submission_kind === "file" ? "file" : "link");
     setSelectedFile(null);
+    setSelfChecked(Boolean(meta?.self_checked));
+    setDelegateTo("");
     if (fileInputRef.current) fileInputRef.current.value = "";
+    if (teamMembers.length === 0) {
+      void listMarketingTeamMembers()
+        .then(setTeamMembers)
+        .catch(() => setTeamMembers([]));
+    }
   }
 
   async function openSubmittedContent(task: MarketingTask) {
@@ -160,6 +191,10 @@ export function MarketingTaskBoard({ mineOnly = true }: { mineOnly?: boolean }) 
   }
 
   async function onSubmitContent(taskId: string) {
+    if (!selfChecked) {
+      setSubmitError("Tick self-check before submitting for approval.");
+      return;
+    }
     if (submitMode === "link" && !contentUrl.trim() && !documentName.trim() && !notes.trim()) {
       setSubmitError("Add a content link, document name, or notes.");
       return;
@@ -179,9 +214,11 @@ export function MarketingTaskBoard({ mineOnly = true }: { mineOnly?: boolean }) 
         content_base64?: string;
         content_type?: string;
         file_name?: string;
+        self_checked: boolean;
       } = {
         document_name: documentName.trim() || undefined,
         notes: notes.trim() || undefined,
+        self_checked: true,
       };
       if (submitMode === "link") {
         payload.content_url = contentUrl.trim() || undefined;
@@ -190,7 +227,6 @@ export function MarketingTaskBoard({ mineOnly = true }: { mineOnly?: boolean }) 
         payload.content_type = selectedFile.type || "application/octet-stream";
         payload.file_name = selectedFile.name;
         payload.document_name = documentName.trim() || selectedFile.name;
-        // Optional: also keep a pasteable link if user filled one
         if (contentUrl.trim()) payload.content_url = contentUrl.trim();
       } else if (contentUrl.trim()) {
         payload.content_url = contentUrl.trim();
@@ -201,10 +237,29 @@ export function MarketingTaskBoard({ mineOnly = true }: { mineOnly?: boolean }) 
       setDocumentName("");
       setNotes("");
       setSelectedFile(null);
+      setSelfChecked(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
       await reload();
     } catch (err) {
       setSubmitError(formatApiError(err, "Could not submit content"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDelegate(taskId: string) {
+    if (!delegateTo) {
+      setSubmitError("Pick a teammate to transfer this work to.");
+      return;
+    }
+    setBusy(true);
+    setSubmitError(null);
+    try {
+      await delegateMarketingTask(taskId, delegateTo);
+      setExpandedId(null);
+      await reload();
+    } catch (err) {
+      setSubmitError(formatApiError(err, "Transfer failed"));
     } finally {
       setBusy(false);
     }
@@ -499,12 +554,22 @@ export function MarketingTaskBoard({ mineOnly = true }: { mineOnly?: boolean }) 
                                     aria-label="Optional content URL"
                                   />
                                 ) : null}
+                                <label className="mt-3 flex cursor-pointer items-center gap-2 text-[12px]">
+                                  <input
+                                    type="checkbox"
+                                    className="cursor-pointer"
+                                    checked={selfChecked}
+                                    disabled={busy}
+                                    onChange={(e) => setSelfChecked(e.target.checked)}
+                                  />
+                                  <span>Self-check done — I reviewed this before approval</span>
+                                </label>
                                 <div className="mt-2 flex flex-wrap items-center gap-2">
                                   <Button
                                     type="button"
                                     size="sm"
                                     className="h-9 cursor-pointer gap-1.5 transition-colors duration-200"
-                                    disabled={busy}
+                                    disabled={busy || !selfChecked}
                                     onClick={() => void onSubmitContent(row.id)}
                                   >
                                     {busy ? (
@@ -519,10 +584,42 @@ export function MarketingTaskBoard({ mineOnly = true }: { mineOnly?: boolean }) 
                               </>
                             ) : (
                               <p className="text-[12px] text-muted-foreground">
-                                Only the assigned content provider (or Marketing module admin) can
+                                Only the assigned maker (provider/editor) or Marketing planner can
                                 submit content for this deliverable.
                               </p>
                             )}
+                            {canTransfer(row) ? (
+                              <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border/50 pt-3">
+                                <label className="space-y-1">
+                                  <span className="text-[11px] font-medium text-muted-foreground">
+                                    Transfer to (Ansh → Piyush / Harshita)
+                                  </span>
+                                  <select
+                                    value={delegateTo}
+                                    onChange={(e) => setDelegateTo(e.target.value)}
+                                    disabled={busy}
+                                    className="flex h-9 min-w-[12rem] cursor-pointer rounded-md border border-input bg-background px-3 text-sm"
+                                  >
+                                    <option value="">Select teammate</option>
+                                    {teamMembers.map((m) => (
+                                      <option key={m.user_id} value={m.user_id}>
+                                        {m.display_name} ({m.role})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-9 cursor-pointer transition-colors duration-200"
+                                  disabled={busy || !delegateTo}
+                                  onClick={() => void onDelegate(row.id)}
+                                >
+                                  Transfer work
+                                </Button>
+                              </div>
+                            ) : null}
                           </td>
                         </tr>
                       ) : null}

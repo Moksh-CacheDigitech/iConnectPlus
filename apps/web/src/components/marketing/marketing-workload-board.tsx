@@ -25,11 +25,14 @@ const EMPTY: WorkloadOverview = {
     utilization_pct: 0,
     completed_tasks: 0,
     actual_hours: 0,
+    checklist_pct: 0,
+    duration_hours: 0,
   },
   people: [],
   overloaded: [],
   underutilized: [],
   campaign_health: [],
+  team_checklist: [],
 };
 
 export function MarketingWorkloadBoard() {
@@ -88,42 +91,75 @@ export function MarketingWorkloadBoard() {
           icon={Gauge}
         />
       </div>
-      <div className="overflow-x-auto rounded-md border border-border/70">
-        <table className="w-full min-w-[560px] text-left text-xs">
-          <thead className="border-b border-border/60 bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">User</th>
-              <th className="px-3 py-2 font-medium">Score</th>
-              <th className="px-3 py-2 font-medium">Utilization</th>
-              <th className="px-3 py-2 font-medium">Active</th>
-              <th className="px-3 py-2 font-medium">Balance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.people.length === 0 ? (
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold tracking-tight">Team checklist (head view)</h2>
+        <p className="text-[11px] text-muted-foreground">
+          Vishakha view — Ansh / Piyush / Harshita progress, duration logged, and delayed work.
+        </p>
+        <div className="overflow-x-auto rounded-md border border-border/70">
+          <table className="w-full min-w-[720px] text-left text-xs">
+            <thead className="border-b border-border/60 bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
               <tr>
-                <td className="px-3 py-4 text-muted-foreground" colSpan={5}>
-                  No assigned work yet.
-                </td>
+                <th className="px-3 py-2 font-medium">Person</th>
+                <th className="px-3 py-2 font-medium">Checklist %</th>
+                <th className="px-3 py-2 font-medium">Done / Active</th>
+                <th className="px-3 py-2 font-medium">Duration (hrs)</th>
+                <th className="px-3 py-2 font-medium">Delayed</th>
+                <th className="px-3 py-2 font-medium">Balance</th>
               </tr>
-            ) : (
-              data.people.map((row) => (
-                <tr key={row.user_id} className="border-b border-border/40 last:border-0">
-                  <td className="px-3 py-2 font-mono text-[11px]">{row.user_id.slice(0, 8)}</td>
-                  <td className="px-3 py-2 font-mono tabular-nums">{row.workload_score}</td>
-                  <td className="px-3 py-2 font-mono tabular-nums">{row.utilization_pct}%</td>
-                  <td className="px-3 py-2 font-mono tabular-nums">{row.active_tasks}</td>
-                  <td className="px-3 py-2">
-                    <Badge variant="secondary" className="text-[10px] uppercase">
-                      {row.reassignment}
-                    </Badge>
+            </thead>
+            <tbody>
+              {(data.team_checklist?.length ? data.team_checklist : data.people).length === 0 ? (
+                <tr>
+                  <td className="px-3 py-4 text-muted-foreground" colSpan={6}>
+                    No assigned work yet.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                (data.team_checklist?.length
+                  ? data.team_checklist.map((row) => ({
+                      user_id: row.user_id,
+                      display_name: row.display_name,
+                      checklist_pct: row.checklist_pct,
+                      completed: row.completed,
+                      active: row.active,
+                      duration_hours: row.duration_hours,
+                      delayed: row.delayed,
+                      reassignment:
+                        data.people.find((p) => p.user_id === row.user_id)?.reassignment ||
+                        "balanced",
+                    }))
+                  : data.people.map((row) => ({
+                      user_id: row.user_id,
+                      display_name: row.display_name || row.user_id.slice(0, 8),
+                      checklist_pct: row.checklist_pct || 0,
+                      completed: row.completed_tasks || 0,
+                      active: row.active_tasks,
+                      duration_hours: row.duration_hours || 0,
+                      delayed: row.delayed_tasks || 0,
+                      reassignment: row.reassignment,
+                    }))
+                ).map((row) => (
+                  <tr key={row.user_id} className="border-b border-border/40 last:border-0">
+                    <td className="px-3 py-2 font-medium text-foreground">{row.display_name}</td>
+                    <td className="px-3 py-2 font-mono tabular-nums">{row.checklist_pct}%</td>
+                    <td className="px-3 py-2 font-mono tabular-nums">
+                      {row.completed} / {row.active}
+                    </td>
+                    <td className="px-3 py-2 font-mono tabular-nums">{row.duration_hours}</td>
+                    <td className="px-3 py-2 font-mono tabular-nums">{row.delayed}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant="secondary" className="text-[10px] uppercase">
+                        {row.reassignment}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

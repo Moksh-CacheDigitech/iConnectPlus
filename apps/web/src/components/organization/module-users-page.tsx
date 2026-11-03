@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { UserPlus, Users } from "lucide-react";
+import { Sparkles, UserPlus, Users } from "lucide-react";
 
 import { UserAvatar } from "@/components/layout/user-avatar";
 import { PageHeader } from "@/components/layout/page-header";
@@ -18,7 +18,11 @@ import {
   listAssignableModuleUsers,
   listModuleMembers,
   removeModuleMember,
+  seedModuleDemoUsers,
+  updateModuleMemberRole,
   updateModuleMemberServiceRole,
+  type MarketingTeamRole,
+  type ModuleDemoSeedResult,
   type ModuleUserOption,
   type ModuleUserRecord,
   type ServiceJobRole,
@@ -33,6 +37,22 @@ const SERVICE_JOB_ROLE_OPTIONS: { value: ServiceJobRole; label: string }[] = [
   { value: "field_engineer", label: "Field Engineer" },
 ];
 
+const MARKETING_TEAM_ROLE_OPTIONS: { value: MarketingTeamRole; label: string }[] = [
+  { value: "marketing_head", label: "Marketing head" },
+  { value: "marketing_associate", label: "Marketing associate" },
+  { value: "video_editor", label: "Video editor" },
+  { value: "graphic_designer", label: "Graphic designer" },
+  { value: "content_creator", label: "Content creator" },
+  { value: "approval_head", label: "Approval head" },
+  { value: "supporting_member", label: "Supporting member" },
+];
+
+function normalizeMarketingRole(role: string | undefined | null): MarketingTeamRole {
+  const known = MARKETING_TEAM_ROLE_OPTIONS.some((o) => o.value === role);
+  if (known) return role as MarketingTeamRole;
+  return "supporting_member";
+}
+
 const selectClassName =
   "h-9 min-w-[180px] cursor-pointer rounded-lg border border-input bg-background px-2.5 text-sm outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -42,15 +62,20 @@ export function ModuleUsersPage({ moduleKey }: Props) {
   const allowed = canManageModuleUsers(moduleKey, adminModuleKeys, user?.userType);
   const title = moduleTitle(moduleKey);
   const isService = moduleKey === "service";
+  const isMarketing = moduleKey === "marketing";
 
   const [members, setMembers] = useState<ModuleUserRecord[]>([]);
   const [options, setOptions] = useState<ModuleUserOption[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [selectedJobRole, setSelectedJobRole] = useState<ServiceJobRole>("service_engineer");
+  const [selectedMarketingRole, setSelectedMarketingRole] =
+    useState<MarketingTeamRole>("marketing_associate");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [seeding, setSeeding] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [seedNotice, setSeedNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,6 +89,7 @@ export function ModuleUsersPage({ moduleKey }: Props) {
       setOptions(assignable);
       setSelectedId("");
       setSelectedJobRole("service_engineer");
+      setSelectedMarketingRole("marketing_associate");
     } catch (err) {
       setMembers([]);
       setOptions([]);
@@ -91,6 +117,7 @@ export function ModuleUsersPage({ moduleKey }: Props) {
         moduleKey,
         selectedId,
         isService ? selectedJobRole : undefined,
+        isMarketing ? selectedMarketingRole : undefined,
       );
       await load();
     } catch (err) {
@@ -116,6 +143,22 @@ export function ModuleUsersPage({ moduleKey }: Props) {
     }
   }
 
+  async function changeMarketingRole(userId: string, nextRole: MarketingTeamRole) {
+    setUpdatingUserId(userId);
+    setError(null);
+    try {
+      const updated = await updateModuleMemberRole(moduleKey, userId, nextRole);
+      setMembers((prev) =>
+        prev.map((row) => (row.user_id === userId ? { ...row, ...updated } : row)),
+      );
+    } catch (err) {
+      setError(formatApiError(err, "Could not update role"));
+      await load();
+    } finally {
+      setUpdatingUserId(null);
+    }
+  }
+
   async function removeUser(userId: string) {
     setSaving(true);
     setError(null);
@@ -126,6 +169,27 @@ export function ModuleUsersPage({ moduleKey }: Props) {
       setError(formatApiError(err, "Could not remove user"));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function seedDemoUsers() {
+    setSeeding(true);
+    setError(null);
+    setSeedNotice(null);
+    try {
+      const result: ModuleDemoSeedResult = await seedModuleDemoUsers(moduleKey);
+      await load();
+      const sample = result.accounts
+        .slice(0, 3)
+        .map((a) => a.email)
+        .join(", ");
+      setSeedNotice(
+        `Seeded ${result.created} new / refreshed ${result.updated} demo users. Password: ${result.password}. Examples: ${sample}`,
+      );
+    } catch (err) {
+      setError(formatApiError(err, "Could not seed demo users"));
+    } finally {
+      setSeeding(false);
     }
   }
 
@@ -145,13 +209,24 @@ export function ModuleUsersPage({ moduleKey }: Props) {
         description={
           isService
             ? "As Service Head, assign HRMS employees and set their role to Service Engineer or Field Engineer. Module admins (Service Head) are set only by the ERP admin under Organization → Users."
-            : `Assign HRMS onboarded employees as users of ${title}. Assigned users see this module in their ERP menu. Module admins are set only by the ERP admin under Organization → Users.`
+            : isMarketing
+              ? "Assign marketing team members and set their role (head, associate, video editor, designer, approval head). Module admins are set only by the ERP admin under Organization → Users."
+              : `Assign HRMS onboarded employees as users of ${title}. Assigned users see this module in their ERP menu. Module admins are set only by the ERP admin under Organization → Users.`
         }
       />
 
       {error ? (
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
+        </div>
+      ) : null}
+
+      {seedNotice ? (
+        <div
+          role="status"
+          className="rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-foreground"
+        >
+          {seedNotice}
         </div>
       ) : null}
 
@@ -171,6 +246,20 @@ export function ModuleUsersPage({ moduleKey }: Props) {
             </div>
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {isMarketing ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 cursor-pointer transition-colors duration-200"
+                disabled={loading || saving || seeding}
+                onClick={() => void seedDemoUsers()}
+                title="Create HRMS demo employees for each marketing role and assign them here"
+              >
+                <Sparkles className="size-3.5" />
+                {seeding ? "Seeding…" : "Seed demo users"}
+              </Button>
+            ) : null}
             <label className="sr-only" htmlFor={`${moduleKey}-assign-user`}>
               Select employee
             </label>
@@ -182,12 +271,17 @@ export function ModuleUsersPage({ moduleKey }: Props) {
               className={`${selectClassName} min-w-[220px]`}
             >
               <option value="">
-                {options.length === 0 ? "No unassigned HRMS employees" : "Select employee…"}
+                {options.length === 0 ? "No onboarded HRMS employees" : "Select employee…"}
               </option>
               {options.map((row) => (
-                <option key={row.user_id} value={row.user_id}>
+                <option
+                  key={row.user_id}
+                  value={row.user_id}
+                  disabled={Boolean(row.already_assigned)}
+                >
                   {row.display_name}
                   {row.employee_code ? ` · ${row.employee_code}` : ""} ({row.email})
+                  {row.already_assigned ? " — assigned" : ""}
                 </option>
               ))}
             </select>
@@ -204,6 +298,28 @@ export function ModuleUsersPage({ moduleKey }: Props) {
                   className={selectClassName}
                 >
                   {SERVICE_JOB_ROLE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : null}
+            {isMarketing ? (
+              <>
+                <label className="sr-only" htmlFor={`${moduleKey}-assign-mkt-role`}>
+                  Select marketing role
+                </label>
+                <select
+                  id={`${moduleKey}-assign-mkt-role`}
+                  value={selectedMarketingRole}
+                  onChange={(e) =>
+                    setSelectedMarketingRole(e.target.value as MarketingTeamRole)
+                  }
+                  disabled={loading || saving}
+                  className={selectClassName}
+                >
+                  {MARKETING_TEAM_ROLE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
                     </option>
@@ -289,6 +405,25 @@ export function ModuleUsersPage({ moduleKey }: Props) {
                             className="h-8 min-w-[160px] cursor-pointer rounded-md border border-input bg-background px-2 text-sm outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {SERVICE_JOB_ROLE_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : isMarketing ? (
+                          <select
+                            aria-label={`Marketing role for ${row.display_name}`}
+                            value={normalizeMarketingRole(row.role)}
+                            disabled={saving || updatingUserId === row.user_id}
+                            onChange={(e) =>
+                              void changeMarketingRole(
+                                row.user_id,
+                                e.target.value as MarketingTeamRole,
+                              )
+                            }
+                            className="h-8 min-w-[180px] cursor-pointer rounded-md border border-input bg-background px-2 text-sm outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {MARKETING_TEAM_ROLE_OPTIONS.map((opt) => (
                               <option key={opt.value} value={opt.value}>
                                 {opt.label}
                               </option>

@@ -109,6 +109,7 @@ class CampaignDeliverableCreate(BaseModel):
     notes: str | None = None
     content_provider_user_id: UUID | None = None
     approval_head_user_id: UUID | None = None
+    approval_head_user_ids: list[UUID] | None = None
     editor_user_id: UUID | None = None
 
 
@@ -125,8 +126,24 @@ class CampaignDeliverableResponse(BaseModel):
     content_provider_name: str | None = None
     approval_head_user_id: UUID | None = None
     approval_head_name: str | None = None
+    approval_head_user_ids: list[UUID] = []
+    approval_head_names: list[str] = []
     editor_user_id: UUID | None = None
     editor_name: str | None = None
+    self_checked: bool = False
+    review_annotations: list[dict] = []
+
+
+class ChannelProgramCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=200)
+    channel: str = Field(..., min_length=2, max_length=40)
+    deliverable_type: str = "social_media_post"
+    start_date: date
+    days: int = Field(default=7, ge=1, le=90)
+    content_provider_user_id: UUID | None = None
+    editor_user_id: UUID | None = None
+    approval_head_user_ids: list[UUID] | None = None
+    company_id: UUID | None = None
 
 
 class MarketingTeamMemberResponse(BaseModel):
@@ -561,6 +578,16 @@ class TaskContentSubmitBody(BaseModel):
     content_base64: str | None = None
     content_type: str | None = Field(default=None, max_length=120)
     file_name: str | None = Field(default=None, max_length=255)
+    self_checked: bool = False
+    approval_head_user_ids: list[UUID] | None = None
+
+
+class TaskAnnotationCreate(BaseModel):
+    kind: str  # image_mark | video_timestamp | text
+    body: str = Field(..., min_length=1, max_length=2000)
+    x: float | None = Field(default=None, ge=0, le=100)
+    y: float | None = Field(default=None, ge=0, le=100)
+    at_seconds: float | None = Field(default=None, ge=0)
 
 
 class ContentRequestReviewBody(BaseModel):
@@ -585,6 +612,9 @@ class ContentRequestReviewItem(BaseModel):
     submission_notes: str | None = None
     deliverable_task_id: UUID | None = None
     improvement_comment: str | None = None
+    self_checked: bool = False
+    approval_head_user_ids: list[str] = []
+    review_annotations: list[dict] = []
 
 
 class DelegateBody(BaseModel):

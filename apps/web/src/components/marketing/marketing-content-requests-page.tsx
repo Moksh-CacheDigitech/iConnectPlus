@@ -13,25 +13,41 @@ import { getAccessToken } from "@/lib/auth";
 import { canViewAllModuleScreens } from "@/lib/module-access";
 import { formatApiError } from "@/services/api-client";
 import {
+  addDeliverableAnnotation,
   listContentReviewQueue,
   reviewContentRequest,
   type MarketingContentReviewItem,
 } from "@/services/marketing-service";
 import { getApiUrl } from "@/utils/env";
 
-function canReview(
+function canReviewRole(
   moduleRoles: Record<string, string>,
   adminModuleKeys: string[],
   userType?: string,
 ): boolean {
   if (canViewAllModuleScreens("marketing", adminModuleKeys, userType, moduleRoles)) return true;
   const role = moduleRoles.marketing;
-  return role === "approval_head" || role === "marketing_head";
+  return (
+    role === "approval_head" ||
+    role === "marketing_head" ||
+    role === "marketing_associate" ||
+    role === "content_creator"
+  );
+}
+
+function canActOnRow(
+  row: MarketingContentReviewItem,
+  userId: string | undefined,
+  roleOk: boolean,
+): boolean {
+  if (roleOk) return true;
+  if (!userId) return false;
+  return Boolean(row.approval_head_user_ids?.includes(userId));
 }
 
 export function MarketingContentRequestsPage() {
   const { user, moduleRoles, adminModuleKeys, loading: authLoading } = useAuthUser();
-  const reviewer = canReview(moduleRoles, adminModuleKeys, user?.userType);
+  const reviewerRole = canReviewRole(moduleRoles, adminModuleKeys, user?.userType);
 
   const [rows, setRows] = useState<MarketingContentReviewItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,6 +55,10 @@ export function MarketingContentRequestsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [commentById, setCommentById] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<string | null>(null);
+  const [annKindById, setAnnKindById] = useState<Record<string, string>>({});
+  const [annBodyById, setAnnBodyById] = useState<Record<string, string>>({});
+  const [annSecById, setAnnSecById] = useState<Record<string, string>>({});
+  const [annXYById, setAnnXYById] = useState<Record<string, { x: string; y: string }>>({});
 
   async function openSubmittedContent(row: MarketingContentReviewItem) {
     const url = row.content_url?.trim() || "";
@@ -138,9 +158,9 @@ export function MarketingContentRequestsPage() {
         </p>
       ) : null}
 
-      {!reviewer && !authLoading ? (
+      {!reviewerRole && !authLoading ? (
         <p className="text-[12px] text-muted-foreground">
-          You can view submissions assigned to you. Approve / reject / improve requires Approval head access.
+          You can view submissions where you are maker or approval head. Approve / annotate when assigned.
         </p>
       ) : null}
 
@@ -173,6 +193,8 @@ export function MarketingContentRequestsPage() {
                 rows.map((row) => {
                   const pending = row.content_status === "in_review";
                   const busy = busyId === row.id;
+                  const canAct = canActOnRow(row, user?.id, reviewerRole);
+                  const anns = row.review_annotations || [];
                   return (
                     <Fragment key={row.id}>
                       <tr className="border-b border-border/50 transition-colors duration-150 hover:bg-accent/30">
@@ -185,6 +207,19 @@ export function MarketingContentRequestsPage() {
                             <p className="mt-1 text-[12px] text-amber-700 dark:text-amber-400">
                               Last comment: {row.improvement_comment}
                             </p>
+                          ) : null}
+                          {anns.length > 0 ? (
+                            <ul className="mt-2 space-y-1 text-[11px] text-muted-foreground">
+                              {anns.slice(-5).map((a) => (
+                                <li key={a.id}>
+                                  <span className="font-medium text-foreground">{a.kind}</span>
+                                  {a.at_seconds != null ? ` @ ${a.at_seconds}s` : ""}
+                                  {a.x != null && a.y != null ? ` (${a.x}%, ${a.y}%)` : ""}
+                                  {": "}
+                                  {a.body}
+                                </li>
+                              ))}
+                            </ul>
                           ) : null}
                         </td>
                         <td className="px-4 py-2.5 text-muted-foreground">
@@ -218,12 +253,17 @@ export function MarketingContentRequestsPage() {
                           <Badge variant="secondary" className="text-[10px] uppercase">
                             {row.content_status || row.status}
                           </Badge>
+                          {row.self_checked ? (
+                            <Badge variant="outline" className="ml-1 text-[10px]">
+                              self-checked
+                            </Badge>
+                          ) : null}
                         </td>
                         <td className="px-4 py-2.5 tabular-nums text-muted-foreground">
                           {row.due_at ? String(row.due_at).slice(0, 10) : "-"}
                         </td>
                         <td className="px-4 py-2.5">
-                          {pending && reviewer ? (
+                          {pending && canAct ? (
                             <div className="space-y-2">
                               <Input
                                 value={commentById[row.id] || ""}
@@ -235,6 +275,128 @@ export function MarketingContentRequestsPage() {
                                 disabled={busy}
                                 aria-label="Review comment"
                               />
+                              {row.deliverable_task_id ? (
+                                <div className="space-y-1 rounded-md border border-border/60 bg-muted/20 p-2">
+                                  <p className="text-[11px] font-medium text-foreground">
+                                    Annotation (image mark / video timestamp)
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    <select
+                                      value={annKindById[row.id] || "text"}
+                                      onChange={(e) =>
+                                        setAnnKindById((p) => ({ ...p, [row.id]: e.target.value }))
+                                      }
+                                      className="h-8 cursor-pointer rounded-md border border-input bg-background px-2 text-[11px]"
+                                    >
+                                      <option value="text">Text note</option>
+                                      <option value="image_mark">Image mark (x%, y%)</option>
+                                      <option value="video_timestamp">Video timestamp</option>
+                                    </select>
+                                    {(annKindById[row.id] || "text") === "video_timestamp" ? (
+                                      <Input
+                                        value={annSecById[row.id] || ""}
+                                        onChange={(e) =>
+                                          setAnnSecById((p) => ({ ...p, [row.id]: e.target.value }))
+                                        }
+                                        placeholder="Seconds"
+                                        className="h-8 w-24"
+                                      />
+                                    ) : null}
+                                    {(annKindById[row.id] || "text") === "image_mark" ? (
+                                      <>
+                                        <Input
+                                          value={annXYById[row.id]?.x || ""}
+                                          onChange={(e) =>
+                                            setAnnXYById((p) => ({
+                                              ...p,
+                                              [row.id]: {
+                                                x: e.target.value,
+                                                y: p[row.id]?.y || "",
+                                              },
+                                            }))
+                                          }
+                                          placeholder="X %"
+                                          className="h-8 w-20"
+                                        />
+                                        <Input
+                                          value={annXYById[row.id]?.y || ""}
+                                          onChange={(e) =>
+                                            setAnnXYById((p) => ({
+                                              ...p,
+                                              [row.id]: {
+                                                x: p[row.id]?.x || "",
+                                                y: e.target.value,
+                                              },
+                                            }))
+                                          }
+                                          placeholder="Y %"
+                                          className="h-8 w-20"
+                                        />
+                                      </>
+                                    ) : null}
+                                  </div>
+                                  <Input
+                                    value={annBodyById[row.id] || ""}
+                                    onChange={(e) =>
+                                      setAnnBodyById((p) => ({ ...p, [row.id]: e.target.value }))
+                                    }
+                                    placeholder="What should change here…"
+                                    className="h-8"
+                                  />
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 cursor-pointer transition-colors duration-200"
+                                    disabled={busy}
+                                    onClick={() => {
+                                      void (async () => {
+                                        const taskId = row.deliverable_task_id;
+                                        if (!taskId) return;
+                                        const kind = (annKindById[row.id] || "text") as
+                                          | "text"
+                                          | "image_mark"
+                                          | "video_timestamp";
+                                        const body = (annBodyById[row.id] || "").trim();
+                                        if (!body) {
+                                          setActionError("Annotation comment is required.");
+                                          return;
+                                        }
+                                        setBusyId(row.id);
+                                        setActionError(null);
+                                        try {
+                                          await addDeliverableAnnotation(taskId, {
+                                            kind,
+                                            body,
+                                            at_seconds:
+                                              kind === "video_timestamp"
+                                                ? Number(annSecById[row.id] || 0)
+                                                : undefined,
+                                            x:
+                                              kind === "image_mark"
+                                                ? Number(annXYById[row.id]?.x || 0)
+                                                : undefined,
+                                            y:
+                                              kind === "image_mark"
+                                                ? Number(annXYById[row.id]?.y || 0)
+                                                : undefined,
+                                          });
+                                          setAnnBodyById((p) => ({ ...p, [row.id]: "" }));
+                                          await load();
+                                        } catch (err) {
+                                          setActionError(
+                                            formatApiError(err, "Could not save annotation"),
+                                          );
+                                        } finally {
+                                          setBusyId(null);
+                                        }
+                                      })();
+                                    }}
+                                  >
+                                    Save annotation
+                                  </Button>
+                                </div>
+                              ) : null}
                               <div className="flex flex-wrap gap-2">
                                 <Button
                                   type="button"

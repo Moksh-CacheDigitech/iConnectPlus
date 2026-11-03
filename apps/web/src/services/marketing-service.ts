@@ -1,4 +1,4 @@
-import { apiClient, resourceService } from "@/services/api-client";
+import { apiClient, apiUpload, resourceService } from "@/services/api-client";
 
 export type MarketingOverview = {
   campaigns_total: number;
@@ -41,11 +41,99 @@ export type MarketingGeneratedContent = {
   campaign_id?: string | null;
   scores?: Record<string, number | string | string[]> | null;
   pipeline_result?: {
+    kind?: string;
     variant?: string;
+    parent_content_id?: string;
     label?: string;
     lines_to_change?: string[];
+    prompt?: string;
+    size?: string;
+    platform?: string | null;
+    image_relpath?: string;
+    creative?: {
+      category_id?: string;
+      category_label?: string;
+      format_id?: string;
+      format_label?: string;
+      width_px?: number;
+      height_px?: number;
+      inches?: string;
+      cms?: string;
+    } | null;
+    cost?: {
+      usd?: number;
+      total_tokens?: number;
+      source?: string;
+      text_input_tokens?: number;
+      image_output_tokens?: number;
+    } | null;
+    canva?: {
+      mode?: string;
+      canva_asset_id?: string;
+      canva_design_id?: string;
+      canva_edit_url?: string;
+      canva_view_url?: string;
+      fallback_reason?: string;
+    } | null;
   } | null;
   content_request_id: string;
+  ai_model?: string | null;
+};
+
+export type ImagePostProviders = {
+  openai_configured: boolean;
+  canva_configured: boolean;
+  canva_connected: boolean;
+  canva_scopes: string;
+  sizes: string[];
+  qualities?: string[];
+  default_quality?: string;
+};
+
+export type ImageSpendBucket = {
+  usd: number;
+  tokens: number;
+  image_count: number;
+};
+
+export type ImageSpendFx = {
+  usd_inr: number;
+  as_of?: string | null;
+  source?: string;
+  provider?: string;
+  provider_url?: string | null;
+};
+
+export type ImageSpendSummary = {
+  currency: string;
+  today: ImageSpendBucket;
+  last_7_days: ImageSpendBucket;
+  last_image: {
+    content_id?: string | null;
+    created_at?: string | null;
+    usd: number;
+    tokens: number;
+    text_input_tokens?: number;
+    image_output_tokens?: number;
+    source?: string | null;
+    model?: string | null;
+    size?: string | null;
+    quality?: string | null;
+  };
+  rates: {
+    text_input_per_m: number;
+    image_input_per_m: number;
+    image_output_per_m: number;
+  };
+  fx?: ImageSpendFx | null;
+};
+
+export type EditInCanvaResult = {
+  content: MarketingGeneratedContent;
+  canva_edit_url: string;
+  mode?: string | null;
+  canva_design_id?: string | null;
+  fallback_reason?: string | null;
 };
 
 export async function loadMarketingOverview(): Promise<MarketingOverview> {
@@ -96,8 +184,21 @@ export type MarketingCampaignDeliverable = {
   content_provider_name?: string | null;
   approval_head_user_id?: string | null;
   approval_head_name?: string | null;
+  approval_head_user_ids?: string[];
+  approval_head_names?: string[];
   editor_user_id?: string | null;
   editor_name?: string | null;
+  self_checked?: boolean;
+  review_annotations?: Array<{
+    id: string;
+    kind: string;
+    body: string;
+    x?: number | null;
+    y?: number | null;
+    at_seconds?: number | null;
+    created_by?: string | null;
+    created_at?: string;
+  }>;
 };
 
 export type MarketingTeamMember = {
@@ -130,6 +231,7 @@ export async function createCampaignDeliverable(
     notes?: string;
     content_provider_user_id?: string;
     approval_head_user_id?: string;
+    approval_head_user_ids?: string[];
     editor_user_id?: string;
   },
 ): Promise<MarketingCampaignDeliverable> {
@@ -138,6 +240,33 @@ export async function createCampaignDeliverable(
     body,
   );
   if (!res.data) throw new Error("Deliverable create failed");
+  return res.data;
+}
+
+export async function createChannelProgram(body: {
+  name: string;
+  channel: string;
+  deliverable_type?: string;
+  start_date: string;
+  days?: number;
+  content_provider_user_id?: string;
+  editor_user_id?: string;
+  approval_head_user_ids?: string[];
+}): Promise<{
+  campaign_id: string;
+  campaign_name: string;
+  channel: string;
+  days: number;
+  deliverables: MarketingCampaignDeliverable[];
+}> {
+  const res = await apiClient<{
+    campaign_id: string;
+    campaign_name: string;
+    channel: string;
+    days: number;
+    deliverables: MarketingCampaignDeliverable[];
+  }>("/marketing/campaigns/channel-programs", { method: "POST", body });
+  if (!res.data) throw new Error("Channel program create failed");
   return res.data;
 }
 
@@ -166,6 +295,375 @@ export async function createContentRequest(body: {
 export async function listGeneratedContent(): Promise<MarketingGeneratedContent[]> {
   const res = await resourceService.list<MarketingGeneratedContent>("/marketing/content");
   return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function loadImagePostProviders(): Promise<ImagePostProviders> {
+  const res = await apiClient<ImagePostProviders>("/marketing/image-posts/providers", {
+    method: "GET",
+  });
+  return (
+    res.data ?? {
+      openai_configured: false,
+      canva_configured: false,
+      canva_connected: false,
+      canva_scopes: "",
+      sizes: ["1024x1024", "1024x1536", "1536x1024"],
+      qualities: ["low", "medium", "high", "xhigh", "max", "auto"],
+      default_quality: "low",
+    }
+  );
+}
+
+export async function loadImagePostUsage(options?: {
+  refreshFx?: boolean;
+}): Promise<ImageSpendSummary> {
+  const qs = options?.refreshFx ? "?refresh_fx=true" : "";
+  const res = await apiClient<ImageSpendSummary>(`/marketing/image-posts/usage${qs}`, {
+    method: "GET",
+  });
+  return (
+    res.data ?? {
+      currency: "USD",
+      today: { usd: 0, tokens: 0, image_count: 0 },
+      last_7_days: { usd: 0, tokens: 0, image_count: 0 },
+      last_image: { usd: 0, tokens: 0 },
+      rates: {
+        text_input_per_m: 5,
+        image_input_per_m: 8,
+        image_output_per_m: 30,
+      },
+    }
+  );
+}
+
+export async function listImagePosts(): Promise<MarketingGeneratedContent[]> {
+  const res = await apiClient<MarketingGeneratedContent[]>("/marketing/image-posts", {
+    method: "GET",
+    query: { page: 1, page_size: 100 },
+  });
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function generateImagePost(body: {
+  prompt: string;
+  size?: string;
+  quality?: string;
+  platform?: string;
+  campaign_id?: string;
+  creative?: {
+    category_id?: string;
+    category_label?: string;
+    format_id?: string;
+    format_label?: string;
+    width_px?: number;
+    height_px?: number;
+    inches?: string;
+    cms?: string;
+  };
+}): Promise<MarketingGeneratedContent> {
+  const res = await apiClient<MarketingGeneratedContent>("/marketing/image-posts", {
+    method: "POST",
+    body,
+  });
+  if (!res.data) throw new Error("Image post generation failed");
+  return res.data;
+}
+
+export async function getCanvaAuthorizeUrl(returnTo = "/marketing/content"): Promise<{
+  authorize_url: string;
+  state: string;
+}> {
+  const res = await apiClient<{ authorize_url: string; state: string }>(
+    "/marketing/image-posts/canva/authorize",
+    { method: "GET", query: { return_to: returnTo } },
+  );
+  if (!res.data?.authorize_url) throw new Error("Canva authorize URL missing");
+  return res.data;
+}
+
+export async function exchangeCanvaCode(body: {
+  code: string;
+  state: string;
+}): Promise<{ connected: boolean; return_to: string }> {
+  const res = await apiClient<{ connected: boolean; return_to: string; user_id: string }>(
+    "/marketing/image-posts/canva/exchange",
+    { method: "POST", body },
+  );
+  if (!res.data) throw new Error("Canva connect failed");
+  return res.data;
+}
+
+export async function editImagePostInCanva(contentId: string): Promise<EditInCanvaResult> {
+  const res = await apiClient<EditInCanvaResult>(
+    `/marketing/image-posts/${contentId}/edit-in-canva`,
+    { method: "POST" },
+  );
+  if (!res.data?.canva_edit_url) throw new Error("Edit in Canva failed");
+  return res.data;
+}
+
+/** Same-origin path for authenticated image preview (cookies via Next rewrite). */
+export function imagePostFilePath(contentId: string): string {
+  return `/api/v1/marketing/image-posts/${contentId}/file`;
+}
+
+/** ChatGPT-style edit: new version from an existing image; original is kept. */
+export async function repurposeImagePost(
+  contentId: string,
+  body: { prompt: string; size?: string; quality?: string },
+): Promise<MarketingGeneratedContent> {
+  const res = await apiClient<MarketingGeneratedContent>(
+    `/marketing/image-posts/${contentId}/repurpose`,
+    { method: "POST", body },
+  );
+  if (!res.data) throw new Error("Repurpose failed");
+  return res.data;
+}
+
+export type MarketingChatProviders = {
+  openai_configured: boolean;
+  image_generation_configured?: boolean;
+  default_model: string;
+  max_attachments?: number;
+  allowed_image_types?: string[];
+  allowed_document_types?: string[];
+};
+
+export type MarketingChatSession = {
+  id: string;
+  title: string;
+  status: string;
+  message_count: number;
+  last_message_at?: string | null;
+  last_model?: string | null;
+  settings_json?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type MarketingChatAttachment = {
+  id: string;
+  session_id: string;
+  message_id?: string | null;
+  kind: "image" | "document" | "generated_image" | string;
+  status: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  created_at?: string | null;
+};
+
+export type MarketingChatMessage = {
+  id: string;
+  session_id: string;
+  role: "user" | "assistant" | "system" | string;
+  content: string;
+  sequence_no: number;
+  model?: string | null;
+  usage_json?: Record<string, unknown> | null;
+  meta_json?: Record<string, unknown> | null;
+  attachments?: MarketingChatAttachment[];
+  created_at?: string | null;
+};
+
+export type MarketingChatSendResult = {
+  session: MarketingChatSession;
+  user_message: MarketingChatMessage;
+  assistant_message: MarketingChatMessage;
+};
+
+export type MarketingChatSettingsPayload = {
+  provider?: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  systemPrompt?: string;
+  ragEnabled?: boolean;
+  ragSource?: string;
+  ragTopK?: number;
+  ragMinScore?: number;
+  ragIndexHint?: string;
+  brandKitEnabled?: boolean;
+  brandKitIncludeVoice?: boolean;
+  brandKitIncludeColors?: boolean;
+  brandKitIncludeLogoRules?: boolean;
+  brandKitVoiceId?: string;
+};
+
+export type ChatSpendBucket = {
+  usd: number;
+  tokens: number;
+  message_count: number;
+};
+
+export type ChatSpendFx = {
+  usd_inr: number;
+  as_of?: string | null;
+  source?: string;
+  provider?: string;
+  provider_url?: string | null;
+};
+
+export type ChatSpendSummary = {
+  currency: string;
+  today: ChatSpendBucket;
+  last_7_days: ChatSpendBucket;
+  last_reply: {
+    message_id?: string | null;
+    session_id?: string | null;
+    created_at?: string | null;
+    usd: number;
+    tokens: number;
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    source?: string | null;
+    model?: string | null;
+    kind?: string | null;
+  };
+  rates: {
+    input_per_m: number;
+    output_per_m: number;
+  };
+  fx?: ChatSpendFx | null;
+};
+
+export async function loadMarketingChatProviders(): Promise<MarketingChatProviders> {
+  const res = await apiClient<MarketingChatProviders>("/marketing/chat/providers", {
+    method: "GET",
+  });
+  return (
+    res.data ?? {
+      openai_configured: false,
+      default_model: "gpt-4o-mini",
+    }
+  );
+}
+
+export async function loadMarketingChatUsage(options?: {
+  refreshFx?: boolean;
+}): Promise<ChatSpendSummary> {
+  const qs = options?.refreshFx ? "?refresh_fx=true" : "";
+  const res = await apiClient<ChatSpendSummary>(`/marketing/chat/usage${qs}`, {
+    method: "GET",
+  });
+  return (
+    res.data ?? {
+      currency: "USD",
+      today: { usd: 0, tokens: 0, message_count: 0 },
+      last_7_days: { usd: 0, tokens: 0, message_count: 0 },
+      last_reply: { usd: 0, tokens: 0 },
+      rates: { input_per_m: 0.15, output_per_m: 0.6 },
+    }
+  );
+}
+
+export async function listMarketingChatSessions(): Promise<MarketingChatSession[]> {
+  const res = await apiClient<MarketingChatSession[]>("/marketing/chat/sessions", {
+    method: "GET",
+  });
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function createMarketingChatSession(body?: {
+  title?: string;
+  settings?: MarketingChatSettingsPayload;
+}): Promise<MarketingChatSession> {
+  const res = await apiClient<MarketingChatSession>("/marketing/chat/sessions", {
+    method: "POST",
+    body: body ?? {},
+  });
+  if (!res.data) throw new Error("Failed to create chat session");
+  return res.data;
+}
+
+export async function renameMarketingChatSession(
+  sessionId: string,
+  title: string,
+): Promise<MarketingChatSession> {
+  const res = await apiClient<MarketingChatSession>(`/marketing/chat/sessions/${sessionId}`, {
+    method: "PATCH",
+    body: { title },
+  });
+  if (!res.data) throw new Error("Failed to rename chat session");
+  return res.data;
+}
+
+export async function deleteMarketingChatSession(sessionId: string): Promise<void> {
+  await apiClient<null>(`/marketing/chat/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listMarketingChatMessages(
+  sessionId: string,
+): Promise<MarketingChatMessage[]> {
+  const res = await apiClient<MarketingChatMessage[]>(
+    `/marketing/chat/sessions/${sessionId}/messages`,
+    { method: "GET" },
+  );
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function sendMarketingChatMessage(
+  sessionId: string,
+  body: {
+    content: string;
+    settings?: MarketingChatSettingsPayload;
+    attachment_ids?: string[];
+    generate_image?: boolean;
+    image_size?: string;
+    image_quality?: string;
+  },
+): Promise<MarketingChatSendResult> {
+  const res = await apiClient<MarketingChatSendResult>(
+    `/marketing/chat/sessions/${sessionId}/messages`,
+    { method: "POST", body },
+  );
+  if (!res.data?.assistant_message) throw new Error("Chat reply failed");
+  return res.data;
+}
+
+export async function uploadMarketingChatAttachment(
+  sessionId: string,
+  file: File,
+): Promise<MarketingChatAttachment> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await apiUpload<MarketingChatAttachment>(
+    `/marketing/chat/sessions/${sessionId}/attachments`,
+    form,
+  );
+  if (!res.data?.id) throw new Error("Attachment upload failed");
+  return res.data;
+}
+
+/** Same-origin path for authenticated chat file preview (cookies via Next rewrite). */
+export function marketingChatAttachmentFilePath(attachmentId: string): string {
+  return `/api/v1/marketing/chat/attachments/${attachmentId}/file`;
+}
+
+export type MarketingChatFromImagePostResult = {
+  session: MarketingChatSession;
+  attachment: MarketingChatAttachment;
+  suggested_prompt?: string | null;
+};
+
+/** Start a ChatGPT session with a Content Studio image already attached. */
+export async function openImagePostInMarketingChat(
+  contentId: string,
+  settings?: MarketingChatSettingsPayload,
+): Promise<MarketingChatFromImagePostResult> {
+  const res = await apiClient<MarketingChatFromImagePostResult>("/marketing/chat/from-image-post", {
+    method: "POST",
+    body: {
+      content_id: contentId,
+      ...(settings ? { settings } : {}),
+    },
+  });
+  if (!res.data?.session?.id || !res.data.attachment?.id) {
+    throw new Error("Could not open image in chat");
+  }
+  return res.data;
 }
 
 export async function createResearch(topic: string) {
@@ -224,6 +722,17 @@ export type MarketingTask = {
   } | null;
 };
 
+export type MarketingReviewAnnotation = {
+  id: string;
+  kind: string;
+  body: string;
+  x?: number | null;
+  y?: number | null;
+  at_seconds?: number | null;
+  created_by?: string | null;
+  created_at?: string;
+};
+
 export type MarketingContentReviewItem = {
   id: string;
   request_code: string;
@@ -241,6 +750,9 @@ export type MarketingContentReviewItem = {
   due_at?: string | null;
   submission_kind?: "link" | "file" | string | null;
   external_link?: string | null;
+  self_checked?: boolean;
+  approval_head_user_ids?: string[];
+  review_annotations?: MarketingReviewAnnotation[];
 };
 
 export type WorkloadOverview = {
@@ -259,13 +771,20 @@ export type WorkloadOverview = {
     utilization_pct: number;
     completed_tasks: number;
     actual_hours: number;
+    checklist_pct?: number;
+    duration_hours?: number;
   };
   people: Array<{
     user_id: string;
+    display_name?: string;
     workload_score: number;
     utilization_pct: number;
     reassignment: string;
     active_tasks: number;
+    completed_tasks?: number;
+    checklist_pct?: number;
+    duration_hours?: number;
+    delayed_tasks?: number;
   }>;
   overloaded: Array<{ user_id: string; workload_score: number }>;
   underutilized: Array<{ user_id: string; workload_score: number }>;
@@ -277,6 +796,15 @@ export type WorkloadOverview = {
     task_count: number;
     completed: number;
     priority?: string;
+  }>;
+  team_checklist?: Array<{
+    user_id: string;
+    display_name: string;
+    completed: number;
+    active: number;
+    checklist_pct: number;
+    duration_hours: number;
+    delayed: number;
   }>;
 };
 
@@ -331,6 +859,8 @@ export async function submitDeliverableContent(
     content_base64?: string;
     content_type?: string;
     file_name?: string;
+    self_checked?: boolean;
+    approval_head_user_ids?: string[];
   },
 ): Promise<MarketingTask> {
   const res = await apiClient<MarketingTask>(`/marketing/tasks/${taskId}/submit-content`, {
@@ -338,6 +868,36 @@ export async function submitDeliverableContent(
     body,
   });
   if (!res.data) throw new Error("Content submit failed");
+  return res.data;
+}
+
+export async function delegateMarketingTask(
+  taskId: string,
+  assigneeUserId: string,
+): Promise<MarketingTask> {
+  const res = await apiClient<MarketingTask>(`/marketing/tasks/${taskId}/delegate`, {
+    method: "POST",
+    body: { assignee_user_id: assigneeUserId },
+  });
+  if (!res.data) throw new Error("Delegate failed");
+  return res.data;
+}
+
+export async function addDeliverableAnnotation(
+  taskId: string,
+  body: {
+    kind: "image_mark" | "video_timestamp" | "text";
+    body: string;
+    x?: number;
+    y?: number;
+    at_seconds?: number;
+  },
+): Promise<MarketingTask> {
+  const res = await apiClient<MarketingTask>(`/marketing/tasks/${taskId}/annotations`, {
+    method: "POST",
+    body,
+  });
+  if (!res.data) throw new Error("Annotation failed");
   return res.data;
 }
 

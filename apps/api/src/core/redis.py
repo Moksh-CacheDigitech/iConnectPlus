@@ -150,6 +150,21 @@ class SessionStore:
                 "Sign-in temporarily unavailable (session store unreachable)"
             ) from exc
 
+    def get_oauth_exchange(self, exchange_code: str) -> dict[str, Any] | None:
+        """Read OAuth exchange result without deleting (idempotent callback support)."""
+        key = f"oauth:exchange:{exchange_code}"
+        try:
+            raw = cast(str | None, self._client.get(key))
+            if raw is None:
+                return None
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else None
+        except RedisError as exc:
+            logger.error("Redis unavailable for get_oauth_exchange: %s", exc)
+            raise RedisUnavailableException(
+                "Sign-in temporarily unavailable (session store unreachable)"
+            ) from exc
+
     def pop_oauth_exchange(self, exchange_code: str) -> dict[str, Any] | None:
         key = f"oauth:exchange:{exchange_code}"
         try:
@@ -160,6 +175,27 @@ class SessionStore:
             return json.loads(raw)
         except RedisError as exc:
             logger.error("Redis unavailable for pop_oauth_exchange: %s", exc)
+            raise RedisUnavailableException(
+                "Sign-in temporarily unavailable (session store unreachable)"
+            ) from exc
+
+    def pop_oauth_state_atomic(self, state: str) -> dict[str, Any] | None:
+        """Atomically get-and-delete OAuth state (GETDEL when available)."""
+        key = f"oauth:state:{state}"
+        try:
+            getdel = getattr(self._client, "getdel", None)
+            if callable(getdel):
+                raw = cast(str | None, getdel(key))
+            else:
+                raw = cast(str | None, self._client.get(key))
+                if raw is not None:
+                    self._client.delete(key)
+            if raw is None:
+                return None
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else None
+        except RedisError as exc:
+            logger.error("Redis unavailable for pop_oauth_state_atomic: %s", exc)
             raise RedisUnavailableException(
                 "Sign-in temporarily unavailable (session store unreachable)"
             ) from exc

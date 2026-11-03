@@ -26,7 +26,7 @@
 | `/marketing/campaigns` | Campaign list. Open a row for the campaign home |
 | `/marketing/campaigns/[id]` | Campaign home - brief, captions, approvals, calendar, tasks, assets |
 | `/marketing/inbox` | Reply queue for live published posts |
-| `/marketing/content` | Content studio - requests + generated drafts |
+| `/marketing/content` | Content studio - copy drafts + image post generator (OpenAI) with Edit in Canva |
 | `/marketing/research` | Research & trends |
 | `/marketing/brand-voices` | Brand kit - logo, colors, fonts, voice |
 | `/marketing/calendar` | Publishing calendar - **month grid** (not list table) |

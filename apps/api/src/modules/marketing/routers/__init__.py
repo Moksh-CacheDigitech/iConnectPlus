@@ -33,6 +33,7 @@ from modules.marketing.schemas import (
     CampaignDeliverableResponse,
     CampaignResponse,
     CampaignUpdate,
+    ChannelProgramCreate,
     CompetitorCreate,
     CompetitorResponse,
     CompetitorUpdate,
@@ -227,6 +228,7 @@ def create_campaign_deliverable(
         notes=body.notes,
         content_provider_user_id=body.content_provider_user_id,
         approval_head_user_id=body.approval_head_user_id,
+        approval_head_user_ids=body.approval_head_user_ids,
         editor_user_id=body.editor_user_id,
     )
     db.commit()
@@ -237,9 +239,42 @@ def create_campaign_deliverable(
     )
 
 
+@campaigns_router.post("/channel-programs", response_model=APIResponse[dict])
+def create_channel_program(
+    body: ChannelProgramCreate,
+    ctx: Annotated[TenantContext, Depends(require_permission("marketing.campaign:create"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Create recurring LinkedIn / WhatsApp / newcomer daily assignments."""
+    data = CampaignService(db).create_channel_program(
+        ctx,
+        name=body.name,
+        channel=body.channel,
+        deliverable_type=body.deliverable_type,
+        start_date=body.start_date,
+        days=body.days,
+        content_provider_user_id=body.content_provider_user_id,
+        editor_user_id=body.editor_user_id,
+        approval_head_user_ids=body.approval_head_user_ids,
+        company_id=body.company_id,
+    )
+    db.commit()
+    campaign = data["campaign"]
+    return APIResponse(
+        message="OK",
+        data={
+            "campaign_id": str(campaign.id),
+            "campaign_name": campaign.campaign_name,
+            "channel": data["channel"],
+            "days": data["days"],
+            "deliverables": data["deliverables"],
+        },
+    )
+
+
 @team_router.get("", response_model=APIResponse[list[MarketingTeamMemberResponse]])
 def list_marketing_team_members(
-    ctx: Annotated[TenantContext, Depends(require_permission("marketing.campaign:create"))],
+    ctx: Annotated[TenantContext, Depends(require_permission("marketing.task:read"))],
     db: Annotated[Session, Depends(get_db)],
 ):
     rows = CampaignService(db).list_team_members(ctx)

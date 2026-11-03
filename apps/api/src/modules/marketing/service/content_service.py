@@ -280,20 +280,44 @@ class ContentService:
                 continue
             content = contents.get(req.id)
             approval_head = inputs.get("approval_head_user_id")
+            head_ids = {
+                str(x)
+                for x in (inputs.get("approval_head_user_ids") or [])
+                if x
+            }
+            if approval_head:
+                head_ids.add(str(approval_head))
             provider = inputs.get("content_provider_user_id")
+            editor = inputs.get("editor_user_id")
+            uid = str(ctx.user_id) if ctx.user_id else None
             if is_admin or role == MARKETING_ROLE_HEAD:
                 pass
+            elif uid and uid in head_ids:
+                pass
             elif role == MARKETING_ROLE_APPROVAL_HEAD:
-                if approval_head and ctx.user_id and str(ctx.user_id) != str(approval_head):
-                    if req.assigned_to_user_id != ctx.user_id:
-                        continue
+                if head_ids and uid not in head_ids and req.assigned_to_user_id != ctx.user_id:
+                    continue
             else:
                 if not (
-                    (provider and ctx.user_id and str(ctx.user_id) == str(provider))
+                    (provider and uid and uid == str(provider))
+                    or (editor and uid and uid == str(editor))
                     or (req.assigned_to_user_id == ctx.user_id)
                 ):
                     continue
-            items.append(self._review_item_payload(req, content, inputs))
+            payload = self._review_item_payload(req, content, inputs)
+            task_raw = inputs.get("deliverable_task_id")
+            if task_raw:
+                try:
+                    from modules.marketing.service.ops_service import TaskService
+
+                    task = TaskService(self.db).get(ctx, UUID(str(task_raw)))
+                    tmeta = task.metadata_json if isinstance(task.metadata_json, dict) else {}
+                    anns = tmeta.get("review_annotations")
+                    if isinstance(anns, list):
+                        payload["review_annotations"] = anns
+                except Exception:
+                    pass
+            items.append(payload)
         items.sort(key=lambda row: (row.get("content_status") != "in_review", row.get("topic") or ""))
         return items
 
@@ -320,13 +344,17 @@ class ContentService:
         role = marketing_module_role(self.db, ctx)
         is_admin = is_marketing_module_admin(self.db, ctx)
         approval_head = inputs.get("approval_head_user_id")
+        head_ids = {str(x) for x in (inputs.get("approval_head_user_ids") or []) if x}
+        if approval_head:
+            head_ids.add(str(approval_head))
+        uid = str(ctx.user_id) if ctx.user_id else None
         allowed = is_admin or role in {MARKETING_ROLE_APPROVAL_HEAD, MARKETING_ROLE_HEAD}
-        if approval_head and ctx.user_id and str(ctx.user_id) == str(approval_head):
+        if uid and uid in head_ids:
             allowed = True
         if req.assigned_to_user_id and ctx.user_id == req.assigned_to_user_id:
             allowed = True
         if not allowed:
-            raise ValidationException("Only the assigned approval head can review this submission")
+            raise ValidationException("Only an assigned approval head can review this submission")
 
         comment_text = (comment or "").strip()
         if action_key in {"reject", "improve"} and not comment_text:
@@ -426,4 +454,11 @@ class ContentService:
             "submission_notes": inputs.get("submission_notes"),
             "deliverable_task_id": task_id,
             "improvement_comment": inputs.get("improvement_comment"),
+            "self_checked": bool(inputs.get("self_checked")),
+            "approval_head_user_ids": [
+                str(x) for x in (inputs.get("approval_head_user_ids") or []) if x
+            ],
+            "review_annotations": inputs.get("review_annotations")
+            if isinstance(inputs.get("review_annotations"), list)
+            else [],
         }

@@ -14,6 +14,8 @@ from modules.foundation.domain.erp_modules import (
     ERP_MODULE_KEY_SET,
     MODULE_ROLE_ADMIN,
     MODULE_ROLE_MEMBER,
+    default_module_member_role,
+    module_member_roles,
 )
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.models.security import SecUser
@@ -83,11 +85,11 @@ class ModuleAdminService:
         return out
 
     def list_assignable_users(self, ctx: TenantContext, module_key: str) -> list[dict]:
-        """HRMS onboarded employees (valid employee id) not yet on this module."""
+        """All HRMS onboarded employees (valid employee id), including those already on this module."""
         self.ensure_module_admin(ctx, module_key)
         assigned_ids = self._modules.list_user_ids_for_module(ctx.tenant_id, module_key)
         links = self._hrms.links_by_user(ctx.tenant_id)
-        valid_ids = {uid for uid, link in links.items() if link.valid} - assigned_ids
+        valid_ids = {uid for uid, link in links.items() if link.valid}
         if not valid_ids:
             return []
         stmt = (
@@ -106,6 +108,7 @@ class ModuleAdminService:
                 "display_name": user.display_name,
                 "email": user.email,
                 "employee_code": links[user.id].employee_code,
+                "already_assigned": user.id in assigned_ids,
             }
             for user in self._db.scalars(stmt).all()
             if user.user_type not in ADMIN_USER_TYPES
@@ -117,6 +120,7 @@ class ModuleAdminService:
         module_key: str,
         user_id: UUID,
         service_job_role: str | None = None,
+        role: str | None = None,
     ) -> dict:
         self.ensure_module_admin(ctx, module_key)
         if ctx.user_id is not None and user_id == ctx.user_id:
@@ -142,11 +146,14 @@ class ModuleAdminService:
                     "service_job_role must be service_engineer or field_engineer"
                 )
 
+        member_role = self._resolve_member_role(module_key, role)
+
         self._modules.add_member(
             tenant_id=ctx.tenant_id,
             user_id=user_id,
             module_key=module_key,
             assigned_by=ctx.user_id,
+            role=member_role,
         )
         if module_key == "service" and resolved_job is not None:
             try:
@@ -167,7 +174,7 @@ class ModuleAdminService:
             performed_by=ctx.user_id,
             new_value={
                 "module_key": module_key,
-                "role": MODULE_ROLE_MEMBER,
+                "role": member_role,
                 "service_job_role": resolved_job,
             },
         )
@@ -175,10 +182,69 @@ class ModuleAdminService:
             "user_id": target.id,
             "display_name": target.display_name,
             "email": target.email,
-            "role": MODULE_ROLE_MEMBER,
+            "role": member_role,
             "status": target.status,
             "service_job_role": resolved_job,
         }
+
+    def update_member_role(
+        self,
+        ctx: TenantContext,
+        module_key: str,
+        user_id: UUID,
+        role: str,
+    ) -> dict:
+        """Update functional team role (e.g. Marketing head / associate / video editor)."""
+        self.ensure_module_admin(ctx, module_key)
+        row = self._modules.get_assignment(ctx.tenant_id, user_id, module_key)
+        if row is None:
+            raise NotFoundException("User is not assigned to this module")
+        if row.role == MODULE_ROLE_ADMIN:
+            raise ForbiddenException("Cannot change role for module admins")
+        target = self._users.get_by_id(ctx.tenant_id, user_id)
+        if target is None:
+            raise NotFoundException("User not found")
+        member_role = self._resolve_member_role(module_key, role, require_explicit=True)
+        old_role = row.role
+        self._modules.update_role(row, member_role)
+        self._audit.log_entity_change(
+            tenant_id=ctx.tenant_id,
+            entity_name="sec_user_module",
+            entity_id=user_id,
+            operation="update",
+            performed_by=ctx.user_id,
+            old_value={"module_key": module_key, "role": old_role},
+            new_value={"module_key": module_key, "role": member_role},
+        )
+        return {
+            "user_id": target.id,
+            "display_name": target.display_name,
+            "email": target.email,
+            "role": member_role,
+            "status": target.status,
+            "service_job_role": None,
+        }
+
+    @staticmethod
+    def _resolve_member_role(
+        module_key: str,
+        role: str | None,
+        *,
+        require_explicit: bool = False,
+    ) -> str:
+        allowed = module_member_roles(module_key)
+        if role is None or not str(role).strip():
+            if require_explicit:
+                raise AppException("Role is required")
+            return default_module_member_role(module_key)
+        role_key = str(role).strip().lower()
+        if role_key == MODULE_ROLE_ADMIN:
+            raise AppException("Module admins are assigned only from Organization → Users")
+        if role_key not in allowed:
+            raise AppException(
+                f"Invalid role for {module_key}. Allowed: {', '.join(sorted(allowed))}"
+            )
+        return role_key
 
     def update_member_service_role(
         self,
