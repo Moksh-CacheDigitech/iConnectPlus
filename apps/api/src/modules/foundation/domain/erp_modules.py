@@ -41,6 +41,7 @@ MODULE_ROLES = frozenset({MODULE_ROLE_ADMIN, MODULE_ROLE_MEMBER})
 # Marketing team roles (stored on sec_user_module.role for module_key=marketing).
 # Work-structure permissions will layer on these later.
 MARKETING_ROLE_HEAD = "marketing_head"
+MARKETING_ROLE_ASSOCIATE = "marketing_associate"
 MARKETING_ROLE_APPROVAL_HEAD = "approval_head"
 MARKETING_ROLE_CONTENT_CREATOR = "content_creator"
 MARKETING_ROLE_VIDEO_EDITOR = "video_editor"
@@ -49,6 +50,7 @@ MARKETING_ROLE_SUPPORTING_MEMBER = "supporting_member"
 MARKETING_TEAM_ROLES = frozenset(
     {
         MARKETING_ROLE_HEAD,
+        MARKETING_ROLE_ASSOCIATE,
         MARKETING_ROLE_APPROVAL_HEAD,
         MARKETING_ROLE_CONTENT_CREATOR,
         MARKETING_ROLE_VIDEO_EDITOR,
@@ -59,8 +61,18 @@ MARKETING_TEAM_ROLES = frozenset(
     }
 )
 
+# Head + associate (+ legacy content_creator) can plan events/channel work.
+MARKETING_PLANNER_ROLES = frozenset(
+    {
+        MARKETING_ROLE_HEAD,
+        MARKETING_ROLE_ASSOCIATE,
+        MARKETING_ROLE_CONTENT_CREATOR,
+    }
+)
+
 MARKETING_FUNCTIONAL_ROLES: tuple[tuple[str, str], ...] = (
     (MARKETING_ROLE_HEAD, "Marketing head"),
+    (MARKETING_ROLE_ASSOCIATE, "Marketing associate"),
     (MARKETING_ROLE_VIDEO_EDITOR, "Video editor"),
     (MARKETING_ROLE_GRAPHIC_DESIGNER, "Graphic designer"),
     (MARKETING_ROLE_CONTENT_CREATOR, "Content creator"),

@@ -28,6 +28,7 @@ from modules.marketing.schemas import (
     MeetingResponse,
     OpsEventResponse,
     SearchQuery,
+    TaskAnnotationCreate,
     TaskContentSubmitBody,
     TaskCreate,
     TaskResponse,
@@ -121,6 +122,29 @@ def submit_task_content(
         content_base64=body.content_base64,
         content_type=body.content_type,
         file_name=body.file_name,
+        self_checked=body.self_checked,
+        approval_head_user_ids=body.approval_head_user_ids,
+    )
+    db.commit()
+    db.refresh(row)
+    return APIResponse(message="OK", data=row)
+
+
+@tasks_router.post("/{task_id}/annotations", response_model=APIResponse[TaskResponse])
+def add_task_annotation(
+    task_id: UUID,
+    body: TaskAnnotationCreate,
+    ctx: Annotated[TenantContext, Depends(require_permission("marketing.approval:act"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    row = TaskService(db).add_annotation(
+        ctx,
+        task_id,
+        kind=body.kind,
+        body=body.body,
+        x=body.x,
+        y=body.y,
+        at_seconds=body.at_seconds,
     )
     db.commit()
     db.refresh(row)

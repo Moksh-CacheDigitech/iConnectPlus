@@ -103,11 +103,12 @@ class CampaignService:
     def activate(self, ctx: TenantContext, row_id: UUID) -> MktCampaign:
         return self.update(ctx, row_id, status=CampaignStatus.ACTIVE.value)
 
-    def list_team_members(self, ctx: TenantContext) -> list[dict]:
-        """Marketing module roster for deliverable assignment dropdowns."""
-        from modules.marketing.service.role_access import ensure_can_manage_deliverables
+    def list_team_members(self, ctx: TenantContext, *, require_planner: bool = False) -> list[dict]:
+        """Marketing module roster for assignment / transfer dropdowns."""
+        if require_planner:
+            from modules.marketing.service.role_access import ensure_can_manage_deliverables
 
-        ensure_can_manage_deliverables(self.db, ctx)
+            ensure_can_manage_deliverables(self.db, ctx)
         rows = self._modules.list_rows_for_module(ctx.tenant_id, "marketing")
         if not rows:
             return []
@@ -163,6 +164,7 @@ class CampaignService:
         notes: str | None = None,
         content_provider_user_id: UUID | None = None,
         approval_head_user_id: UUID | None = None,
+        approval_head_user_ids: list[UUID] | None = None,
         editor_user_id: UUID | None = None,
     ) -> MktTask:
         from modules.marketing.service.role_access import ensure_can_manage_deliverables
@@ -178,11 +180,20 @@ class CampaignService:
             content_provider_user_id,
             label="Content provider",
         )
-        approval_head = self._resolve_assignee(
-            ctx,
-            approval_head_user_id,
-            label="Approval head",
-        )
+        head_ids: list[UUID] = []
+        for raw in approval_head_user_ids or []:
+            if raw and raw not in head_ids:
+                head_ids.append(raw)
+        if approval_head_user_id and approval_head_user_id not in head_ids:
+            head_ids.insert(0, approval_head_user_id)
+
+        approval_heads: list[dict] = []
+        for hid in head_ids:
+            resolved = self._resolve_assignee(ctx, hid, label="Approval head")
+            if resolved:
+                approval_heads.append(resolved)
+        primary_head = approval_heads[0] if approval_heads else None
+
         editor = self._resolve_assignee(
             ctx,
             editor_user_id,
@@ -194,10 +205,14 @@ class CampaignService:
             "deliverable_type": dtype,
             "content_provider_user_id": str(content_provider["user_id"]) if content_provider else None,
             "content_provider_name": content_provider["display_name"] if content_provider else None,
-            "approval_head_user_id": str(approval_head["user_id"]) if approval_head else None,
-            "approval_head_name": approval_head["display_name"] if approval_head else None,
+            "approval_head_user_id": str(primary_head["user_id"]) if primary_head else None,
+            "approval_head_name": primary_head["display_name"] if primary_head else None,
+            "approval_head_user_ids": [str(h["user_id"]) for h in approval_heads],
+            "approval_head_names": [h["display_name"] for h in approval_heads],
             "editor_user_id": str(editor["user_id"]) if editor else None,
             "editor_name": editor["display_name"] if editor else None,
+            "review_annotations": [],
+            "self_checked": False,
         }
 
         return TaskService(self.db).create(
@@ -211,10 +226,72 @@ class CampaignService:
             due_at=due_at,
             owner_user_id=content_provider["user_id"] if content_provider else ctx.user_id,
             assignee_user_id=editor["user_id"] if editor else None,
-            reviewer_user_id=approval_head["user_id"] if approval_head else None,
+            reviewer_user_id=primary_head["user_id"] if primary_head else None,
             metadata_json=metadata,
             status="assigned" if editor else "draft",
         )
+
+    def create_channel_program(
+        self,
+        ctx: TenantContext,
+        *,
+        name: str,
+        channel: str,
+        deliverable_type: str = "social_media_post",
+        start_date: date,
+        days: int = 7,
+        content_provider_user_id: UUID | None = None,
+        editor_user_id: UUID | None = None,
+        approval_head_user_ids: list[UUID] | None = None,
+        company_id: UUID | None = None,
+    ) -> dict:
+        """Recurring LinkedIn / WhatsApp / newcomer daily posts as a channel campaign."""
+        from datetime import timedelta
+
+        from modules.marketing.service.role_access import ensure_can_create_campaign
+
+        ensure_can_create_campaign(self.db, ctx)
+        channel_key = _slug_deliverable_type(channel)
+        if channel_key not in {"linkedin", "whatsapp", "newcomer", "instagram", "other"}:
+            raise ValidationException("Channel must be linkedin, whatsapp, newcomer, instagram, or other")
+        day_count = max(1, min(int(days or 7), 90))
+        campaign = self.create(
+            ctx,
+            company_id=company_id,
+            campaign_name=(name or "").strip() or f"{channel_key.title()} channel · {start_date.isoformat()}",
+            campaign_type="channel",
+            objective=f"Recurring {channel_key} deliverables ({day_count} days)",
+            status=CampaignStatus.ACTIVE.value,
+            success_metrics={
+                "kind": "channel_program",
+                "channel": channel_key,
+                "days": day_count,
+                "start_date": start_date.isoformat(),
+            },
+        )
+        created: list[MktTask] = []
+        dtype = _slug_deliverable_type(deliverable_type)
+        for i in range(day_count):
+            due = start_date + timedelta(days=i)
+            title = f"{channel_key.replace('_', ' ').title()} · Day {i + 1} · {due.isoformat()}"
+            row = self.create_deliverable(
+                ctx,
+                campaign.id,
+                deliverable_type=dtype,
+                due_date=due,
+                title=title,
+                notes=f"Recurring {channel_key} assignment",
+                content_provider_user_id=content_provider_user_id,
+                approval_head_user_ids=approval_head_user_ids,
+                editor_user_id=editor_user_id,
+            )
+            created.append(row)
+        return {
+            "campaign": campaign,
+            "deliverables": [self.deliverable_payload(r) for r in created],
+            "channel": channel_key,
+            "days": day_count,
+        }
 
     def _resolve_assignee(
         self,
@@ -250,6 +327,20 @@ class CampaignService:
     def deliverable_payload(row: MktTask) -> dict:
         due = row.due_at.date() if row.due_at else None
         meta = row.metadata_json if isinstance(row.metadata_json, dict) else {}
+        head_ids_raw = meta.get("approval_head_user_ids")
+        head_ids: list[UUID] = []
+        if isinstance(head_ids_raw, list):
+            for item in head_ids_raw:
+                try:
+                    head_ids.append(UUID(str(item)))
+                except (TypeError, ValueError):
+                    continue
+        primary = _uuid_from_meta(meta, "approval_head_user_id") or row.reviewer_user_id
+        if primary and primary not in head_ids:
+            head_ids.insert(0, primary)
+        names = meta.get("approval_head_names")
+        if not isinstance(names, list):
+            names = [meta.get("approval_head_name")] if meta.get("approval_head_name") else []
         return {
             "id": row.id,
             "campaign_id": row.campaign_id,
@@ -261,8 +352,14 @@ class CampaignService:
             "notes": row.description,
             "content_provider_user_id": _uuid_from_meta(meta, "content_provider_user_id") or row.owner_user_id,
             "content_provider_name": meta.get("content_provider_name"),
-            "approval_head_user_id": _uuid_from_meta(meta, "approval_head_user_id") or row.reviewer_user_id,
+            "approval_head_user_id": primary,
             "approval_head_name": meta.get("approval_head_name"),
+            "approval_head_user_ids": head_ids,
+            "approval_head_names": [str(n) for n in names if n],
             "editor_user_id": _uuid_from_meta(meta, "editor_user_id") or row.assignee_user_id,
             "editor_name": meta.get("editor_name"),
+            "self_checked": bool(meta.get("self_checked")),
+            "review_annotations": meta.get("review_annotations")
+            if isinstance(meta.get("review_annotations"), list)
+            else [],
         }

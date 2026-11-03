@@ -15,6 +15,7 @@ import {
   LineChart,
   ListTodo,
   Megaphone,
+  MessageSquare,
   Palette,
   Radar,
   Search,
@@ -61,6 +62,7 @@ export const MARKETING_NAV_GROUPS: readonly MarketingNavGroup[] = [
       { title: "Requests", href: "/marketing/content-requests", icon: FolderKanban },
       { title: "Calendar", href: "/marketing/calendar", icon: CalendarDays },
       { title: "Brand kit", href: "/marketing/brand-voices", icon: Palette },
+      { title: "Chat", href: "/marketing/chat", icon: MessageSquare },
     ],
   },
   {

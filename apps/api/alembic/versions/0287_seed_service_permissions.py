@@ -117,6 +117,25 @@ def _grant(conn, now, tenant_id, role_id, perm_id):
     )
 
 
+def _resolve_perm_id(conn, now, perm_ids: dict[str, str], perm_code: str) -> str | None:
+    if perm_code in perm_ids:
+        return perm_ids[perm_code]
+    exists = conn.execute(
+        sa.text("SELECT id FROM foundation.sec_permission WHERE permission_code = :code"),
+        {"code": perm_code},
+    ).first()
+    if exists:
+        perm_ids[perm_code] = str(exists[0])
+        return perm_ids[perm_code]
+    # Cross-module lookup perms (e.g. master.customer:read) — create if missing.
+    if ":" in perm_code:
+        resource, action = perm_code.rsplit(":", 1)
+        module = resource.split(".", 1)[0]
+        perm_ids[perm_code] = _ensure_permission(conn, now, perm_code, resource, action, module)
+        return perm_ids[perm_code]
+    return None
+
+
 def upgrade() -> None:
     conn = op.get_bind()
     now = datetime.now(timezone.utc)
@@ -131,7 +150,10 @@ def upgrade() -> None:
         for role_code, role_name, perms in ROLE_SPECS:
             role_id = _ensure_role(conn, now, tid, role_code, role_name)
             for perm_code in perms:
-                _grant(conn, now, tid, role_id, perm_ids[perm_code])
+                pid = _resolve_perm_id(conn, now, perm_ids, perm_code)
+                if pid is None:
+                    continue
+                _grant(conn, now, tid, role_id, pid)
 
 
 def downgrade() -> None:

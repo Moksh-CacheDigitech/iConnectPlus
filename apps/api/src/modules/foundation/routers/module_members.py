@@ -13,6 +13,7 @@ from modules.foundation.schemas import (
     ModuleUserCreateRequest,
     ModuleUserOption,
     ModuleUserRecord,
+    ModuleUserRoleUpdateRequest,
     ModuleUserServiceRoleUpdateRequest,
 )
 from modules.foundation.service.module_admin_service import ModuleAdminService
@@ -58,7 +59,11 @@ def add_module_member(
     db: Annotated[Session, Depends(get_db)],
 ) -> APIResponse[ModuleUserRecord]:
     row = ModuleAdminService(db).add_member(
-        ctx, module_key, body.user_id, service_job_role=body.service_job_role
+        ctx,
+        module_key,
+        body.user_id,
+        service_job_role=body.service_job_role,
+        role=body.role,
     )
     db.commit()
     return APIResponse(message="Module user assigned", data=ModuleUserRecord(**row))
@@ -82,6 +87,22 @@ def update_module_member_service_role(
     return APIResponse(message="Service job role updated", data=ModuleUserRecord(**row))
 
 
+@router.patch(
+    "/{module_key}/members/{user_id}/role",
+    response_model=APIResponse[ModuleUserRecord],
+)
+def update_module_member_role(
+    module_key: str,
+    user_id: UUID,
+    body: ModuleUserRoleUpdateRequest,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ModuleUserRecord]:
+    row = ModuleAdminService(db).update_member_role(ctx, module_key, user_id, body.role)
+    db.commit()
+    return APIResponse(message="Module role updated", data=ModuleUserRecord(**row))
+
+
 @router.delete("/{module_key}/members/{user_id}", response_model=APIResponse[None])
 def remove_module_member(
     module_key: str,
@@ -92,3 +113,22 @@ def remove_module_member(
     ModuleAdminService(db).remove_member(ctx, module_key, user_id)
     db.commit()
     return APIResponse(message="Module user removed", data=None)
+
+
+@router.post("/{module_key}/seed-demo-users", response_model=APIResponse[dict])
+def seed_module_demo_users(
+    module_key: str,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[dict]:
+    from modules.foundation.service.module_demo_users_service import ModuleDemoUsersService
+
+    result = ModuleDemoUsersService(db).seed_demo_users(ctx, module_key)
+    db.commit()
+    return APIResponse(
+        message=(
+            f"Seeded {result['created']} new and refreshed {result['updated']} "
+            f"{module_key} demo users"
+        ),
+        data=result,
+    )

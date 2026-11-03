@@ -19,6 +19,8 @@ from modules.marketing.routers import (
     team_router,
     trends_router,
 )
+from modules.marketing.routers.chat import chat_router
+from modules.marketing.routers.image_posts import image_posts_router
 from modules.marketing.routers.ops import (
     ai_ops_router,
     approvals_router,
@@ -37,6 +39,8 @@ marketing_router.include_router(brand_voices_router)
 marketing_router.include_router(social_accounts_router)
 marketing_router.include_router(inbox_router)
 marketing_router.include_router(content_requests_router)
+marketing_router.include_router(chat_router)
+marketing_router.include_router(image_posts_router)
 marketing_router.include_router(content_router)
 marketing_router.include_router(research_router)
 marketing_router.include_router(trends_router)

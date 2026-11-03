@@ -309,6 +309,36 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
     openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
+    openai_image_model: str = Field(default="gpt-image-2.5-flare", alias="OPENAI_IMAGE_MODEL")
+
+    # Canva Connect (Marketing "Edit in Canva")
+    canva_client_id: str = Field(default="", alias="CANVA_CLIENT_ID")
+    canva_client_secret: str = Field(default="", alias="CANVA_CLIENT_SECRET")
+    canva_redirect_uri: str = Field(
+        default="http://localhost:3000/marketing/content",
+        alias="CANVA_REDIRECT_URI",
+    )
+    canva_scopes: str = Field(
+        default="asset:read asset:write design:content:write design:meta:read",
+        alias="CANVA_SCOPES",
+    )
+
+    # Frankfurter FX (USD→INR) — free lifetime, no API key (https://frankfurter.dev/)
+    frankfurter_enabled: bool = Field(default=True, alias="FRANKFURTER_ENABLED")
+    frankfurter_base_url: str = Field(
+        default="https://api.frankfurter.dev",
+        alias="FRANKFURTER_BASE_URL",
+    )
+    frankfurter_cache_ttl_seconds: int = Field(
+        default=43200,
+        alias="FRANKFURTER_CACHE_TTL_SECONDS",
+        description="Cache USD→INR for 12h (rates update once per day).",
+    )
+    frankfurter_fallback_usd_inr: float = Field(
+        default=95.0,
+        alias="FRANKFURTER_FALLBACK_USD_INR",
+        description="Used when Frankfurter is unreachable.",
+    )
 
     org_email_domain: str = Field(default="cachedigitech.com", alias="ORG_EMAIL_DOMAIN")
     # HRMS employee codes that count as real onboarded employees (e.g. CT5345, CDPL2014).

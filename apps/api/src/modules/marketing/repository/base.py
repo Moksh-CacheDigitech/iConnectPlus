@@ -42,11 +42,18 @@ class MktScopedRepository(OrgScopedRepository):
         self,
         model,
         ctx: TenantContext,
-        company_id: UUID,
+        company_id: UUID | None,
         *,
         branch_scoped: bool = False,
     ):
-        stmt = select(model).where(model.company_id == company_id, model.is_deleted.is_(False))
+        """List rows for one company, or all visible companies when company_id is None.
+
+        Module admins / platform admins resolve list company as None (tenant-wide).
+        Never use ``company_id == None`` SQL — that hides every real row.
+        """
+        stmt = select(model).where(model.is_deleted.is_(False))
+        if company_id is not None:
+            stmt = stmt.where(model.company_id == company_id)
         stmt = self.apply_mkt_filter(stmt, model, ctx, branch_scoped=branch_scoped)
         return list(self.db.scalars(stmt).all())
 

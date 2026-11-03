@@ -40,7 +40,8 @@ RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh \
       /app/var/asset-storage \
       /app/var/ess-documents \
       /app/var/project-trackers \
-      /app/var/marketing-deliverables
+      /app/var/marketing-deliverables \
+      /app/var/marketing-image-posts
 
 ENV PYTHONPATH=/app/src
 ENV API_HOST=0.0.0.0

@@ -185,8 +185,10 @@ class TaskService:
         content_base64: str | None = None,
         content_type: str | None = None,
         file_name: str | None = None,
+        self_checked: bool = False,
+        approval_head_user_ids: list[UUID] | None = None,
     ) -> MktTask:
-        """Content provider attaches a link and/or uploaded file for approval."""
+        """Maker (provider/editor) attaches link/file for approval after self-check."""
         import base64
         import uuid as uuid_lib
         from pathlib import Path
@@ -205,23 +207,52 @@ class TaskService:
         if meta.get("is_deliverable") is not True:
             raise ValidationException("Only campaign deliverables can submit content this way")
 
+        if not self_checked:
+            raise ValidationException("Self-check is required before submitting for approval")
+
         provider_id = meta.get("content_provider_user_id")
-        is_provider = (
+        editor_id = meta.get("editor_user_id")
+        is_maker = (
             (provider_id and ctx.user_id and str(ctx.user_id) == str(provider_id))
+            or (editor_id and ctx.user_id and str(ctx.user_id) == str(editor_id))
             or (ctx.user_id is not None and row.owner_user_id == ctx.user_id)
+            or (ctx.user_id is not None and row.assignee_user_id == ctx.user_id)
         )
         role = marketing_module_role(self.db, ctx)
         if (
-            not is_provider
+            not is_maker
             and not is_marketing_module_admin(self.db, ctx)
             and role != MARKETING_ROLE_HEAD
         ):
-            raise ValidationException("Only the assigned content provider can submit content")
+            raise ValidationException(
+                "Only the assigned content provider or editor can submit content"
+            )
 
         if row.status in {"completed", "cancelled"}:
             raise ValidationException("This deliverable is closed and cannot accept new content")
         if meta.get("submission_status") == "approved":
             raise ValidationException("This deliverable is already approved")
+
+        # Maker may attach / refresh approval heads at submit time.
+        if approval_head_user_ids:
+            from modules.marketing.service.campaign_service import CampaignService
+
+            heads: list[dict] = []
+            seen: set[str] = set()
+            svc = CampaignService(self.db)
+            for hid in approval_head_user_ids:
+                if not hid or str(hid) in seen:
+                    continue
+                seen.add(str(hid))
+                resolved = svc._resolve_assignee(ctx, hid, label="Approval head")  # noqa: SLF001
+                if resolved:
+                    heads.append(resolved)
+            if heads:
+                meta["approval_head_user_ids"] = [str(h["user_id"]) for h in heads]
+                meta["approval_head_names"] = [h["display_name"] for h in heads]
+                meta["approval_head_user_id"] = str(heads[0]["user_id"])
+                meta["approval_head_name"] = heads[0]["display_name"]
+                meta["_reviewer_user_id"] = str(heads[0]["user_id"])
 
         url = (content_url or "").strip()
         try:
@@ -288,8 +319,12 @@ class TaskService:
             "file_stored_name": stored_name,
             "content_provider_user_id": meta.get("content_provider_user_id"),
             "approval_head_user_id": meta.get("approval_head_user_id"),
+            "approval_head_user_ids": meta.get("approval_head_user_ids") or (
+                [meta["approval_head_user_id"]] if meta.get("approval_head_user_id") else []
+            ),
             "editor_user_id": meta.get("editor_user_id"),
             "deliverable_type": meta.get("deliverable_type") or row.task_kind,
+            "self_checked": True,
         }
 
         if req is None:
@@ -361,15 +396,23 @@ class TaskService:
                 "file_content_type": stored_ctype,
                 "submission_status": "in_review",
                 "improvement_comment": None,
+                "self_checked": True,
             }
         )
-        updated = self.update(
-            ctx,
-            row_id,
-            content_request_id=req.id,
-            metadata_json=meta,
-            status="in_review",
-        )
+        reviewer = None
+        if meta.pop("_reviewer_user_id", None):
+            try:
+                reviewer = UUID(str(meta.get("approval_head_user_id")))
+            except (TypeError, ValueError):
+                reviewer = row.reviewer_user_id
+        update_fields: dict = {
+            "content_request_id": req.id,
+            "metadata_json": meta,
+            "status": "in_review",
+        }
+        if reviewer is not None:
+            update_fields["reviewer_user_id"] = reviewer
+        updated = self.update(ctx, row_id, **update_fields)
         self._ops.record(
             ctx,
             company_id=row.company_id,
@@ -443,6 +486,71 @@ class TaskService:
         actual = Decimal(str(task.actual_hours or 0)) + Decimal(str(hours))
         self.update(ctx, task_id, actual_hours=actual)
         return entry
+
+    def add_annotation(
+        self,
+        ctx: TenantContext,
+        task_id: UUID,
+        *,
+        kind: str,
+        body: str,
+        x: float | None = None,
+        y: float | None = None,
+        at_seconds: float | None = None,
+    ) -> MktTask:
+        """Reviewer annotation on image (x/y) or video (timestamp) until final approval."""
+        kind_key = (kind or "").strip().lower()
+        if kind_key not in {"image_mark", "video_timestamp", "text"}:
+            raise ValidationException("Annotation kind must be image_mark, video_timestamp, or text")
+        note = (body or "").strip()
+        if not note:
+            raise ValidationException("Annotation comment is required")
+        if kind_key == "video_timestamp" and at_seconds is None:
+            raise ValidationException("Video annotations need at_seconds")
+        if kind_key == "image_mark" and (x is None or y is None):
+            raise ValidationException("Image marks need x and y (0–100)")
+
+        row = self.get(ctx, task_id)
+        meta = dict(row.metadata_json) if isinstance(row.metadata_json, dict) else {}
+        if meta.get("is_deliverable") is not True:
+            raise ValidationException("Annotations are only for campaign deliverables")
+        if row.status in {"completed", "cancelled"}:
+            raise ValidationException("Closed deliverables cannot take new annotations")
+
+        import uuid as uuid_lib
+
+        annotations = list(meta.get("review_annotations") or [])
+        if not isinstance(annotations, list):
+            annotations = []
+        entry = {
+            "id": uuid_lib.uuid4().hex,
+            "kind": kind_key,
+            "body": note[:2000],
+            "x": float(x) if x is not None else None,
+            "y": float(y) if y is not None else None,
+            "at_seconds": float(at_seconds) if at_seconds is not None else None,
+            "created_by": str(ctx.user_id) if ctx.user_id else None,
+            "created_at": utcnow().isoformat(),
+        }
+        annotations.append(entry)
+        meta["review_annotations"] = annotations[-200:]
+        meta["submission_status"] = meta.get("submission_status") or "in_review"
+        if row.status not in {"in_review", "assigned", "in_progress"}:
+            status = "in_review"
+        else:
+            status = row.status
+        updated = self.update(ctx, task_id, metadata_json=meta, status=status)
+        self._ops.record(
+            ctx,
+            company_id=row.company_id,
+            action="deliverable.annotate",
+            entity_type="mkt_task",
+            entity_id=row.id,
+            campaign_id=row.campaign_id,
+            new_value={"kind": kind_key, "body": note[:200]},
+            branch_id=row.branch_id,
+        )
+        return updated
 
 
 class ApprovalService:
@@ -734,20 +842,65 @@ class WorkloadService:
         for task in tasks:
             key = str(task.assignee_user_id or task.owner_user_id or "unassigned")
             by_user[key].append(task)
+        from modules.foundation.models.security import SecUser
+
+        user_ids = [UUID(uid) for uid in by_user.keys() if uid != "unassigned"]
+        name_map: dict[str, str] = {}
+        if user_ids:
+            for u in self.db.scalars(
+                select(SecUser).where(
+                    SecUser.tenant_id == ctx.tenant_id,
+                    SecUser.id.in_(user_ids),
+                    SecUser.is_deleted.is_(False),
+                )
+            ).all():
+                name_map[str(u.id)] = u.display_name or u.email or str(u.id)
+
         people = []
         for user_id, user_tasks in by_user.items():
             metrics = self._score(user_tasks)
-            people.append({"user_id": user_id, **metrics})
+            total = len(user_tasks) or 1
+            done = metrics.get("completed_tasks") or 0
+            people.append(
+                {
+                    "user_id": user_id,
+                    "display_name": name_map.get(user_id) or ("Unassigned" if user_id == "unassigned" else user_id[:8]),
+                    "checklist_pct": round((done / total) * 100, 1),
+                    "duration_hours": metrics.get("actual_hours") or 0,
+                    **metrics,
+                }
+            )
         people.sort(key=lambda r: r["workload_score"], reverse=True)
         company = self._score(tasks)
         mine = [t for t in tasks if ctx.user_id and ctx.user_id in {t.assignee_user_id, t.owner_user_id}]
         return {
             "company": company,
             "people": people,
-            "me": self._score(mine),
+            "me": {
+                **self._score(mine),
+                "display_name": "Me",
+                "checklist_pct": round(
+                    ((self._score(mine).get("completed_tasks") or 0) / (len(mine) or 1)) * 100,
+                    1,
+                ),
+                "duration_hours": self._score(mine).get("actual_hours") or 0,
+            },
             "overloaded": [p for p in people if p["reassignment"] == "overload"],
             "underutilized": [p for p in people if p["reassignment"] == "underutilized"],
             "campaign_health": self._campaign_health(ctx, cid, tasks),
+            "team_checklist": [
+                {
+                    "user_id": p["user_id"],
+                    "display_name": p["display_name"],
+                    "completed": p.get("completed_tasks") or 0,
+                    "active": p.get("active_tasks") or 0,
+                    "checklist_pct": p.get("checklist_pct") or 0,
+                    "duration_hours": p.get("duration_hours") or 0,
+                    "delayed": p.get("delayed_tasks") or 0,
+                }
+                for p in people
+                if p["user_id"] != "unassigned"
+            ],
         }
 
     def _campaign_health(self, ctx: TenantContext, company_id: UUID, tasks: list[MktTask]) -> list[dict]:

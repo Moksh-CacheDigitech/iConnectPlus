@@ -5,6 +5,11 @@ from modules.marketing.models.brand_voice import MktBrandVoice
 from modules.marketing.models.brand_voice_source import MktBrandVoiceSource
 from modules.marketing.models.calendar_entry import MktCalendarEntry
 from modules.marketing.models.campaign import MktCampaign
+from modules.marketing.models.chat_session import (
+    MktChatAttachment,
+    MktChatMessage,
+    MktChatSession,
+)
 from modules.marketing.models.competitor import MktCompetitor
 from modules.marketing.models.content_pillar import MktContentPillar
 from modules.marketing.models.content_request import MktContentRequest
@@ -32,6 +37,9 @@ __all__ = [
     "MktSocialAccount",
     "MktSocialInbox",
     "MktContentRequest",
+    "MktChatSession",
+    "MktChatMessage",
+    "MktChatAttachment",
     "MktGeneratedContent",
     "MktGeneratedContentVersion",
     "MktResearchReport",

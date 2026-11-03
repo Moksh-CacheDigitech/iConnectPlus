@@ -74,6 +74,12 @@ export const marketingQuickLinks: MarketingQuickLink[] = [
     icon: FileText,
   },
   {
+    title: "Chat",
+    description: "ChatGPT-style marketing assistant",
+    href: "/marketing/chat",
+    icon: Sparkles,
+  },
+  {
     title: "Social Accounts",
     description: "Connected channels",
     href: "/marketing/social-accounts",

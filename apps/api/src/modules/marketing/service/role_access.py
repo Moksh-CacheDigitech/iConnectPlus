@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from uuid import UUID
-
 from sqlalchemy.orm import Session
 
 from core.exceptions import ForbiddenException
 from modules.foundation.domain.erp_modules import (
     ADMIN_USER_TYPES,
+    MARKETING_PLANNER_ROLES,
     MARKETING_ROLE_HEAD,
     MODULE_ROLE_ADMIN,
 )
@@ -31,29 +30,35 @@ def is_marketing_module_admin(db: Session, ctx: TenantContext) -> bool:
     return UserModuleRepository(db).is_module_admin(ctx.tenant_id, ctx.user_id, "marketing")
 
 
-def ensure_can_create_campaign(db: Session, ctx: TenantContext) -> None:
-    """Campaigns may only be created by Marketing head or Marketing module admin."""
+def can_plan_marketing_work(db: Session, ctx: TenantContext) -> bool:
+    """Vishakha (head) or Ansh (associate/content creator) can create events & deliverables."""
     if is_marketing_module_admin(db, ctx):
-        return
+        return True
     role = marketing_module_role(db, ctx)
-    if role == MARKETING_ROLE_HEAD:
-        return
     if role == MODULE_ROLE_ADMIN:
+        return True
+    return role in MARKETING_PLANNER_ROLES
+
+
+def ensure_can_create_campaign(db: Session, ctx: TenantContext) -> None:
+    """Campaigns / events may be created by Marketing head or associate planners."""
+    if can_plan_marketing_work(db, ctx):
         return
     raise ForbiddenException(
-        "Only Marketing head or Marketing module admin can create campaigns"
+        "Only Marketing head or Marketing associate can create campaigns / events"
     )
 
 
 def ensure_can_manage_deliverables(db: Session, ctx: TenantContext) -> None:
-    """Campaign deliverables may only be added by Marketing head or module admin."""
-    if is_marketing_module_admin(db, ctx):
-        return
-    role = marketing_module_role(db, ctx)
-    if role == MARKETING_ROLE_HEAD:
-        return
-    if role == MODULE_ROLE_ADMIN:
+    """Deliverables and approval-head assignment: head or associate."""
+    if can_plan_marketing_work(db, ctx):
         return
     raise ForbiddenException(
-        "Only Marketing head or Marketing module admin can add campaign deliverables"
+        "Only Marketing head or Marketing associate can add campaign deliverables"
     )
+
+
+def is_marketing_head(db: Session, ctx: TenantContext) -> bool:
+    if is_marketing_module_admin(db, ctx):
+        return True
+    return marketing_module_role(db, ctx) == MARKETING_ROLE_HEAD

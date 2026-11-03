@@ -152,6 +152,7 @@ class ModuleUserOption(BaseModel):
     display_name: str
     email: str
     employee_code: str | None = None
+    already_assigned: bool = False
 
 
 class ModuleUserRecord(BaseModel):
@@ -167,10 +168,16 @@ class ModuleUserRecord(BaseModel):
 class ModuleUserCreateRequest(BaseModel):
     user_id: UUID
     service_job_role: str | None = None
+    # Marketing (and other modules with functional roles): marketing_head, marketing_associate, …
+    role: str | None = None
 
 
 class ModuleUserServiceRoleUpdateRequest(BaseModel):
     service_job_role: str
+
+
+class ModuleUserRoleUpdateRequest(BaseModel):
+    role: str = Field(min_length=1, max_length=50)
 
 
 class RoleCreateRequest(BaseModel):
