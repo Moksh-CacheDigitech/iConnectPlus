@@ -282,6 +282,9 @@ class OpportunityUpdate(BaseModel):
     migration_credit_phase2: Decimal | None = None
     migration_credit_phase3: Decimal | None = None
     marketing_event_id: UUID | None = None
+    service_sourcing_channel: str | None = Field(
+        default=None, pattern="^(Outsourced|Cache Service)$"
+    )
     purchase_model: str | None = Field(default=None, pattern="^(capex|opex)$")
     lease_type: str | None = Field(default=None, pattern="^(finance|operating)$")
     lease_partner: str | None = Field(default=None, max_length=255)
@@ -338,6 +341,7 @@ class OpportunityResponse(OrmModel):
     has_hardware: bool = False
     has_software: bool = False
     has_services: bool = False
+    service_sourcing_channel: str | None = None
     cloud_sub_product: str | None = None
     customer_mrr: Decimal | None = None
     customer_arr: Decimal | None = None

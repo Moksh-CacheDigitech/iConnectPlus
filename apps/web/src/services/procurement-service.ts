@@ -543,6 +543,8 @@ export type ProcOrder = {
   source_module: string | null;
   source_document_type?: string | null;
   source_document_id: string | null;
+  /** product | vendor_service | internal_service */
+  order_kind?: string | null;
   company_po_number: string | null;
   entity_code?: string | null;
   baseline_amount?: number;

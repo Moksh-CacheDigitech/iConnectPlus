@@ -299,6 +299,8 @@ export type ProjectPoQueueItem = {
   customer_total: number;
   status: string;
   ovf_id: string | null;
+  /** product | vendor_service | internal_service */
+  order_kind?: string | null;
   branch_id: string;
   company_id: string;
   created_at: string | null;

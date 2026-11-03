@@ -72,6 +72,17 @@ export function ProjectPoQueuePage() {
         cell: (r) => formatDate(r.document_date),
       },
       {
+        key: "order_kind",
+        label: "Kind",
+        sort: (r) => r.order_kind || "",
+        cell: (r) => {
+          if (r.order_kind === "internal_service") return "Internal Service";
+          if (r.order_kind === "vendor_service") return "Vendor Service";
+          if (r.is_seed) return "Seed";
+          return "Installation";
+        },
+      },
+      {
         key: "site_name",
         label: "Site",
         sort: (r) => r.site_name || r.project_name || "",
@@ -123,12 +134,12 @@ export function ProjectPoQueuePage() {
   return (
     <ProjectsRecordList
       title="PO Queue"
-      description="Awaiting project creation — shared installation POs, plus Projects test seed rows (H-Cloud). Seed rows never appear in SCM."
+      description="Awaiting project creation — Cache Service (internal) POs after Management issue, shared installation POs, plus Projects test seed rows. Create Project stays manual. Seed rows never appear in SCM."
       panelTitle="Awaiting project"
       panelSubtitle="Queue entries without a linked project"
       icon={ShoppingCart}
       searchPlaceholder="Search PO, site, circle, customer…"
-      emptyMessage="No purchase orders awaiting project creation. Share from Installation when ready."
+      emptyMessage="No purchase orders awaiting project creation. Cache Service POs appear after Management issue; installation shares come from Delivery."
       loadingMessage="Loading purchase orders…"
       errorMessage="Failed to load purchase orders"
       minWidth={980}

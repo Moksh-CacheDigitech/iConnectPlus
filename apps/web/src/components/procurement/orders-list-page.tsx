@@ -433,6 +433,7 @@ export function OrdersListPage() {
               <tr>
                 <th className="px-3 py-3.5 font-bold">S.No</th>
                 <th className="px-3 py-3.5 font-bold">Company PO number</th>
+                <th className="px-3 py-3.5 font-bold">Kind</th>
                 <th className="px-3 py-3.5 font-bold">PO date</th>
                 <th className="px-3 py-3.5 font-bold">Vendor</th>
                 <th className="px-3 py-3.5 font-bold">Status</th>
@@ -443,14 +444,14 @@ export function OrdersListPage() {
             <tbody>
               {loading && filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">
                     Loading purchase orders…
                   </td>
                 </tr>
               ) : null}
               {!loading && filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">
                     No purchase orders match this filter.
                   </td>
                 </tr>
@@ -458,42 +459,55 @@ export function OrdersListPage() {
               {filtered.map((row, index) => {
                 const orderHref = `/procurement/orders/${row.id}`;
                 return (
-                <tr
-                  key={row.id}
-                  className={cn(
-                    "border-b border-border/70 cursor-pointer transition-colors duration-200",
-                    "hover:bg-sky-50 active:bg-sky-100/80",
-                  )}
-                  onClick={() => router.push(orderHref)}
-                >
-                  <td className="px-3 py-3.5 tabular-nums text-muted-foreground">{index + 1}</td>
-                  <td className="px-3 py-3.5 font-medium tabular-nums">
-                    {row.company_po_number || row.document_number || "-"}
-                  </td>
-                  <td className={cn(procurementUi.tdNumeric, "py-3.5 text-muted-foreground")}>
-                    {row.document_date || "-"}
-                  </td>
-                  <td className="px-3 py-3.5">
-                    {vendors[row.vendor_id]?.label || row.vendor_id.slice(0, 8)}
-                  </td>
-                  <td className="px-3 py-3.5">
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "font-medium",
-                        poApprovalStatusBadgeClass(row.status, row.scm_approval_stage),
+                  <tr
+                    key={row.id}
+                    className={cn(
+                      "border-b border-border/70 cursor-pointer transition-colors duration-200",
+                      "hover:bg-sky-50 active:bg-sky-100/80",
+                    )}
+                    onClick={() => router.push(orderHref)}
+                  >
+                    <td className="px-3 py-3.5 tabular-nums text-muted-foreground">{index + 1}</td>
+                    <td className="px-3 py-3.5 font-medium tabular-nums">
+                      {row.company_po_number || row.document_number || "-"}
+                    </td>
+                    <td className="px-3 py-3.5">
+                      {row.order_kind === "internal_service" ? (
+                        <Badge variant="outline" className="font-medium">
+                          Internal Service
+                        </Badge>
+                      ) : row.order_kind === "vendor_service" ? (
+                        <Badge variant="outline" className="font-medium">
+                          Vendor Service
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">Product</span>
                       )}
-                    >
-                      {formatPoApprovalStatusLabel(row.status, row.scm_approval_stage)}
-                    </Badge>
-                  </td>
-                  <td className="px-3 py-3.5 tabular-nums">{formatInr(row.total_amount)}</td>
-                  <td className="px-3 py-3.5">
-                    <Badge variant={grnBadgeVariant(row.grn_status ?? "pending")} className="uppercase">
-                      {formatGrnStatusBadgeLabel(row.grn_status ?? "pending")}
-                    </Badge>
-                  </td>
-                </tr>
+                    </td>
+                    <td className={cn(procurementUi.tdNumeric, "py-3.5 text-muted-foreground")}>
+                      {row.document_date || "-"}
+                    </td>
+                    <td className="px-3 py-3.5">
+                      {vendors[row.vendor_id]?.label || row.vendor_id.slice(0, 8)}
+                    </td>
+                    <td className="px-3 py-3.5">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "font-medium",
+                          poApprovalStatusBadgeClass(row.status, row.scm_approval_stage),
+                        )}
+                      >
+                        {formatPoApprovalStatusLabel(row.status, row.scm_approval_stage)}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-3.5 tabular-nums">{formatInr(row.total_amount)}</td>
+                    <td className="px-3 py-3.5">
+                      <Badge variant={grnBadgeVariant(row.grn_status ?? "pending")} className="uppercase">
+                        {formatGrnStatusBadgeLabel(row.grn_status ?? "pending")}
+                      </Badge>
+                    </td>
+                  </tr>
                 );
               })}
             </tbody>

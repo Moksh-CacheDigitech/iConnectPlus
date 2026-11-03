@@ -47,6 +47,10 @@ class ProcOrderHeader(Base, *ProcTransactionMixin):
             name="ck_proc_oh_scm_approval_stage",
         ),
         CheckConstraint(
+            "order_kind IN ('product', 'vendor_service', 'internal_service')",
+            name="ck_proc_oh_order_kind",
+        ),
+        CheckConstraint(
             "fulfillment_stage IS NULL OR fulfillment_stage IN ("
             "'awaiting_vendor_send','awaiting_vendor_response','vendor_rejected',"
             "'vendor_accepted','customer_notified','vendor_dispatch_recorded',"
@@ -113,6 +117,10 @@ class ProcOrderHeader(Base, *ProcTransactionMixin):
     source_module: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_document_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_document_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    # product (default OVF/inventory) | vendor_service | internal_service (Cache Service).
+    order_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="product", server_default="product", index=True
+    )
     # Entity-based company PO number, e.g. PO/CDT/001 (assigned on finalize).
     company_po_number: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     entity_code: Mapped[str | None] = mapped_column(String(10), nullable=True)

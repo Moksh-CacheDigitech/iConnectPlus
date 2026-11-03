@@ -399,6 +399,25 @@ class ApprovalTaskService:
                 raise ConflictException("A file upload is required to complete this attachment task")
 
         is_admin = self._is_crm_admin(ctx)
+        # Apply blueprint / side effects while the task is still pending so a
+        # failure (e.g. service PO spawn) does not leave My Jobs "approved"
+        # while the opportunity stays locked.
+        self._resume(
+            ctx,
+            task,
+            decision,
+            remark,
+            freight=freight,
+            freight_medium=freight_medium,
+            freight_weight_kg=freight_weight_kg,
+            freight_insurance=freight_insurance,
+            supporting_items=supporting_items,
+            service_plan=service_plan,
+            file_name=file_name,
+            content_base64=content_base64,
+            content_type=content_type,
+            file_path=file_path,
+        )
         self._repo.cancel_pending_siblings(
             ctx,
             task.entity_type,
@@ -420,22 +439,6 @@ class ApprovalTaskService:
         if decision == "rejected":
             self._notify_rejection(ctx, task, remark)
         self._notify_decision_emails(ctx, task, decision, remark)
-        self._resume(
-            ctx,
-            task,
-            decision,
-            remark,
-            freight=freight,
-            freight_medium=freight_medium,
-            freight_weight_kg=freight_weight_kg,
-            freight_insurance=freight_insurance,
-            supporting_items=supporting_items,
-            service_plan=service_plan,
-            file_name=file_name,
-            content_base64=content_base64,
-            content_type=content_type,
-            file_path=file_path,
-        )
         return task
 
     def _notify_rejection(

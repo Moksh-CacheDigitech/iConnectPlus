@@ -134,6 +134,7 @@ class ProjectPoQueueItem(BaseModel):
     customer_total: float = 0
     status: str = "shared"
     ovf_id: UUID | None = None
+    order_kind: str | None = None
     branch_id: UUID
     company_id: UUID
     created_at: datetime | None = None

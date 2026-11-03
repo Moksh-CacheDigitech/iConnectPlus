@@ -1081,6 +1081,14 @@ class LeadService:
                 and not opp_fields["has_services"]
                 and not opp_fields["has_software"]
             )
+            if opp_fields["has_services"]:
+                from modules.crm.domain.lead_sourcing_channels import (
+                    parse_service_sourcing_channel,
+                )
+
+                channel = parse_service_sourcing_channel(lead.deal_type)
+                if channel:
+                    opp_fields["service_sourcing_channel"] = channel
             cloud_variant = cloud_variant_from_lead(lead)
             if cloud_variant:
                 opp_fields["cloud_blueprint_variant"] = cloud_variant

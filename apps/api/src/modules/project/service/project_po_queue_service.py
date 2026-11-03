@@ -184,10 +184,38 @@ class ProjectPoQueueService:
             except Exception:
                 pass
 
+        order_kind = (getattr(order, "order_kind", None) or "product").strip().lower()
+        is_service_po = (
+            order.source_module == "crm"
+            and (order.source_document_type or "").strip().lower() == "opportunity_service"
+        ) or order_kind == "internal_service"
+        if is_service_po and order.source_document_id is not None and opportunity_id is None:
+            try:
+                crm_ctx = self._crm.resolve_opportunity_project_context(
+                    ctx, order.source_document_id
+                )
+                customer_name = crm_ctx.get("customer_name") or customer_name
+                customer_id = crm_ctx.get("customer_id") or customer_id
+                site_name = crm_ctx.get("site_name") or site_name
+                opportunity_id = crm_ctx.get("opportunity_id")
+                circle_name = crm_ctx.get("circle_name") or circle_name
+                entity_state = crm_ctx.get("entity_state") or entity_state
+                project_title = crm_ctx.get("project_title") or project_title
+                if not customer_po_number:
+                    customer_po_number = crm_ctx.get("customer_po_number")
+            except Exception:
+                pass
+
         if handoff is not None:
-            project_title = handoff.project_name or project_title
-            site_name = handoff.site_name or site_name
-            circle_name = handoff.circle_name or circle_name
+            # CRM identity fields win; handoff only fills gaps (skip legacy "Service" stub).
+            if not project_title:
+                project_title = handoff.project_name or project_title
+            if not site_name:
+                site_name = handoff.site_name or site_name
+            if not circle_name:
+                handoff_circle = (handoff.circle_name or "").strip()
+                if handoff_circle and handoff_circle.lower() != "service":
+                    circle_name = handoff_circle
 
         if customer_id is None and customer_name:
             customer_id = self._match_customer_id(ctx, order.company_id, customer_name)
@@ -203,6 +231,14 @@ class ProjectPoQueueService:
             f"PO {order.company_po_number or order.document_number}"
             + (f" · Customer PO {customer_po_number}" if customer_po_number else "")
         )
+        if is_service_po:
+            channel_hint = ""
+            if handoff is not None and (handoff.remarks or "").strip():
+                channel_hint = f" · {(handoff.remarks or '').strip()[:120]}"
+            description = (
+                f"Internal Service PO {order.company_po_number or order.document_number}"
+                + channel_hint
+            )
 
         budget = order.customer_total or order.total_amount
         return ProjectPoPrefillResponse(
@@ -366,6 +402,7 @@ class ProjectPoQueueService:
             customer_total=float(order.customer_total or 0),
             status=order.status,
             ovf_id=ovf_id,
+            order_kind=getattr(order, "order_kind", None) or "product",
             branch_id=order.branch_id,
             company_id=order.company_id,
             created_at=None,

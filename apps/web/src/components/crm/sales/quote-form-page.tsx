@@ -854,6 +854,11 @@ export function QuoteFormPage({
         title={isEdit ? `Edit ${formatCrmCode(quote?.quote_no) || "Quote"}` : "Create Quote"}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {opportunity?.has_services && opportunity.service_sourcing_channel ? (
+              <span className="inline-flex h-8 items-center rounded-md border border-border bg-muted/40 px-2.5 text-xs font-medium text-foreground">
+                Service sourcing: {opportunity.service_sourcing_channel}
+              </span>
+            ) : null}
             <Link
               href={backHref}
               className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-border px-3 text-sm font-medium transition-colors duration-200 hover:bg-muted"

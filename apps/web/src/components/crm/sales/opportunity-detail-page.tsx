@@ -569,6 +569,16 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
                 {formatCrmCode(opp.opportunity_code)}
               </p>
             </div>
+            {opp.has_services && opp.service_sourcing_channel ? (
+              <div>
+                <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                  Service sourcing
+                </p>
+                <p className="mt-0.5 text-sm font-medium text-foreground">
+                  {opp.service_sourcing_channel}
+                </p>
+              </div>
+            ) : null}
           </div>
 
           {banner ? <CrmErrorBanner>{banner.text}</CrmErrorBanner> : null}

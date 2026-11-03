@@ -44,7 +44,7 @@ from modules.marketing.permissions import (
 )
 
 revision: str = "0670_restore_marketing_module"
-down_revision: str | Sequence[str] | None = "0664_rec_job_posting_audience_evidence"
+down_revision: str | Sequence[str] | None = "0666_crm_service_sourcing_scm_order_kind"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

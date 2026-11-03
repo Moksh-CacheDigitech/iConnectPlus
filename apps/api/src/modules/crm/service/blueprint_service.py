@@ -768,6 +768,7 @@ class OpportunityBlueprintService:
             updates["customer_po_approved"] = True
             updates["locked"] = False
             self._notify_operations_of_service_scope(ctx, opp)
+            self._spawn_service_po_from_opportunity(ctx, opp)
         elif action == "reject_po":
             self._clear_approval_attachment(ctx, opp.id, "customer_po")
             updates["customer_po_approved"] = False
@@ -1255,6 +1256,15 @@ class OpportunityBlueprintService:
             branch_id=opp.branch_id,
             remarks=remarks,
         )
+
+    def _spawn_service_po_from_opportunity(
+        self, ctx: TenantContext, opp: CrmOpportunity
+    ) -> None:
+        """Create Vendor/Internal Service PO from lead Service Sourcing Channel."""
+        # Late import: procurement → crm models; avoid import cycle at module load.
+        from modules.procurement.service.service_po_service import ServicePoService
+
+        ServicePoService(self._db).ensure_service_po_after_customer_po_approved(ctx, opp)
 
     def _clear_approval_attachment(
         self,

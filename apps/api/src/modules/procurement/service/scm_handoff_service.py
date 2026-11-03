@@ -24,9 +24,14 @@ from modules.procurement.adapters.master_data_adapter import (
     ProcurementMasterDataAdapter,
     scm_line_product_code,
 )
+from modules.crm.domain.lead_sourcing_channels import (
+    SERVICE_CHANNEL_CACHE,
+    normalize_service_sourcing_channel,
+)
 from modules.procurement.domain.approval_step_owners import APPROVAL_STEP_CATALOG, STAGE_TO_STEP_KEY
 from modules.procurement.domain.enums import OrderStatus
 from modules.procurement.domain.exceptions import InvalidDocumentState
+from modules.procurement.domain.service_po import ORDER_KIND_PRODUCT
 from modules.procurement.models.inventory_adjustment import ProcInventoryStockAdjustment
 from modules.procurement.models.inventory_import import ProcInventoryImportLine
 from modules.procurement.models.inventory_stock import ProcInventoryStockUnit
@@ -1450,6 +1455,7 @@ class ScmHandoffService:
                 "PO finalization requires approval. Create the PO as a draft and have an administrator issue it from Approval."
             )
         handoff = self._crm.get_handoff(ctx, ovf_id)
+        self._assert_ovf_allows_product_po(ctx, handoff)
         linked = self._orders.list_by_source(
             ctx,
             source_module=self.SOURCE_MODULE,
@@ -1669,6 +1675,37 @@ class ScmHandoffService:
             and getattr(order, "source_document_type", None) == self.SOURCE_DOC_TYPE
         )
 
+    def _sales_pack_linked_to_service_po(
+        self,
+        ctx: TenantContext,
+        *,
+        entity_type: str,
+        entity_id: UUID,
+    ) -> bool:
+        """True when a CRM service PO references this opportunity (or its quote)."""
+        from modules.crm.models.quote import CrmQuote
+        from modules.procurement.domain.service_po import SOURCE_DOC_TYPE_OPPORTUNITY_SERVICE
+
+        opportunity_id: UUID | None = None
+        if entity_type == "opportunity":
+            opportunity_id = entity_id
+        elif entity_type == "quote":
+            quote = self._db.get(CrmQuote, entity_id)
+            if quote is not None and not getattr(quote, "is_deleted", False):
+                opportunity_id = quote.opportunity_id
+        if opportunity_id is None:
+            return False
+        linked = self._orders.list_by_source(
+            ctx,
+            source_module=self.SOURCE_MODULE,
+            source_document_type=SOURCE_DOC_TYPE_OPPORTUNITY_SERVICE,
+            source_document_id=opportunity_id,
+        )
+        return any(
+            row.status != OrderStatus.CANCELLED.value
+            for row in linked
+        )
+
     def _negotiation_savings(self, order: ProcOrderHeader) -> float:
         """Savings SCM negotiated off the OVF vendor price on this PO."""
         baseline = float(getattr(order, "baseline_amount", 0) or 0)
@@ -1845,11 +1882,40 @@ class ScmHandoffService:
         )
         return self.negotiation_summary(ctx, order_id)
 
+    def _assert_ovf_allows_product_po(self, ctx: TenantContext, handoff: dict) -> None:
+        """Cache Service deals use Internal Service PO only — no OVF product PO."""
+        opp_id = handoff.get("opportunity_id")
+        if opp_id is None:
+            return
+        brief = self._crm.get_opportunity_brief(ctx, opp_id)
+        if brief is None:
+            return
+        channel = normalize_service_sourcing_channel(
+            brief.get("service_sourcing_channel")
+        )
+        if channel != SERVICE_CHANNEL_CACHE:
+            return
+        raise ConflictException(
+            "This opportunity uses Cache Service sourcing. "
+            "Use the Internal Service purchase order created on Customer PO approval "
+            "— do not create a product PO from OVF."
+        )
+
     def _is_scm_finalizable(self, order: ProcOrderHeader) -> bool:
-        """CRM OVF handoff POs and inventory/manual draft POs share SCM finalize."""
+        """CRM OVF / service POs and inventory/manual draft POs share SCM finalize."""
+        from modules.procurement.domain.service_po import (
+            SERVICE_ORDER_KINDS,
+            SOURCE_DOC_TYPE_OPPORTUNITY_SERVICE,
+        )
+
+        kind = (getattr(order, "order_kind", None) or ORDER_KIND_PRODUCT).strip().lower()
+        if kind in SERVICE_ORDER_KINDS:
+            return True
         module = (getattr(order, "source_module", None) or "").strip().lower()
         doc_type = (getattr(order, "source_document_type", None) or "").strip().lower()
         if module == self.SOURCE_MODULE and doc_type == self.SOURCE_DOC_TYPE:
+            return True
+        if module == self.SOURCE_MODULE and doc_type == SOURCE_DOC_TYPE_OPPORTUNITY_SERVICE:
             return True
         return module == "procurement" and doc_type == "inventory_initiated"
 
@@ -2345,8 +2411,14 @@ class ScmHandoffService:
         order.updated_at = utcnow()
         order.updated_by = ctx.user_id
         order.version = int(getattr(order, "version", 0) or 0) + 1
-        # CRM POs enter the fulfillment wizard; vendor send is an explicit step.
-        if self._is_ovf_sourced(order):
+        # CRM product/OVF and outsourced service POs enter the fulfillment wizard.
+        from modules.procurement.domain.service_po import (
+            ORDER_KIND_INTERNAL_SERVICE,
+            ORDER_KIND_VENDOR_SERVICE,
+        )
+
+        order_kind = (getattr(order, "order_kind", None) or "product").strip().lower()
+        if self._is_ovf_sourced(order) or order_kind == ORDER_KIND_VENDOR_SERVICE:
             from modules.procurement.service.scm_fulfillment_service import ScmFulfillmentService
 
             ScmFulfillmentService(self._db).initialize_on_issue(order)
@@ -2364,11 +2436,17 @@ class ScmHandoffService:
             entity_id=order_id,
             operation="scm_finalize",
             performed_by=ctx.user_id,
-            new_value={"company_po_number": order.company_po_number},
+            new_value={
+                "company_po_number": order.company_po_number,
+                "order_kind": order_kind,
+            },
         )
+        # Cache Service internal POs go straight to Projects PO Queue (manual Create Project).
+        if order_kind == ORDER_KIND_INTERNAL_SERVICE:
+            self._share_internal_service_po_to_projects(ctx, order)
         # Non-CRM inventory POs still get the best-effort vendor issue mail.
-        # CRM OVF POs use the fulfillment "Send PO to vendor" step instead.
-        if not self._is_ovf_sourced(order):
+        # CRM OVF / vendor_service POs use the fulfillment "Send PO to vendor" step instead.
+        elif not self._is_ovf_sourced(order) and order_kind != ORDER_KIND_VENDOR_SERVICE:
             self._notify_vendor_po_issued(
                 ctx,
                 order,
@@ -2376,6 +2454,70 @@ class ScmHandoffService:
                 po_pdf_filename=po_pdf_filename,
             )
         return order
+
+    def _share_internal_service_po_to_projects(
+        self, ctx: TenantContext, order: ProcOrderHeader
+    ) -> None:
+        """After Management issues a Cache Service PO, enqueue Projects PO Queue."""
+        from modules.project.adapters.crm_port import ProjectCrmAdapter
+        from modules.project.schemas import ProjectPoQueueShareCreate
+        from modules.project.service.project_po_queue_service import ProjectPoQueueService
+
+        remarks_parts = ["Internal Service PO (Cache Service) — create project in PM."]
+        project_name = "Service project"
+        circle_name = "TBD"
+        site_name = "TBD"
+        opp_id = getattr(order, "source_document_id", None)
+        if opp_id is not None:
+            crm_ctx = ProjectCrmAdapter(self._db).resolve_opportunity_project_context(
+                ctx, opp_id
+            )
+            project_name = (
+                (crm_ctx.get("project_title") or "").strip() or project_name
+            )
+            circle_name = (crm_ctx.get("circle_name") or "").strip() or circle_name
+            site_name = (crm_ctx.get("site_name") or "").strip() or site_name
+            customer_hint = (crm_ctx.get("customer_name") or "").strip()
+            customer_po = (crm_ctx.get("customer_po_number") or "").strip()
+            channel = (crm_ctx.get("service_sourcing_channel") or "").strip()
+            remarks_parts.append(f"Opportunity: {opp_id}")
+            if channel:
+                remarks_parts.append(f"Channel: {channel}")
+            if customer_hint:
+                remarks_parts.append(f"Customer: {customer_hint}")
+            if customer_po:
+                remarks_parts.append(f"Customer PO: {customer_po}")
+
+        line_names = [
+            (getattr(ln, "product_name", None) or "").strip()
+            for ln in (order.lines or [])
+            if not getattr(ln, "is_deleted", False)
+            and (getattr(ln, "product_name", None) or "").strip()
+        ]
+        if line_names:
+            remarks_parts.append("Services: " + ", ".join(line_names[:10]))
+
+        payload = ProjectPoQueueShareCreate(
+            order_id=order.id,
+            challan_id=None,
+            project_name=project_name[:255],
+            circle_name=circle_name[:255],
+            site_name=site_name[:255],
+            contact_person="TBD",
+            contact_number="TBD",
+            # Leave qty editable for SCM/Projects — digitsOnly treats non-digits as empty.
+            rack_quantity="-",
+            server_quantity="-",
+            server_type="-",
+            remarks="\n".join(remarks_parts),
+        )
+        try:
+            ProjectPoQueueService(self._db).share_to_queue(ctx, payload)
+        except Exception:  # noqa: BLE001
+            # Do not roll back PO issue if queue share races (already shared / already linked).
+            existing = ProjectPoQueueService(self._db).get_handoff(ctx, order.id)
+            if existing is None:
+                raise
 
     def _notify_vendor_po_issued(
         self,
@@ -3005,17 +3147,57 @@ class ScmHandoffService:
             replace_existing_category=replace,
         )
 
+    def list_opportunity_service_attachments(
+        self, ctx: TenantContext, opportunity_id: UUID
+    ) -> list[dict]:
+        """CRM quote + opportunity files for Cache/Outsourced service POs (no OVF)."""
+        from modules.crm.repository.quote_repository import QuoteRepository
+
+        entity_filters: list[tuple[str, UUID]] = [("opportunity", opportunity_id)]
+        quotes = QuoteRepository(self._db).list_quotes(
+            ctx, None, opportunity_id=opportunity_id
+        )
+        accepted = next((q for q in quotes if q.quote_stage == "accepted"), None)
+        if accepted is not None:
+            entity_filters.append(("quote", accepted.id))
+        elif quotes:
+            entity_filters.append(("quote", quotes[0].id))
+        rows = ProcurementCrmAdapter(self._db).list_attachments(
+            ctx, entity_filters=entity_filters
+        )
+        seen: set = set()
+        out: list[dict] = []
+        for row in rows:
+            if row.id in seen:
+                continue
+            seen.add(row.id)
+            out.append(self._attachment_summary(row))
+        return out
+
     def list_commercial_documents_for_order(
         self, ctx: TenantContext, order_id: UUID
     ) -> list[dict]:
-        """OVF pack + PO-specific files for approval / SCM review."""
+        """OVF/sales pack + PO-specific files for approval / SCM review."""
+        from modules.procurement.domain.service_po import (
+            SOURCE_DOC_TYPE_OPPORTUNITY_SERVICE,
+            SERVICE_ORDER_KINDS,
+        )
+
         order = self._order_service.get_order(ctx, order_id)
         docs: list[dict] = []
         source_module = (getattr(order, "source_module", None) or "").strip().lower()
+        source_type = (getattr(order, "source_document_type", None) or "").strip().lower()
         source_id = getattr(order, "source_document_id", None)
+        order_kind = (getattr(order, "order_kind", None) or ORDER_KIND_PRODUCT).strip().lower()
         if source_module == "crm" and source_id is not None:
             try:
-                docs.extend(self.list_ovf_attachments(ctx, source_id))
+                if (
+                    source_type == SOURCE_DOC_TYPE_OPPORTUNITY_SERVICE
+                    or order_kind in SERVICE_ORDER_KINDS
+                ):
+                    docs.extend(self.list_opportunity_service_attachments(ctx, source_id))
+                else:
+                    docs.extend(self.list_ovf_attachments(ctx, source_id))
             except Exception:
                 pass
         docs.extend(self.list_po_attachments(ctx, order_id))
@@ -3047,9 +3229,12 @@ class ScmHandoffService:
             linked_ovf_id = crm.find_ovf_id_for_sales_pack(
                 ctx, entity_type=row.entity_type, entity_id=row.entity_id
             )
-            if linked_ovf_id is None:
+            if linked_ovf_id is not None:
+                self.get_ovf_preview(ctx, linked_ovf_id)
+            elif not self._sales_pack_linked_to_service_po(
+                ctx, entity_type=row.entity_type, entity_id=row.entity_id
+            ):
                 raise NotFoundException("Attachment not found")
-            self.get_ovf_preview(ctx, linked_ovf_id)
         else:
             raise NotFoundException("Attachment not found")
 

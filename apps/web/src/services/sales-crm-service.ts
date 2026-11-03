@@ -705,6 +705,8 @@ export type Opportunity = {
   has_hardware?: boolean;
   has_software?: boolean;
   has_services?: boolean;
+  /** Outsourced | Cache Service — copied from lead Service Sourcing Channel. */
+  service_sourcing_channel?: string | null;
   cloud_sub_product?: string | null;
   customer_mrr?: number | null;
   customer_arr?: number | null;

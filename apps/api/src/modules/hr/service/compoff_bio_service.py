@@ -11,8 +11,18 @@ from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.orm import Session
-from zk import ZK
-from zk.exception import ZKErrorResponse, ZKNetworkError
+
+try:
+    from zk import ZK
+    from zk.exception import ZKErrorResponse, ZKNetworkError
+except ModuleNotFoundError:  # optional runtime dep (pyzk) - not always in the API image
+    ZK = None  # type: ignore[misc, assignment]
+
+    class ZKErrorResponse(Exception):
+        """Fallback when pyzk is not installed."""
+
+    class ZKNetworkError(Exception):
+        """Fallback when pyzk is not installed."""
 
 from core.exceptions import AppException, ConflictException, NotFoundException
 from modules.foundation.domain.value_objects import TenantContext
@@ -419,6 +429,11 @@ class BiometricDeviceService:
         device = self.get(ctx, row_id)
         if device.status != "active":
             raise AppException("Biometric device is inactive")
+        if ZK is None:
+            raise AppException(
+                "Biometric ZK library (pyzk) is not installed on this API server. "
+                "Install pyzk to download device logs."
+            )
         if not device.ip_address or not device.port:
             raise AppException("Set the device IP address and port before downloading logs.")
         password = int(str(device.comm_password or "0").strip() or "0")

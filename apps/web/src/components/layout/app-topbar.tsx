@@ -2,15 +2,19 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { LogIn } from "lucide-react";
 
 import { AppTopbarNotifications } from "@/components/layout/app-topbar-notifications";
 import { CompanyContextBadge } from "@/components/layout/company-context-badge";
 import { ShellGlobalSearch } from "@/components/layout/shell-global-search";
+import { isHrPath } from "@/config/hr-nav";
 import { useAuthUser } from "@/hooks/use-auth-user";
 
 export function AppTopbar() {
   const { signedIn, loading } = useAuthUser();
+  const pathname = usePathname() || "";
+  const showEntitySwitcher = signedIn && isHrPath(pathname);
 
   return (
     <header className="sticky top-0 z-40 flex h-14 items-center justify-between gap-4 border-b border-border/80 bg-card/80 px-4 backdrop-blur-md supports-backdrop-filter:bg-card/70 sm:px-6">
@@ -35,7 +39,7 @@ export function AppTopbar() {
       <ShellGlobalSearch className="min-w-0 flex-1" />
 
       <div className="flex shrink-0 items-center gap-2">
-        {signedIn ? <CompanyContextBadge /> : null}
+        {showEntitySwitcher ? <CompanyContextBadge /> : null}
         <AppTopbarNotifications />
         {!signedIn && !loading ? (
           <Link

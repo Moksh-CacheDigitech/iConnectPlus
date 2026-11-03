@@ -333,6 +333,7 @@ class OrderResponse(BaseModel):
     source_module: str | None = None
     source_document_type: str | None = None
     source_document_id: UUID | None = None
+    order_kind: str = "product"
     company_po_number: str | None = None
     entity_code: str | None = None
     baseline_amount: float = 0

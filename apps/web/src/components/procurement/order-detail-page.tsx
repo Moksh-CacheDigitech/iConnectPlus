@@ -805,10 +805,14 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
   const negotiationApplies = Boolean(
     order && order.status === "draft" && order.source_module === "crm",
   );
-  // Fulfillment wizard only matters once the CRM PO is live with the distributor.
+  const orderKind = (order?.order_kind || "product").toLowerCase();
+  const isInternalServicePo = orderKind === "internal_service";
+  const isVendorServicePo = orderKind === "vendor_service";
+  // Fulfillment wizard for CRM product/OVF and outsourced service POs (not Cache Service).
   const fulfillmentApplies = Boolean(
     order &&
     order.source_module === "crm" &&
+    !isInternalServicePo &&
     !["draft", "submitted", "cancelled"].includes((order.status || "").toLowerCase()),
   );
   const GRN_UNLOCK_STAGES = new Set([
@@ -825,6 +829,7 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
   /** GRN / receipt / challan only after issue (+ fulfillment gate for CRM POs). */
   const canReceipt = Boolean(
     order &&
+    !isInternalServicePo &&
     !["draft", "submitted", "cancelled"].includes((order.status || "").toLowerCase()) &&
     !fulfillmentBlocksGrn,
   );
@@ -834,17 +839,30 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
   const canFinalize =
     order &&
     orderStatus === "draft" &&
-    (order.source_module === "crm" || order.source_document_type === "inventory_initiated") &&
+    (order.source_module === "crm" ||
+      order.source_document_type === "inventory_initiated" ||
+      order.source_document_type === "opportunity_service" ||
+      isVendorServicePo ||
+      isInternalServicePo) &&
     (order.lines?.length ?? 0) > 0 &&
     !finalizeBlockedByApproval &&
     !negotiationBlocksIssue &&
-    !isAdmin;
+    // Admins may also send Internal/Vendor Service POs for Accept PO → Management.
+    (!isAdmin || isInternalServicePo || isVendorServicePo);
+  const isOpportunityServicePo =
+    order?.source_document_type === "opportunity_service" ||
+    isInternalServicePo ||
+    isVendorServicePo;
   const editPoHref =
-    order?.source_module === "crm" && order.source_document_id
+    order?.source_module === "crm" &&
+      order.source_document_id &&
+      !isOpportunityServicePo
       ? `/procurement/scm/ovf/${order.source_document_id}/po`
       : null;
   const ovfViewHref =
-    order?.source_module === "crm" && order.source_document_id
+    order?.source_module === "crm" &&
+      order.source_document_id &&
+      !isOpportunityServicePo
       ? `/procurement/scm/ovf/${order.source_document_id}`
       : null;
   const lineCount = order?.lines?.length ?? 0;
@@ -1225,8 +1243,36 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
                 />
               ) : null}
 
+              {isInternalServicePo &&
+                !["draft", "submitted", "cancelled"].includes(orderStatus) ? (
+                <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+                  Internal Service (Cache Service) PO is issued. It was shared to{" "}
+                  <Link
+                    href="/projects/po-queue"
+                    className="cursor-pointer font-semibold underline underline-offset-2 transition-colors duration-200 hover:text-sky-800"
+                  >
+                    Projects → PO Queue
+                  </Link>{" "}
+                  for project creation. GRN / vendor fulfillment does not apply.
+                </div>
+              ) : null}
+
+              {isVendorServicePo ? (
+                <div className="rounded-xl border border-border/70 bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+                  Vendor Service (Outsourced) PO — use Accept PO → Management, then fulfillment to
+                  send to the vendor.
+                </div>
+              ) : null}
+
               <SectionCard title="Purchase order overview">
                 <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <DetailItem label="PO kind">
+                    {isInternalServicePo
+                      ? "Internal Service"
+                      : isVendorServicePo
+                        ? "Vendor Service"
+                        : "Product"}
+                  </DetailItem>
                   <DetailItem label="Company PO">
                     {order.company_po_number?.trim() || order.document_number}
                   </DetailItem>
