@@ -33,7 +33,7 @@ services:
       RUN_MIGRATIONS: "true"
       CORS_ORIGINS: ${CORS_ORIGINS}
       CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-}
-      FRONTEND_URL: ${FRONTEND_URL:-https://172.16.200.30}
+      FRONTEND_URL: ${FRONTEND_URL:-https://erp.iconnectplus.in}
       MICROSOFT_REDIRECT_URI: ${MICROSOFT_REDIRECT_URI:-}
       SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
       REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
@@ -113,7 +113,7 @@ services:
       context: ./apps/web
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://172.16.200.30/api/v1}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://erp.iconnectplus.in/api/v1}
         NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-iConnect Plus}
         NEXT_PUBLIC_DEMO_EMAIL: ${NEXT_PUBLIC_DEMO_EMAIL:-admin@example.com}
         NEXT_PUBLIC_DEMO_PASSWORD: ${NEXT_PUBLIC_DEMO_PASSWORD:-Secure1!}

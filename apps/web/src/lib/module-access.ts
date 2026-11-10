@@ -29,6 +29,8 @@ export function hasAllModulesAdmin(adminModuleKeys: string[]): boolean {
 
 export function moduleKeyForHref(href: string): string | null {
   if (href === "/" || href === "/home" || href === "/my-jobs") return null;
+  // External absolute URLs (e.g. Feedback Microsoft Form) are not module-gated.
+  if (/^https?:\/\//i.test(href)) return null;
   if (href === "/organization/users" || href.startsWith("/organization/")) {
     return "organization";
   }

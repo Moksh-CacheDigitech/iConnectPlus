@@ -31,3 +31,4 @@ defusedxml==0.7.1
 pypdfium2==4.30.1
 pillow==11.3.0
 pyzk==0.9
+future==1.0.0

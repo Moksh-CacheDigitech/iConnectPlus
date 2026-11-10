@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   Mail,
   Megaphone,
+  MessageSquare,
   Mic,
   Package,
   Shield,
@@ -27,6 +28,10 @@ import {
 } from "lucide-react";
 
 import { erpModules, type ErpModule } from "@/config/modules";
+
+/** Office Microsoft Form — opens outside the ERP shell. */
+export const FEEDBACK_FORM_URL =
+  "https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=wYYSMPwX2kiEseoRX2d4tKRY4d-KeFJLoGvKu8A4eYlUMUowWkswNlBHUzI4N0VFTlpHNEJZOVBHTC4u";
 
 export type NavItem = {
   title: string;
@@ -158,4 +163,16 @@ export const navigation: NavGroup[] = [
       ],
     };
   }),
+  {
+    title: "Feedback",
+    items: [
+      {
+        title: "Feedback",
+        href: FEEDBACK_FORM_URL,
+        description: "Share feedback about iConnect Plus",
+        icon: MessageSquare,
+        inApp: false,
+      },
+    ],
+  },
 ];
