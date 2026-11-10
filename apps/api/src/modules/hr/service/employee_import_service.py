@@ -157,17 +157,43 @@ class EmployeeImportService:
         rows = list(self._db.scalars(stmt).all())
         commands = EmployeeCommands(self._db)
         deleted = 0
+        employee_ids: list[UUID] = []
         for i, row in enumerate(rows):
             # Free unique (company_id, employee_code) and (company_id, email)
             commands.soft_delete_freeing_identity(
                 row.id, suffix=f"{stamp}-{i}", deleted_by=ctx.user_id
             )
+            employee_ids.append(row.id)
             deleted += 1
+
+        # Free hr_employment document numbers so re-import can allocate EMPL-* again.
+        empl_cleared = 0
+        if employee_ids:
+            empl_rows = list(
+                self._db.scalars(
+                    select(HrEmployment).where(
+                        HrEmployment.tenant_id == ctx.tenant_id,
+                        HrEmployment.is_deleted.is_(False),
+                        HrEmployment.employee_id.in_(employee_ids),
+                    )
+                ).all()
+            )
+            for j, empl in enumerate(empl_rows):
+                empl.is_deleted = True
+                empl.deleted_at = datetime.now(timezone.utc)
+                empl.deleted_by = ctx.user_id
+                empl.document_number = f"{empl.document_number}-DEL-{stamp}-{j}"[:50]
+                empl.updated_by = ctx.user_id
+                empl.version = int(empl.version or 1) + 1
+                empl_cleared += 1
 
         self._db.flush()
         return {
             "deleted": deleted,
-            "message": f"Soft-deleted {deleted} employee(s). Codes freed for re-import.",
+            "message": (
+                f"Soft-deleted {deleted} employee(s) and {empl_cleared} "
+                "employment record(s). Codes freed for re-import."
+            ),
         }
 
     def import_rows(self, ctx: TenantContext, rows: list[dict]) -> dict:
@@ -199,6 +225,8 @@ class EmployeeImportService:
         errors: list[str] = []
         results: list[dict] = []
         code_to_id: dict[str, UUID] = {}
+        # Track emails claimed in this batch per company to avoid unique collisions.
+        claimed_emails: dict[UUID, set[str]] = {}
 
         for c in companies:
             for emp in self._employees.list_employees(ctx, company_id=c.id):
@@ -246,6 +274,22 @@ class EmployeeImportService:
 
                     if not email:
                         email = f"{emp_code.lower().replace(' ', '')}@import.cache.local"
+
+                    email_key = email.strip().lower()
+                    claimed = claimed_emails.setdefault(company.id, set())
+                    if email_key in claimed:
+                        # Sheet often reuses personal/cache emails — keep import moving.
+                        uniquified = (
+                            f"{emp_code.lower().replace(' ', '')}."
+                            f"{email_key.replace('@', '.at.')}@import.cache.local"
+                        )
+                        warnings.append(
+                            f"Row {idx} ({emp_code}): email '{email}' already used in this "
+                            f"company/import - using {uniquified}"
+                        )
+                        email = uniquified
+                        email_key = email.lower()
+                    claimed.add(email_key)
 
                     dept_id = self._ensure_department(
                         ctx, company.id, branch_id, department_name, dept_cache
@@ -725,6 +769,18 @@ class EmployeeImportService:
             }
             if work_location:
                 fields["work_location_text"] = work_location
+            # Moving company keeps the old EMPL doc number — that can collide with
+            # uk_hr_empl_company_doc. Always allocate a fresh number on company change.
+            if existing.company_id != company_id:
+                from modules.hr.domain.enums import HrEntityType
+                from modules.hr.service.document_number_service import DocumentNumberService
+
+                fields["document_number"] = DocumentNumberService(self._db).generate(
+                    HrEntityType.EMPLOYMENT,
+                    company_id,
+                    HrEmployment,
+                    "document_number",
+                )
             self._employment.update(ctx, existing.id, **fields)
             return
         self._employment.create(

@@ -53,6 +53,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         return;
       }
       // HttpOnly cookie session survives reload — probe /auth/me with credentials.
+      // apiClient refreshes via the refresh cookie on 401 before giving up.
       try {
         await apiClient("/auth/me", { auth: true });
         markSessionPresent();
@@ -61,8 +62,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
           setChecking(false);
         }
         return;
-      } catch {
-        // fall through to unauthenticated
+      } catch (err) {
+        // Only clear on confirmed auth failure — keep hint through transient blips.
+        if (!(err instanceof ApiClientError) || err.status !== 401) {
+          if (isAuthenticated()) {
+            if (!cancelled) {
+              setAuthed(true);
+              setChecking(false);
+            }
+            return;
+          }
+        }
       }
       if (!cancelled) {
         clearTokens();

@@ -553,21 +553,42 @@ def create_shared_ovf(
     # Lead BOQ/SOW + DR auto-advance the opportunity to oem_pending (or deal_reg).
     opportunity = blueprint.get(sales_ctx, opportunity.id)
     state = (opportunity.blueprint_state or "").strip()
+
+    def _clear_pending_approvals() -> None:
+        """Unlock opportunities parked in *_approval after lead-doc sync."""
+        nonlocal opportunity, state
+        while True:
+            opportunity = blueprint.get(sales_ctx, opportunity.id)
+            state = (opportunity.blueprint_state or "").strip()
+            if not getattr(opportunity, "locked", False) and not state.endswith("_approval"):
+                break
+            tasks = ApprovalTaskService(db).list(
+                sales_ctx, entity_id=opportunity.id, status="pending"
+            )
+            if not tasks:
+                break
+            decide_pending(db, sales_ctx, opportunity.id)
+
+    _clear_pending_approvals()
+
     if state in {"open", "boq_pending", "boq_approval", "sow_approval"}:
-        blueprint.perform_action(
-            sales_ctx, opportunity.id, "attach_boq", tiny_file(f"BOQ_{index:02d}.pdf")
-        )
-        blueprint.perform_action(
-            sales_ctx,
-            opportunity.id,
-            "send_boq_approval",
-            {
-                "team_role": "presales",
-                "assigned_user_ids": [approver_id],
-                "remarks": f"Approve BOQ for SCM demo #{index}",
-            },
-        )
-        decide_pending(db, sales_ctx, opportunity.id)
+        if state in {"boq_approval", "sow_approval"} or getattr(opportunity, "locked", False):
+            _clear_pending_approvals()
+        if (opportunity.blueprint_state or "").strip() in {"open", "boq_pending"}:
+            blueprint.perform_action(
+                sales_ctx, opportunity.id, "attach_boq", tiny_file(f"BOQ_{index:02d}.pdf")
+            )
+            blueprint.perform_action(
+                sales_ctx,
+                opportunity.id,
+                "send_boq_approval",
+                {
+                    "team_role": "presales",
+                    "assigned_user_ids": [approver_id],
+                    "remarks": f"Approve BOQ for SCM demo #{index}",
+                },
+            )
+            decide_pending(db, sales_ctx, opportunity.id)
         opportunity = blueprint.get(sales_ctx, opportunity.id)
         state = (opportunity.blueprint_state or "").strip()
     if state == "deal_reg":
@@ -588,6 +609,7 @@ def create_shared_ovf(
         )
         opportunity = blueprint.get(sales_ctx, opportunity.id)
         state = (opportunity.blueprint_state or "").strip()
+    _clear_pending_approvals()
     if state != "quote_ready":
         raise RuntimeError(
             f"Expected quote_ready after OEM attach for SCM demo #{index}, got {state}"

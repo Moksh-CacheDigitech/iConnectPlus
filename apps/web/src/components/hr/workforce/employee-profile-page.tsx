@@ -127,15 +127,15 @@ const EDIT_SECTIONS: {
   description: string;
   icon: typeof UserRound;
 }[] = [
-  { id: "personal", title: "Personal & contact", description: "Identity, contact details, addresses, and emergency contact.", icon: UserRound },
-  { id: "employment", title: "Employment", description: "Organisation, role, manager, work location, and status.", icon: Building2 },
-  { id: "government", title: "Government IDs", description: "Tax, identity, statutory, and licence details.", icon: ShieldCheck },
-  { id: "bank", title: "Bank account", description: "Salary account details collected during onboarding.", icon: Landmark },
-  { id: "salary", title: "Payroll & salary", description: "Salary structure, statutory deductions, and tax setup.", icon: BriefcaseBusiness },
-  { id: "education", title: "Education", description: "Qualifications, institutions, and certificates.", icon: GraduationCap },
-  { id: "history", title: "Previous employment", description: "Prior employers and work history.", icon: Contact },
-  { id: "documents", title: "Documents", description: "Employee documents and file metadata.", icon: FileText },
-];
+    { id: "personal", title: "Personal & contact", description: "Identity, contact details, addresses, and emergency contact.", icon: UserRound },
+    { id: "employment", title: "Employment", description: "Organisation, role, manager, work location, and status.", icon: Building2 },
+    { id: "government", title: "Government IDs", description: "Tax, identity, statutory, and licence details.", icon: ShieldCheck },
+    { id: "bank", title: "Bank account", description: "Salary account details collected during onboarding.", icon: Landmark },
+    { id: "salary", title: "Payroll & salary", description: "Salary structure, statutory deductions, and tax setup.", icon: BriefcaseBusiness },
+    { id: "education", title: "Education", description: "Qualifications, institutions, and certificates.", icon: GraduationCap },
+    { id: "history", title: "Previous employment", description: "Prior employers and work history.", icon: Contact },
+    { id: "documents", title: "Documents", description: "Employee documents and file metadata.", icon: FileText },
+  ];
 
 type LinkedData = {
   attendance: Record<string, unknown>[];
@@ -586,18 +586,59 @@ export function EmployeeProfilePage({ employeeId }: { employeeId: string }) {
         <div className="min-w-0 flex-1 grid gap-2 p-4 sm:grid-cols-2 lg:grid-cols-3 text-sm">
           <Info label="Employee ID" value={record.employeeCode} />
           <Info
-            label="Legal entity"
+            label="Entity"
             value={record.extension.employment.entityName || "-"}
           />
-          <Info label="Department" value={record.departmentName} />
-          <Info label="Designation" value={record.designationName} />
-          <Info label="Reporting manager" value={record.reportingManagerName} />
-          <Info label="Branch" value={record.branchName} />
-          <Info label="Joined" value={record.joiningDate || "-"} />
+          <Info
+            label="Organisation"
+            value={
+              record.extension.employment.branchName ||
+              record.branchName ||
+              record.companyName ||
+              "-"
+            }
+          />
+          <Info
+            label="Base Location"
+            value={record.locationName || record.extension.employment.location || "-"}
+          />
+          <Info
+            label="Department"
+            value={record.departmentName || record.extension.employment.departmentName || "-"}
+          />
+          <Info
+            label="Designation"
+            value={record.designationName || record.extension.employment.designationName || "-"}
+          />
+          <Info
+            label="Reporting manager"
+            value={
+              record.reportingManagerName ||
+              record.extension.employment.reportingManagerName ||
+              "-"
+            }
+          />
+          <Info
+            label="DOJ"
+            value={record.joiningDate || record.extension.employment.joiningDate || "-"}
+          />
           <Info label="Employment type" value={formatEmploymentTypeLabel(record.employmentType)} />
-          <Info label="Status" value={<HrStatusBadge status={record.lifecycleStatus} />} />
-          <Info label="cache email id" value={record.officialEmail} />
-          <Info label="Emp. Contact No." value={maskPhone(record.mobile) || "-"} />
+          <Info
+            label="Status"
+            value={
+              <HrStatusBadge
+                status={record.extension.employment.lifecycleStatus || record.lifecycleStatus}
+              />
+            }
+          />
+          <Info
+            label="cache email id"
+            value={record.officialEmail || record.extension.personal.officialEmail || "-"}
+          />
+          <Info
+            label="Emp. Contact No."
+            value={maskPhone(record.mobile || record.extension.personal.mobile) || "-"}
+          />
         </div>
       </div>
 
@@ -645,13 +686,14 @@ export function EmployeeProfilePage({ employeeId }: { employeeId: string }) {
 
         {tab === "gov" ? (
           <EmsFormGrid>
-            <Info label="Aadhaar" value={maskAadhaar(record.extension.governmentIds.aadhaar) || "-"} />
+            <Info label="Aadhar" value={maskAadhaar(record.extension.governmentIds.aadhaar) || "-"} />
             <Info label="PAN" value={maskPan(record.extension.governmentIds.pan) || "-"} />
             <Info
               label="Passport"
               value={maskKeepLast(record.extension.governmentIds.passport) || "-"}
             />
-            <Info label="UAN" value={maskKeepLast(record.extension.governmentIds.uan) || "-"} />
+            <Info label="UAN No" value={maskKeepLast(record.extension.governmentIds.uan) || "-"} />
+            <Info label="ESI / ESIC" value={maskKeepLast(record.extension.governmentIds.esic) || (record.extension.salary.esi ? "Yes" : "-")} />
             <Info
               label="DL"
               value={maskKeepLast(record.extension.governmentIds.drivingLicense) || "-"}
@@ -660,22 +702,39 @@ export function EmployeeProfilePage({ employeeId }: { employeeId: string }) {
         ) : null}
 
         {tab === "bank" ? (
-          <Section title="Salary Account">
-            <p className="mb-2 text-xs text-muted-foreground">
-              Verified account details provided by the employee during onboarding.
-            </p>
-            {bankFilled(record.extension.bank) ? (
-              <EmsFormGrid>
-                <Info label="Bank" value={record.extension.bank.bankName || "-"} />
-                <Info label="Holder" value={record.extension.bank.accountHolderName || "-"} />
-                <Info label="IFSC" value={record.extension.bank.ifsc || "-"} />
-                <Info label="Account" value={maskAccount(record.extension.bank.accountNumber)} />
-                <Info label="Branch" value={record.extension.bank.branchName || "-"} />
-              </EmsFormGrid>
-            ) : (
-              <p className="text-xs text-muted-foreground">No verified bank details on file.</p>
-            )}
-          </Section>
+          <div className="space-y-4">
+            <Section title="Personal / employee bank">
+              <p className="mb-2 text-xs text-muted-foreground">
+                Account details from onboarding or Excel import (Personal Account Number).
+              </p>
+              {bankFilled(record.extension.bank) ? (
+                <EmsFormGrid>
+                  <Info label="Bank Name" value={record.extension.bank.bankName || "-"} />
+                  <Info label="Holder" value={record.extension.bank.accountHolderName || "-"} />
+                  <Info label="IFSC Code" value={record.extension.bank.ifsc || "-"} />
+                  <Info label="Personal Account Number" value={maskAccount(record.extension.bank.accountNumber)} />
+                  <Info label="Branch" value={record.extension.bank.branchName || "-"} />
+                </EmsFormGrid>
+              ) : (
+                <p className="text-xs text-muted-foreground">No personal bank details on file.</p>
+              )}
+            </Section>
+            <Section title="Salary account">
+              <p className="mb-2 text-xs text-muted-foreground">
+                Company salary account (Salary Bank Name / Salary Account Num).
+              </p>
+              {bankFilled(record.extension.companyBank) ? (
+                <EmsFormGrid>
+                  <Info label="Salary Bank Name" value={record.extension.companyBank.bankName || "-"} />
+                  <Info label="Holder" value={record.extension.companyBank.accountHolderName || "-"} />
+                  <Info label="IFSC Code" value={record.extension.companyBank.ifsc || "-"} />
+                  <Info label="Salary Account Num" value={maskAccount(record.extension.companyBank.accountNumber)} />
+                </EmsFormGrid>
+              ) : (
+                <p className="text-xs text-muted-foreground">No salary bank details on file.</p>
+              )}
+            </Section>
+          </div>
         ) : null}
 
         {tab === "documents" ? (
@@ -1918,21 +1977,55 @@ function OverviewTab({
           <OverviewCard title="Employment">
             <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
               <OverviewField
-                label="Legal entity"
+                label="Entity"
                 value={record.extension.employment.entityName}
               />
-              <OverviewField label="Department" value={record.departmentName} />
-              <OverviewField label="Designation" value={record.designationName} />
-              <OverviewField label="Branch" value={record.branchName} />
-              <OverviewField label="Reporting manager" value={record.reportingManagerName} />
+              <OverviewField
+                label="Organisation"
+                value={
+                  record.extension.employment.branchName ||
+                  record.branchName ||
+                  record.companyName ||
+                  undefined
+                }
+                hideIfEmpty
+              />
+              <OverviewField
+                label="Base Location"
+                value={record.locationName || record.extension.employment.location || undefined}
+                hideIfEmpty
+              />
+              <OverviewField
+                label="Department"
+                value={record.departmentName || record.extension.employment.departmentName}
+              />
+              <OverviewField
+                label="Designation"
+                value={record.designationName || record.extension.employment.designationName}
+              />
+              <OverviewField
+                label="Reporting manager"
+                value={
+                  record.reportingManagerName ||
+                  record.extension.employment.reportingManagerName ||
+                  undefined
+                }
+              />
               <OverviewField
                 label="Employment type"
                 value={formatEmploymentTypeLabel(record.employmentType)}
               />
-              <OverviewField label="Joined" value={record.joiningDate} />
+              <OverviewField
+                label="DOJ"
+                value={record.joiningDate || record.extension.employment.joiningDate}
+              />
               <OverviewField
                 label="Status"
-                value={<HrStatusBadge status={record.lifecycleStatus} />}
+                value={
+                  <HrStatusBadge
+                    status={record.extension.employment.lifecycleStatus || record.lifecycleStatus}
+                  />
+                }
               />
             </div>
           </OverviewCard>
@@ -1950,6 +2043,80 @@ function OverviewTab({
           </OverviewCard>
         </div>
       </div>
+
+      {(record.extension.education?.length ?? 0) > 0 ? (
+        <OverviewCard title="Education">
+          <div className="space-y-2">
+            {record.extension.education.map((edu) => (
+              <div
+                key={edu.id}
+                className="grid grid-cols-1 gap-x-4 gap-y-1 rounded-md border border-border/50 px-3 py-2 sm:grid-cols-3"
+              >
+                <OverviewField label="Degree" value={edu.degree || undefined} />
+                <OverviewField label="Field" value={edu.field || undefined} hideIfEmpty />
+                <OverviewField
+                  label="Marksheet / certificate"
+                  value={edu.certificateFileName || undefined}
+                  hideIfEmpty
+                />
+              </div>
+            ))}
+          </div>
+        </OverviewCard>
+      ) : null}
+
+      {(record.extension.previousEmployment?.length ?? 0) > 0 ? (
+        <OverviewCard title="Previous employment">
+          <div className="space-y-2">
+            {record.extension.previousEmployment.map((job) => (
+              <div
+                key={job.id}
+                className="grid grid-cols-1 gap-x-4 gap-y-1 rounded-md border border-border/50 px-3 py-2 sm:grid-cols-2"
+              >
+                <OverviewField label="Company" value={job.company || undefined} />
+                <OverviewField label="Designation" value={job.designation || undefined} hideIfEmpty />
+                <OverviewField
+                  label="Notes / letters"
+                  value={job.reasonForLeaving || undefined}
+                  hideIfEmpty
+                  className="sm:col-span-2"
+                />
+              </div>
+            ))}
+          </div>
+        </OverviewCard>
+      ) : null}
+
+      {(() => {
+        const checklistTypes = [
+          "Laptop",
+          "Dongel and Sim",
+          "Joinning kits",
+          "Letter of Intent",
+          "Appointment Letter",
+          "10th Marksheet",
+          "12th Marksheet",
+          "Previous-Employer Offer",
+          "Previous-Employer Experience letter",
+        ];
+        const docs = (record.extension.documents ?? []).filter((d) =>
+          checklistTypes.some((t) => t.toLowerCase() === d.documentType.toLowerCase()),
+        );
+        if (!docs.length) return null;
+        return (
+          <OverviewCard title="Import checklist / documents">
+            <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+              {docs.map((d) => (
+                <OverviewField
+                  key={d.id}
+                  label={d.documentType}
+                  value={d.documentNumber || d.fileName || undefined}
+                />
+              ))}
+            </div>
+          </OverviewCard>
+        );
+      })()}
     </div>
   );
 }
@@ -2060,7 +2227,7 @@ function DocumentsTab({
     mimeType?: string;
     meta: string;
   }[] = bgDocs.length
-    ? bgDocs.map((d) => ({
+      ? bgDocs.map((d) => ({
         id: d.id,
         label: d.label,
         fileName: d.fileName,
@@ -2068,7 +2235,7 @@ function DocumentsTab({
         mimeType: d.mimeType,
         meta: "BG check portal",
       }))
-    : storedBgDocs.map((d) => ({
+      : storedBgDocs.map((d) => ({
         id: d.id,
         label: d.documentType,
         fileName: d.fileName,

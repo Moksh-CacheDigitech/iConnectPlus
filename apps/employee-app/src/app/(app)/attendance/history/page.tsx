@@ -9,7 +9,8 @@ import {
   IconLogin,
   IconLogout,
 } from "@/components/icons";
-import { AlertBox, EmptyState, FilterChips, SearchField, SubHeader, ViewportFab } from "@/components/ui";
+import { FilterChips, SearchField, SubHeader } from "@/components/app-header";
+import { AlertBox, EmptyState, ViewportFab } from "@/components/ui";
 import { ApiClientError } from "@/services/api-client";
 import { essService } from "@/services/ess-service";
 import type { EssAttendance, EssMe } from "@/types/api";
@@ -108,11 +109,10 @@ export default function AttendanceHistoryPage() {
                 key={d.iso}
                 type="button"
                 onClick={() => setSelectedDate(d.iso)}
-                className={`flex flex-col items-center gap-1 rounded-2xl py-2 text-xs ${
-                  active
+                className={`flex flex-col items-center gap-1 rounded-2xl py-2 text-xs ${active
                     ? "bg-[#004ac6] text-white"
                     : "text-[#0b1c30]"
-                }`}
+                  }`}
               >
                 <span className={active ? "text-white/70" : "text-[#434655]"}>
                   {d.dow}
@@ -186,15 +186,14 @@ export default function AttendanceHistoryPage() {
                       </p>
                     </div>
                     <span
-                      className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase ${
-                        overtime
+                      className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase ${overtime
                           ? "bg-[#eaddff] text-[#712ae2]"
                           : late
                             ? "bg-amber-100 text-amber-800"
                             : row.attendance_status === "absent"
                               ? "bg-[#ffdad6] text-[#ba1a1a]"
                               : "bg-emerald-100 text-emerald-800"
-                      }`}
+                        }`}
                     >
                       {overtime
                         ? "Overtime"
