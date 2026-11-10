@@ -56,35 +56,66 @@ class ModuleAccessService:
         ctx: TenantContext,
         user_id: UUID,
         *,
-        module_key: str,
+        module_key: str | None = None,
+        module_keys: list[str] | None = None,
         role: str,
         service_job_role: str | None = None,
     ) -> UserEntity:
+        """Grant Admin/User on one or more modules; send a single access email."""
         self._users.require_erp_admin(ctx.tenant_id, ctx.user_id)
-        key = self._require_module(module_key)
+        keys: list[str] = []
+        seen: set[str] = set()
+        for raw in [*(module_keys or []), module_key or ""]:
+            if not (raw or "").strip():
+                continue
+            key = self._require_module(raw)
+            if key in seen:
+                continue
+            seen.add(key)
+            keys.append(key)
+        if not keys:
+            raise AppException("At least one module_key is required")
+
         user = self._users.get_user(ctx.tenant_id, user_id)
         first_module = not (user.assigned_module_keys or user.admin_module_keys)
-        existing = self._modules.get_assignment(ctx.tenant_id, user_id, key)
-        current = (existing.role or MODULE_ROLE_MEMBER) if existing else None
+        granted: list[str] = []
 
-        if role == MODULE_ROLE_ADMIN:
-            if current == MODULE_ROLE_ADMIN:
-                raise ConflictException("User is already an admin of this module")
-            self._set_admin(ctx, user, key, grant=True)
-        elif role == MODULE_ROLE_MEMBER:
-            if current is not None and current != MODULE_ROLE_ADMIN:
-                raise ConflictException("User is already a user of this module")
-            if current == MODULE_ROLE_ADMIN:
-                self._set_admin(ctx, user, key, grant=False)
-            self._members.add_member(ctx, key, user_id, service_job_role)
-        else:
-            raise AppException("role must be admin or member")
+        for key in keys:
+            existing = self._modules.get_assignment(ctx.tenant_id, user_id, key)
+            current = (existing.role or MODULE_ROLE_MEMBER) if existing else None
+            user = self._users.get_user(ctx.tenant_id, user_id)
+
+            if role == MODULE_ROLE_ADMIN:
+                if current == MODULE_ROLE_ADMIN:
+                    continue
+                self._set_admin(ctx, user, key, grant=True)
+                granted.append(key)
+            elif role == MODULE_ROLE_MEMBER:
+                if current is not None and current != MODULE_ROLE_ADMIN:
+                    continue
+                if current == MODULE_ROLE_ADMIN:
+                    self._set_admin(ctx, user, key, grant=False)
+                self._members.add_member(
+                    ctx,
+                    key,
+                    user_id,
+                    service_job_role if key == "service" else None,
+                )
+                granted.append(key)
+            else:
+                raise AppException("role must be admin or member")
+
+        if not granted:
+            label = "admin" if role == MODULE_ROLE_ADMIN else "user"
+            raise ConflictException(
+                f"User already has {label} access to the selected module(s)"
+            )
 
         updated = self._users.get_user(ctx.tenant_id, user_id)
         self._notify_access_emails(
             ctx,
             user_id=user_id,
-            module_key=key,
+            module_keys=granted,
             role=role,
             first_module=first_module,
         )
@@ -95,7 +126,7 @@ class ModuleAccessService:
         ctx: TenantContext,
         *,
         user_id: UUID,
-        module_key: str,
+        module_keys: list[str],
         role: str,
         first_module: bool,
     ) -> None:
@@ -121,7 +152,7 @@ class ModuleAccessService:
                 mail.notify_welcome(
                     tenant_id=ctx.tenant_id,
                     user=row,
-                    module_key=module_key,
+                    module_keys=module_keys,
                     role=role,
                     temporary_password=DEFAULT_TEMPORARY_PASSWORD,
                     created_by=ctx.user_id,
@@ -130,7 +161,7 @@ class ModuleAccessService:
                 mail.notify_module_assigned(
                     tenant_id=ctx.tenant_id,
                     user=row,
-                    module_key=module_key,
+                    module_keys=module_keys,
                     role=role,
                     created_by=ctx.user_id,
                 )

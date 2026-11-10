@@ -340,7 +340,8 @@ class OpportunityBlueprintService:
                 return row or opp
             return opp
 
-        # Prefer BOQ study first, then SOW — both use Default task owners.
+        # Prefer BOQ study first, then SOW. BOQ uses Default task owners;
+        # SOW on Services deals routes only to the opportunity owner.
         if boq_needs:
             self._auto_raise_doc_approval(ctx, opp, doc="boq")
             row = self._repo.update(
@@ -566,7 +567,7 @@ class OpportunityBlueprintService:
                 team_role=payload.get("team_role", "presales"),
                 title=f"Attach SOW - {opp.opportunity_name}",
                 remarks=payload.get("remarks"),
-                assigned_user_ids=_require_assigned_users(payload),
+                assigned_user_ids=self._sow_assignee_ids(ctx, opp, payload),
             )
             updates["locked"] = True
         elif action == "provide_boq_attachment":
@@ -616,11 +617,6 @@ class OpportunityBlueprintService:
                 raise ConflictException("Attach a SOW before requesting approval")
             if opp.sow_approved:
                 raise ConflictException("SOW is already approved")
-            assigned = (
-                _require_assigned_users(payload)
-                if payload.get("assigned_user_ids") or payload.get("assigned_user_id")
-                else self._default_doc_approver_ids(ctx, "sow")
-            )
             self._raise_approval(
                 ctx,
                 opp,
@@ -628,7 +624,7 @@ class OpportunityBlueprintService:
                 team_role=payload.get("team_role", "presales"),
                 title=f"Approve SOW - {opp.opportunity_name}",
                 remarks=payload.get("remarks"),
-                assigned_user_ids=assigned,
+                assigned_user_ids=self._sow_assignee_ids(ctx, opp, payload),
             )
             updates["locked"] = True
         elif action == "approve_boq":
@@ -855,10 +851,43 @@ class OpportunityBlueprintService:
             )
         return owners
 
+    def _services_sow_assignee_ids(self, ctx: TenantContext, opp: CrmOpportunity) -> list[UUID]:
+        """When Services is on the deal, SOW attach/approve goes only to the owner."""
+        from modules.crm.service.crm_notification_service import resolve_employee_user_id
+
+        owner_uid = resolve_employee_user_id(
+            self._db, ctx.tenant_id, getattr(opp, "owner_employee_id", None)
+        )
+        if owner_uid is None:
+            raise ConflictException(
+                "Opportunity owner must have a user login to receive SOW tasks "
+                "when Services is selected on the lead."
+            )
+        return [owner_uid]
+
+    def _sow_assignee_ids(
+        self,
+        ctx: TenantContext,
+        opp: CrmOpportunity,
+        payload: dict[str, Any] | None = None,
+    ) -> list[UUID]:
+        """SOW recipients: owner-only for Services deals; otherwise payload / defaults."""
+        from modules.crm.domain.product_types import entity_has_services
+
+        if entity_has_services(opp):
+            return self._services_sow_assignee_ids(ctx, opp)
+        payload = payload or {}
+        if payload.get("assigned_user_ids") or payload.get("assigned_user_id"):
+            return _require_assigned_users(payload)
+        return self._default_doc_approver_ids(ctx, "sow")
+
     def _auto_raise_doc_approval(
         self, ctx: TenantContext, opp: CrmOpportunity, *, doc: str
     ) -> None:
-        """After BOQ/SOW attach, route study approval to Default task owners."""
+        """After BOQ/SOW attach, route study approval to Default task owners.
+
+        Services deals: SOW approval goes only to the opportunity owner (lead assignee).
+        """
         from modules.crm.domain.approval_step_owners import APPROVAL_STEP_CATALOG
         from modules.crm.service.approval_task_service import ApprovalTaskService
 
@@ -874,14 +903,26 @@ class OpportunityBlueprintService:
         )
         if any(task.action == action for task in pending):
             return
+        from modules.crm.domain.product_types import entity_has_services
+
+        services_sow = doc == "sow" and entity_has_services(opp)
+        assigned = (
+            self._sow_assignee_ids(ctx, opp)
+            if doc == "sow"
+            else self._default_doc_approver_ids(ctx, doc)
+        )
         self._raise_approval(
             ctx,
             opp,
             action=action,
             team_role=team_role,
             title=f"Approve {doc.upper()} - {opp.opportunity_name}",
-            remarks="Auto-routed after document attachment",
-            assigned_user_ids=self._default_doc_approver_ids(ctx, doc),
+            remarks=(
+                "Auto-routed to opportunity owner (Services selected on lead)"
+                if services_sow
+                else "Auto-routed after document attachment"
+            ),
+            assigned_user_ids=assigned,
         )
 
     def _advance_after_doc_approval(

@@ -263,10 +263,10 @@ class UserService:
             if row is None or row.is_deleted:
                 return
             mail = OrgAccessEmailService(self._repo.db)
-            module_label = (
-                "All modules"
+            mail_keys = (
+                ["*"]
                 if len(newly_granted) >= len(ERP_MODULE_KEYS)
-                else newly_granted[0]
+                else newly_granted
             )
             if first_module:
                 row.password_hash = PasswordHasher.hash_password(DEFAULT_TEMPORARY_PASSWORD)
@@ -279,7 +279,7 @@ class UserService:
                 mail.notify_welcome(
                     tenant_id=tenant_id,
                     user=row,
-                    module_key=module_label if module_label != "All modules" else "*",
+                    module_keys=mail_keys,
                     role=MODULE_ROLE_ADMIN,
                     temporary_password=DEFAULT_TEMPORARY_PASSWORD,
                     created_by=actor_id,
@@ -288,7 +288,7 @@ class UserService:
                 mail.notify_module_assigned(
                     tenant_id=tenant_id,
                     user=row,
-                    module_key=module_label if module_label != "All modules" else "*",
+                    module_keys=mail_keys,
                     role=MODULE_ROLE_ADMIN,
                     created_by=actor_id,
                 )

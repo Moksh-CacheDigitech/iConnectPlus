@@ -357,6 +357,11 @@ type Props = {
   opportunityId?: string;
   /** Distinguishes quote vs OVF for send_for_approval step-owner defaults. */
   entityType?: "quote" | "ovf" | "opportunity";
+  /**
+   * When Services was selected on the lead, SOW attachment/approval is locked to
+   * this user (opportunity owner login) — not Default task owners.
+   */
+  servicesSowOwnerUserId?: string | null;
   /** Actions rendered elsewhere by the parent (e.g. gated Create Quote / Create OVF CTAs). */
   excludeActions?: string[];
   actionLabelOverrides?: Partial<Record<string, string>>;
@@ -373,6 +378,7 @@ export function BlueprintActions({
   showDealWonBadge = false,
   opportunityId,
   entityType,
+  servicesSowOwnerUserId = null,
   excludeActions,
   actionLabelOverrides,
   actionDispatchOverrides,
@@ -480,7 +486,25 @@ export function BlueprintActions({
 
   function resolvePinnedApproverIds(action: string): string[] {
     const key = stepKeyForAction(action, entityType);
+    const sowOwner = (servicesSowOwnerUserId || "").trim();
+    if (
+      sowOwner &&
+      (action === "send_sow_for_attachment" || action === "send_sow_approval")
+    ) {
+      return [sowOwner];
+    }
     if (!key || !PINNED_STEP_KEYS.has(key)) return [];
+    return resolveDefaultApproverIds(action);
+  }
+
+  function resolveDefaultApproverIdsForAction(action: string): string[] {
+    const sowOwner = (servicesSowOwnerUserId || "").trim();
+    if (
+      sowOwner &&
+      (action === "send_sow_for_attachment" || action === "send_sow_approval")
+    ) {
+      return [sowOwner];
+    }
     return resolveDefaultApproverIds(action);
   }
 
@@ -516,10 +540,15 @@ export function BlueprintActions({
       return { ...base, fields: PO_APPROVAL_DIALOG_FIELDS };
     }
     if (SEND_APPROVAL_ACTIONS.has(action)) {
+      const sowLockedToOwner =
+        Boolean((servicesSowOwnerUserId || "").trim()) &&
+        (action === "send_sow_for_attachment" || action === "send_sow_approval");
       return {
         ...base,
         fields: APPROVAL_DIALOG_FIELDS,
-        description: base.description ?? APPROVAL_ADMIN_NOTE,
+        description: sowLockedToOwner
+          ? "Services was selected on the lead — SOW is assigned only to the opportunity owner."
+          : (base.description ?? APPROVAL_ADMIN_NOTE),
       };
     }
     return base;
@@ -546,7 +575,7 @@ export function BlueprintActions({
       return;
     }
     const pinnedIds = resolvePinnedApproverIds(action);
-    const defaultIds = resolveDefaultApproverIds(action);
+    const defaultIds = resolveDefaultApproverIdsForAction(action);
     setActiveAction(action);
     setValues(
       Object.fromEntries(

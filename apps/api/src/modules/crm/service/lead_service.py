@@ -733,11 +733,34 @@ class LeadService:
                 return
             if action in pending_actions:
                 return
-            user_ids = owners.list_user_ids(ctx, step_key) or tasks._admin_recipient_ids(ctx)
-            if not user_ids:
-                raise ConflictException(
-                    f"No default owners configured for {step_key.replace('_', ' ')}. "
-                    "Assign owners under CRM → Users → Default task owners before requiring this document."
+            # Services leads: SOW attach/approve My Jobs go only to the lead owner.
+            from modules.crm.domain.product_types import product_type_includes_services
+            from modules.crm.service.crm_notification_service import resolve_employee_user_id
+
+            if action == "provide_sow_attachment" and product_type_includes_services(
+                lead.product_type
+            ):
+                owner_uid = resolve_employee_user_id(
+                    self._db, ctx.tenant_id, lead.owner_employee_id
+                )
+                if owner_uid is None:
+                    raise ConflictException(
+                        "Lead owner must have a user login to receive SOW attachment "
+                        "when Services is selected."
+                    )
+                user_ids = [owner_uid]
+                remarks = (
+                    "Required — Services lead: SOW attachment assigned to lead owner only"
+                )
+            else:
+                user_ids = owners.list_user_ids(ctx, step_key) or tasks._admin_recipient_ids(ctx)
+                if not user_ids:
+                    raise ConflictException(
+                        f"No default owners configured for {step_key.replace('_', ' ')}. "
+                        "Assign owners under CRM → Users → Default task owners before requiring this document."
+                    )
+                remarks = (
+                    "Required — lead converts to an opportunity when documents are attached"
                 )
             team_role = APPROVAL_STEP_CATALOG[step_key][1]
             tasks.route_approval(
@@ -750,7 +773,7 @@ class LeadService:
                 action=action,
                 company_id=lead.company_id,
                 branch_id=lead.branch_id,
-                remarks="Required — lead converts to an opportunity when documents are attached",
+                remarks=remarks,
             )
 
         call_ready = self._presales_call_ready(lead)

@@ -589,6 +589,16 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
             locked={blueprint.locked}
             opportunityId={opp.id}
             entityType="opportunity"
+            servicesSowOwnerUserId={
+              opp.has_services ||
+              (opp.product_type || "")
+                .toLowerCase()
+                .split(/[,&]/)
+                .map((p) => p.trim())
+                .includes("services")
+                ? employees.find((e) => e.id === opp.owner_employee_id)?.userId ?? null
+                : null
+            }
             currentStageLabel={resolveSalesStageLabel({
               entityType: "opportunity",
               blueprintState: blueprint.state,
