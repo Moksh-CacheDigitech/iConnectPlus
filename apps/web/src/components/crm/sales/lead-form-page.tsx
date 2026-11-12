@@ -162,7 +162,8 @@ const EMPTY: LeadCreateFromCompanyInput = {
   entity_gst: "",
   entity_contact: "",
   requires_boq: true,
-  requires_sow: true,
+  /** SOW is required only when Services is in product_type (derived on save). */
+  requires_sow: false,
   notes: "",
   presales_owner_id: "",
 };
@@ -424,6 +425,9 @@ export function LeadFormPage({
         sub_product: cloudSelected ? "" : f.sub_product,
         sub_product_other: cloudSelected ? "" : f.sub_product_other,
         deal_type: formatLeadSourcingChannels(channels, types),
+        // SOW My Jobs only when Services is selected.
+        requires_sow: types.includes("Services"),
+        requires_boq: !cloudSelected,
       };
     });
   }
@@ -608,8 +612,8 @@ export function LeadFormPage({
         sale_type: resolvedSaleType || null,
         end_customer_name: endCustomerName || null,
         presales_owner_id: form.presales_owner_id?.trim() || null,
-        requires_boq: Boolean(form.requires_boq),
-        requires_sow: Boolean(form.requires_sow),
+        requires_boq: Boolean(form.requires_boq) && !isCloudProduct,
+        requires_sow: selectedProductTypes.includes("Services"),
         distributor_department: null,
       };
       if (isEdit && leadId && existingLead) {

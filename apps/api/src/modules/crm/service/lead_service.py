@@ -450,9 +450,7 @@ class LeadService:
         fields.setdefault("document_date", date.today())
         fields.setdefault("status", LeadStatus.NEW.value)
         row = self._repo.create(ctx, company_id=cid, branch_id=branch_id, lead_code=code, **fields)
-        if self._boq_sow_mandatory(row):
-            row.requires_boq = True
-            row.requires_sow = True
+        if self._apply_sales_doc_requirements(row):
             self._db.flush()
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,
@@ -495,8 +493,8 @@ class LeadService:
         # DR number is assigned at create and is the lead's unique ID - do not overwrite.
         fields.pop("dr_number", None)
         fields.pop("lead_code", None)
-        if self._boq_sow_mandatory(lead):
-            # Technical team is always looped in on hardware/services leads.
+        # BOQ/SOW flags are derived from product mix after save — ignore client overrides.
+        if self._boq_sow_mandatory(lead) or "product_type" in fields:
             fields.pop("requires_boq", None)
             fields.pop("requires_sow", None)
         if "presales_call_by_product" in fields:
@@ -558,12 +556,10 @@ class LeadService:
         if fields.get("requires_sow") is False:
             fields["sow_attached"] = False
         row = self._repo.update(ctx, lead_id, **fields)
-        if self._boq_sow_mandatory(row) and not (row.requires_boq and row.requires_sow):
-            row.requires_boq = True
-            row.requires_sow = True
-            self._db.flush()
         if row is None:
             raise NotFoundException("Lead not found")
+        if self._apply_sales_doc_requirements(row):
+            self._db.flush()
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,
             entity_name="crm_lead",
@@ -623,10 +619,44 @@ class LeadService:
 
     @staticmethod
     def _boq_sow_mandatory(lead: CrmLead | None) -> bool:
-        """Sales-process leads always need BOQ + SOW, except the cloud consumption flow."""
+        """Sales-process leads need technical docs, except the cloud consumption flow."""
         if lead is None or lead.company_account_id is None:
             return False
         return cloud_variant_from_lead(lead) is None
+
+    @staticmethod
+    def _apply_sales_doc_requirements(lead: CrmLead | None) -> bool:
+        """Derive BOQ/SOW requirements from product mix.
+
+        - Non-cloud sales leads always require BOQ.
+        - SOW is required only when Services is in product_type.
+        Returns True when flags changed.
+        """
+        from modules.crm.domain.product_types import product_type_includes_services
+
+        if lead is None:
+            return False
+        if not LeadService._boq_sow_mandatory(lead):
+            changed = bool(lead.requires_boq) or bool(lead.requires_sow)
+            if lead.requires_boq:
+                lead.requires_boq = False
+            if lead.requires_sow:
+                lead.requires_sow = False
+                lead.sow_attached = False
+            return changed
+
+        want_boq = True
+        want_sow = product_type_includes_services(lead.product_type)
+        changed = False
+        if bool(lead.requires_boq) != want_boq:
+            lead.requires_boq = want_boq
+            changed = True
+        if bool(lead.requires_sow) != want_sow:
+            lead.requires_sow = want_sow
+            if not want_sow:
+                lead.sow_attached = False
+            changed = True
+        return changed
 
     @staticmethod
     def _presales_call_ready(lead: CrmLead) -> bool:
