@@ -39,3 +39,35 @@ class HrScopeValidator(HrScopedRepository):
             raise ValidationException("Branch has no company; cannot create record")
         self.validate_company_access(ctx, cid)
         return cid
+
+    def resolve_write_company_id(
+        self,
+        ctx: TenantContext,
+        *,
+        company_id: UUID | None = None,
+        branch_id: UUID | None = None,
+    ) -> UUID:
+        """Concrete company_id for HR writes (never None — DB company_id is NOT NULL).
+
+        Module-wide HR admins get ``None`` from list-style ``resolve_company_id``;
+        creates must instead use an explicit company, the branch's company, or
+        the session/single-scoped company.
+        """
+        if company_id is not None:
+            self.validate_company_access(ctx, company_id)
+            return company_id
+        if branch_id is not None:
+            self.validate_branch_access(ctx, branch_id)
+            return self.resolve_create_company_id(ctx, branch_id=branch_id, company_id=None)
+        # Prefer session pin, then a single scoped company — never return None.
+        if ctx.company_id is not None:
+            self.validate_company_access(ctx, ctx.company_id)
+            return ctx.company_id
+        from modules.foundation.domain.org_data_scope import effective_company_ids
+
+        allowed = effective_company_ids(ctx, module_key=HR_MODULE_KEY)
+        if allowed and len(allowed) == 1:
+            return allowed[0]
+        raise ValidationException(
+            "Company is required. Select a branch that belongs to a company and try again."
+        )

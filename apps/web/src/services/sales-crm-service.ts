@@ -1123,6 +1123,15 @@ export async function getQuoteRevisionPrintPayload(
   );
 }
 
+/** Remove unapproved current revision and restore the prior approved version. */
+export async function discardQuoteCurrentRevision(quoteId: string): Promise<Quote> {
+  return unwrap(
+    await apiClient<Quote>(`${CRM_QUOTES_API}/${quoteId}/revisions/current/discard`, {
+      method: "POST",
+    }),
+  );
+}
+
 export async function getQuoteBlueprint(quoteId: string): Promise<BlueprintState> {
   return unwrap(await apiClient<BlueprintState>(`${CRM_QUOTES_API}/${quoteId}/blueprint`));
 }

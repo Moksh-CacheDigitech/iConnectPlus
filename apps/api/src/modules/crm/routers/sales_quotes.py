@@ -217,6 +217,22 @@ def get_quote_revision_print_payload(
     )
 
 
+@quotes_router.post(
+    "/{quote_id}/revisions/current/discard",
+    response_model=APIResponse[QuoteResponse],
+)
+def discard_current_quote_revision(
+    quote_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("crm.quote:update"))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Remove the unapproved current revision and restore the prior approved version."""
+    return APIResponse(
+        message="OK",
+        data=QuoteService(db).discard_current_revision(ctx, quote_id),
+    )
+
+
 @quotes_router.post("/{quote_id}/send-for-approval", response_model=APIResponse[QuoteResponse])
 def send_quote_for_approval(
     quote_id: UUID,

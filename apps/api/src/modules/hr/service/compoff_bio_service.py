@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import errno
 import hmac
 import re
 import secrets
 import socket
+import threading
+import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
@@ -231,6 +234,22 @@ def _clean_comm_password(value: str | None) -> str | None:
     return text
 
 
+# Serialize ZK downloads per device so overlapping auto-sync / manual download
+# cannot leave half-open sessions (common cause of Broken pipe / EPIPE).
+_ZK_DOWNLOAD_LOCKS: dict[str, threading.Lock] = {}
+_ZK_DOWNLOAD_LOCKS_GUARD = threading.Lock()
+
+
+def _zk_download_lock(device_id: UUID) -> threading.Lock:
+    key = str(device_id)
+    with _ZK_DOWNLOAD_LOCKS_GUARD:
+        lock = _ZK_DOWNLOAD_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _ZK_DOWNLOAD_LOCKS[key] = lock
+        return lock
+
+
 class BiometricDeviceService:
     def __init__(self, db: Session) -> None:
         self._db = db
@@ -251,6 +270,47 @@ class BiometricDeviceService:
                 return True, f"Device reachable at {ip}:{port}"
         except OSError as exc:
             return False, f"Cannot reach {ip}:{port} - {exc}"
+
+    @staticmethod
+    def _is_transient_zk_error(exc: BaseException) -> bool:
+        err_no = getattr(exc, "errno", None)
+        text = str(exc).lower()
+        if err_no in {errno.EPIPE, errno.ECONNRESET, errno.ETIMEDOUT, errno.ECONNABORTED}:
+            return True
+        return any(
+            token in text
+            for token in (
+                "broken pipe",
+                "connection reset",
+                "timed out",
+                "timeout",
+                "temporarily unavailable",
+            )
+        )
+
+    @staticmethod
+    def _format_zk_download_error(ip: str, port: int, exc: BaseException) -> str:
+        err_no = getattr(exc, "errno", None)
+        text = str(exc).lower()
+        if err_no == errno.EPIPE or "broken pipe" in text:
+            return (
+                f"Device closed the connection (broken pipe) at {ip}:{port}. "
+                "Check LAN reachability from the API host, Comm password, and that "
+                "another client is not holding the device."
+            )
+        if err_no in {errno.ECONNREFUSED, errno.EHOSTUNREACH, errno.ENETUNREACH} or any(
+            token in text for token in ("refused", "unreachable", "no route")
+        ):
+            return (
+                f"Cannot reach biometric device at {ip}:{port}. "
+                f"Confirm the device is online and port {port} is open from the API host. ({exc})"
+            )
+        if err_no == errno.ETIMEDOUT or "timed out" in text or "timeout" in text:
+            return (
+                f"Timed out talking to biometric device at {ip}:{port}. "
+                "The device may be busy or the network path is slow. Try again."
+            )
+        return f"Cannot download attendance from {ip}:{port}. {exc}"
 
     def get(self, ctx: TenantContext, row_id: UUID):
         row = self._repo.get(ctx, row_id)
@@ -436,29 +496,54 @@ class BiometricDeviceService:
             )
         if not device.ip_address or not device.port:
             raise AppException("Set the device IP address and port before downloading logs.")
+
+        ip = str(device.ip_address).strip()
+        port = int(device.port)
+        reachable, reachability_message = self._probe_device(ip, port)
+        if not reachable:
+            raise AppException(reachability_message)
+
         password = int(str(device.comm_password or "0").strip() or "0")
-        terminal = ZK(
-            str(device.ip_address).strip(),
-            port=int(device.port),
-            timeout=8,
-            password=password,
-            force_udp=False,
-            ommit_ping=True,
-        )
-        conn = None
-        try:
-            conn = terminal.connect()
-            raw_logs = conn.get_attendance() or []
-        except (OSError, ZKNetworkError, ZKErrorResponse) as exc:
+        lock = _zk_download_lock(device.id)
+        if not lock.acquire(blocking=False):
             raise AppException(
-                f"Cannot download attendance from {device.ip_address}:{device.port}. {exc}"
-            ) from exc
-        finally:
-            if conn is not None:
+                f"Attendance download already in progress for {device.device_code} "
+                f"({ip}:{port}). Wait for it to finish, then try again."
+            )
+        raw_logs: list = []
+        try:
+            last_exc: BaseException | None = None
+            for attempt in range(3):
+                terminal = ZK(
+                    ip,
+                    port=port,
+                    timeout=12,
+                    password=password,
+                    force_udp=False,
+                    ommit_ping=True,
+                )
+                conn = None
                 try:
-                    conn.disconnect()
-                except (OSError, ZKNetworkError, ZKErrorResponse):
-                    pass
+                    conn = terminal.connect()
+                    raw_logs = conn.get_attendance() or []
+                    last_exc = None
+                    break
+                except (OSError, ZKNetworkError, ZKErrorResponse) as exc:
+                    last_exc = exc
+                    if attempt < 2 and self._is_transient_zk_error(exc):
+                        time.sleep(0.8 * (attempt + 1))
+                        continue
+                    raise AppException(self._format_zk_download_error(ip, port, exc)) from exc
+                finally:
+                    if conn is not None:
+                        try:
+                            conn.disconnect()
+                        except (OSError, ZKNetworkError, ZKErrorResponse):
+                            pass
+            if last_exc is not None:
+                raise AppException(self._format_zk_download_error(ip, port, last_exc)) from last_exc
+        finally:
+            lock.release()
 
         cutoff = datetime.now(_DEVICE_LOCAL_TZ) - timedelta(days=_LOG_LOOKBACK_DAYS)
         grouped: dict[tuple[str, date], list[datetime]] = {}

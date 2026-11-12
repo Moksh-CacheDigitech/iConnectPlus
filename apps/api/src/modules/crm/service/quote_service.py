@@ -10,6 +10,7 @@ Product rules enforced here:
 
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -938,6 +939,166 @@ class QuoteService:
                     Decimal("0.01")
                 )
         return rows
+
+    def discard_current_revision(self, ctx: TenantContext, quote_id: UUID) -> CrmQuote:
+        """Remove the unapproved current revision and restore the prior approved version.
+
+        After negotiate/edit opens Vn as a draft (or pending/rejected approval), Sales can
+        discard Vn and return to Vn-1 so Create Quote Vn+1 / Deal Won / Deal Lost reappear.
+        """
+        quote = self.get(ctx, quote_id)
+        current_rev = max(1, int(quote.quote_revision or 1))
+        if current_rev <= 1:
+            raise ConflictException("Version V1 cannot be removed — there is no prior approved quote.")
+
+        stage = str(quote.quote_stage or "")
+        approval = str(quote.approval_status or "")
+        approved_stages = {
+            "approved_internal",
+            "sent_to_customer",
+            "negotiation",
+            "follow_up",
+            "accepted",
+        }
+        if stage in approved_stages or (approval == "approved" and stage not in {"draft", "internal_approval"}):
+            raise ConflictException(
+                f"V{current_rev} is already approved. Create the next version via negotiation before removing a draft."
+            )
+        if stage in {"accepted", "lost"}:
+            raise ConflictException("Cannot remove a quote version after the deal is closed.")
+
+        prior_rev = current_rev - 1
+        prior = self._revisions.get_for_revision(ctx, quote_id, prior_rev)
+        if prior is None:
+            raise ConflictException(f"Prior approved version V{prior_rev} was not found — cannot restore.")
+        payload = prior.payload_json if isinstance(prior.payload_json, dict) else None
+        header = payload.get("quote") if payload and isinstance(payload.get("quote"), dict) else None
+        lines_payload = payload.get("lines") if payload and isinstance(payload.get("lines"), list) else None
+        if not header or lines_payload is None:
+            raise ConflictException(
+                f"V{prior_rev} has no frozen line detail — cannot restore. Keep editing V{current_rev} or contact support."
+            )
+        if any(str(item.get("id") or "").startswith("archive-") for item in lines_payload if isinstance(item, dict)):
+            raise ConflictException(
+                f"V{prior_rev} only has archived totals — cannot restore line items."
+            )
+
+        # Cancel pending My Jobs approval for the discarded draft/pending revision.
+        from modules.crm.service.approval_task_service import ApprovalTaskService
+
+        tasks = ApprovalTaskService(self._db)
+        pending = tasks.list(
+            ctx,
+            company_id=quote.company_id,
+            entity_type="quote",
+            entity_id=quote_id,
+            status="pending",
+        )
+        now = datetime.now(timezone.utc)
+        for task in pending:
+            if task.action == "approve_internally" and task.status == "pending":
+                tasks._repo.update(
+                    ctx,
+                    task.id,
+                    status="cancelled",
+                    decision_remark=f"Quote V{current_rev} discarded; restored V{prior_rev}",
+                    decided_at=now,
+                    decided_by=ctx.user_id,
+                )
+
+        # Soft-delete live lines for the discarded revision, then rebuild from Vn-1.
+        for line in list(self._lines.list_for_quote(ctx, quote_id)):
+            self._lines.delete(ctx, line.id)
+
+        for index, item in enumerate(lines_payload):
+            if not isinstance(item, dict):
+                continue
+            product_id = None
+            raw_product_id = item.get("product_id")
+            if raw_product_id:
+                try:
+                    product_id = UUID(str(raw_product_id))
+                except (TypeError, ValueError):
+                    product_id = None
+            source_line_id = None
+            raw_source = item.get("source_line_id")
+            if raw_source:
+                try:
+                    source_line_id = UUID(str(raw_source))
+                except (TypeError, ValueError):
+                    source_line_id = None
+            self._lines.create(
+                ctx,
+                company_id=quote.company_id,
+                branch_id=quote.branch_id,
+                quote_id=quote_id,
+                line_no=int(item.get("line_no") or index + 1),
+                product_id=product_id,
+                product_name=str(item.get("product_name") or "Line item"),
+                hsn_sac=item.get("hsn_sac"),
+                description=item.get("description"),
+                sub_product_category=item.get("sub_product_category"),
+                line_type=str(item.get("line_type") or "hardware"),
+                qty=Decimal(str(item.get("qty") or 0)),
+                unit_cost=Decimal(str(item.get("unit_cost") or 0)),
+                unit_sell=Decimal(str(item.get("unit_sell") or 0)),
+                gst_pct=Decimal(str(item.get("gst_pct") or 0)),
+                source_line_id=source_line_id,
+            )
+
+        restored_stage = str(header.get("quote_stage") or "")
+        if restored_stage not in (approved_stages - {"accepted"}):
+            # Prefer customer-facing stage when known; otherwise post-approval internal.
+            restored_stage = "approved_internal"
+        valid_until = quote.valid_until
+        raw_valid = header.get("valid_until")
+        if isinstance(raw_valid, str) and raw_valid.strip():
+            try:
+                valid_until = date.fromisoformat(raw_valid[:10])
+            except ValueError:
+                pass
+
+        header_updates: dict[str, Any] = {
+            "quote_revision": prior_rev,
+            "quote_stage": restored_stage,
+            "approval_status": "approved",
+            "locked": False,
+            "freight": Decimal(str(header.get("freight") or quote.freight or 0)),
+            "valid_until": valid_until,
+        }
+        for field in (
+            "subject",
+            "project_title",
+            "account_name",
+            "owner_name",
+            "entity_name",
+            "entity_email",
+            "entity_address",
+            "entity_gst",
+            "entity_contact",
+            "reason_for_discount",
+            "terms",
+            "description",
+            "billing_country",
+            "shipping_country",
+        ):
+            if field in header and header.get(field) is not None:
+                header_updates[field] = header.get(field)
+
+        from_state = quote.quote_stage
+        self._revisions.soft_delete_revision(ctx, quote_id, current_rev)
+        row = self._repo.update(ctx, quote_id, **header_updates)
+        self._recompute(ctx, quote_id)
+        row = self.get(ctx, quote_id)
+        self._log(
+            ctx,
+            quote,
+            from_state,
+            restored_stage,
+            "discard_current_revision",
+            f"Discarded V{current_rev}; restored approved V{prior_rev}",
+        )
+        return row
 
     def revision_print_payload(self, ctx: TenantContext, quote_id: UUID, revision_no: int) -> dict[str, Any]:
         """Return quote + lines frozen for ``revision_no`` (live data when current)."""

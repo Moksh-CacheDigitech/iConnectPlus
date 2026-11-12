@@ -12,6 +12,7 @@ import {
   MapPin,
   Pencil,
   Scale,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -49,6 +50,7 @@ import {
   getOpportunityBlueprint,
   getQuote,
   getQuoteBlueprint,
+  discardQuoteCurrentRevision,
   getQuoteRevisionPrintPayload,
   listContacts,
   listQuoteLines,
@@ -117,6 +119,7 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
   const [banner, setBanner] = useState<{ text: string; tone: "error" | "success" } | null>(null);
   const [busy, setBusy] = useState(false);
   const [downloadingRevision, setDownloadingRevision] = useState<number | null>(null);
+  const [removingCurrentRevision, setRemovingCurrentRevision] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -385,6 +388,45 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
     return Boolean(row.snapshotted_at);
   }
 
+  function canRemoveCurrentRevision(row: QuoteRevisionRow): boolean {
+    if (!row.is_current) return false;
+    if (row.revision_no <= 1) return false;
+    if (quote.quote_stage === "accepted" || quote.quote_stage === "lost") return false;
+    // Only until this version is approved — then next steps (Vn+1 / won / lost) apply on it.
+    return !isQuoteApproved(quote);
+  }
+
+  async function onRemoveCurrentRevision() {
+    if (!quote) return;
+    const currentRev = Math.max(1, Number(quote.quote_revision) || 1);
+    if (
+      !window.confirm(
+        `Remove V${currentRev} and restore approved V${currentRev - 1}? Create Quote V${currentRev}, Deal Won, and Deal Lost will return.`,
+      )
+    ) {
+      return;
+    }
+    setRemovingCurrentRevision(true);
+    setBusy(true);
+    setBanner(null);
+    try {
+      await discardQuoteCurrentRevision(quoteId);
+      setBanner({
+        text: `V${currentRev} removed. Restored approved V${currentRev - 1}.`,
+        tone: "success",
+      });
+      await load();
+    } catch (err) {
+      setBanner({
+        text: err instanceof ApiClientError ? err.message : "Failed to remove current quote version",
+        tone: "error",
+      });
+    } finally {
+      setRemovingCurrentRevision(false);
+      setBusy(false);
+    }
+  }
+
   async function onEditQuote() {
     if (!quote) return;
     setBusy(true);
@@ -575,22 +617,39 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
                         : `${Number(row.negotiation_pct || 0) > 0 ? "+" : ""}${Number(row.negotiation_pct || 0).toFixed(2)}%`}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {canDownloadRevision(row) ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-7 cursor-pointer gap-1.5 px-2.5 text-[0.8rem] transition-colors duration-200"
-                          disabled={downloadingRevision === row.revision_no || busy}
-                          onClick={() => void onDownloadRevision(row.revision_no)}
-                          aria-label={`Download V${row.revision_no} print PDF`}
-                        >
-                          <Download className="size-3.5" />
-                          {downloadingRevision === row.revision_no ? "…" : "Download"}
-                        </Button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
+                      <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                        {canDownloadRevision(row) ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 cursor-pointer gap-1.5 px-2.5 text-[0.8rem] transition-colors duration-200"
+                            disabled={downloadingRevision === row.revision_no || busy}
+                            onClick={() => void onDownloadRevision(row.revision_no)}
+                            aria-label={`Download V${row.revision_no} print PDF`}
+                          >
+                            <Download className="size-3.5" />
+                            {downloadingRevision === row.revision_no ? "…" : "Download"}
+                          </Button>
+                        ) : null}
+                        {canRemoveCurrentRevision(row) ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 cursor-pointer gap-1.5 px-2.5 text-[0.8rem] text-destructive transition-colors duration-200 hover:bg-destructive/10 hover:text-destructive"
+                            disabled={removingCurrentRevision || busy}
+                            onClick={() => void onRemoveCurrentRevision()}
+                            aria-label={`Remove current quote V${row.revision_no} and restore previous approved version`}
+                          >
+                            <Trash2 className="size-3.5" />
+                            {removingCurrentRevision ? "…" : "Remove"}
+                          </Button>
+                        ) : null}
+                        {!canDownloadRevision(row) && !canRemoveCurrentRevision(row) ? (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -601,7 +660,8 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
         <p className="mt-2 text-xs text-muted-foreground">
           Negotiation % compares each version grand total against original V1. Moving to negotiation
           creates the next version and restarts approval. Print PDF download is available after that
-          version is approved.
+          version is approved. Remove on the current unapproved version restores the prior approved
+          quote so Create Quote Vn+1, Deal Won, and Deal Lost return.
         </p>
       </CrmSection>
 

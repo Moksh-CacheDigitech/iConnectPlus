@@ -167,7 +167,7 @@ export type ShiftRosterDirectory = {
   weeklyOffAlternateSaturdayStart: string;
   holidays: { date: string; name: string; type: string }[];
   options: {
-    branches: { id: string; label: string }[];
+    branches: { id: string; label: string; companyId?: string }[];
     employees: {
       id: string;
       label: string;
@@ -196,7 +196,7 @@ async function loadShiftRosterDirectoryInner(): Promise<ShiftRosterDirectory> {
   const emptyEmpDir = {
     records: [] as Awaited<ReturnType<typeof loadEmployeeDirectory>>["records"],
     options: {
-      branches: [] as { id: string; label: string }[],
+      branches: [] as { id: string; label: string; companyId?: string }[],
       departments: [] as { id: string; label: string }[],
       designations: [] as { id: string; label: string }[],
       managers: [] as { id: string; label: string }[],
@@ -507,6 +507,7 @@ async function loadShiftRosterDirectoryInner(): Promise<ShiftRosterDirectory> {
       branches: branchRows.map((b) => ({
         id: String(b.id),
         label: String(b.branch_name ?? b.name ?? b.id),
+        companyId: b.company_id ? String(b.company_id) : undefined,
       })),
       employees,
       managers,
@@ -565,8 +566,12 @@ export function filterAssignments(
 
 export async function createShift(payload: CreateShiftPayload): Promise<void> {
   const code = payload.shiftCode || consumeShiftCode();
+  if (!payload.branchId) {
+    throw new Error("Select a branch that belongs to a company");
+  }
   const res = await resourceService.create("/hr/shifts", {
-    branch_id: payload.branchId || null,
+    company_id: payload.companyId || null,
+    branch_id: payload.branchId,
     shift_code: code,
     shift_name: payload.shiftName,
     shift_type: mapApiShiftType(payload.shiftType),
@@ -1074,10 +1079,9 @@ export function exportManagerRosterCsv(
     `# Roster ${month} · manager ${data.manager.code} ${data.manager.label} · ${data.days.length} days`,
     `# Fill cells with shift CODE only (e.g. A / B / C / D) - not Morning/Evening names`,
     `# Special: WO = weekly off · HO = holiday · blank = clear day override`,
-    `# Allowed shifts: ${
-      data.activeShifts.length
-        ? data.activeShifts.map((s) => `${s.shiftCode}=${s.shiftName}`).join(" | ")
-        : "(none configured - add shifts in Shift master)"
+    `# Allowed shifts: ${data.activeShifts.length
+      ? data.activeShifts.map((s) => `${s.shiftCode}=${s.shiftName}`).join(" | ")
+      : "(none configured - add shifts in Shift master)"
     }`,
   ];
 
@@ -1173,11 +1177,11 @@ export function validateManagerRosterCsv(
   const manager =
     (context.managerId
       ? dir.options.managers.find((m) => m.id === context.managerId) ??
-        dir.options.employees.find((e) => e.id === context.managerId)
+      dir.options.employees.find((e) => e.id === context.managerId)
       : undefined) ||
     (legacyManagerCode
       ? dir.options.managers.find((m) => m.code === legacyManagerCode) ||
-        dir.options.employees.find((e) => e.code === legacyManagerCode)
+      dir.options.employees.find((e) => e.code === legacyManagerCode)
       : undefined);
 
   if (!manager) {

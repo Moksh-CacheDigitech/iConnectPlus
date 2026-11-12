@@ -27,15 +27,36 @@ class QuoteRevisionRepository(CrmScopedRepository):
         return list(self.db.scalars(stmt).all())
 
     def get_for_revision(
-        self, ctx: TenantContext, quote_id: UUID, revision_no: int
+        self,
+        ctx: TenantContext,
+        quote_id: UUID,
+        revision_no: int,
+        *,
+        include_deleted: bool = False,
     ) -> CrmQuoteRevisionSnapshot | None:
         stmt = select(CrmQuoteRevisionSnapshot).where(
             CrmQuoteRevisionSnapshot.quote_id == quote_id,
             CrmQuoteRevisionSnapshot.revision_no == revision_no,
-            CrmQuoteRevisionSnapshot.is_deleted.is_(False),
         )
+        if not include_deleted:
+            stmt = stmt.where(CrmQuoteRevisionSnapshot.is_deleted.is_(False))
         stmt = self.apply_crm_filter(stmt, CrmQuoteRevisionSnapshot, ctx, branch_scoped=True)
         return self.db.scalar(stmt)
+
+    def soft_delete_revision(
+        self, ctx: TenantContext, quote_id: UUID, revision_no: int
+    ) -> bool:
+        row = self.get_for_revision(ctx, quote_id, revision_no)
+        if row is None:
+            return False
+        row.is_deleted = True
+        row.deleted_at = utcnow()
+        row.deleted_by = ctx.user_id
+        row.updated_at = utcnow()
+        row.updated_by = ctx.user_id
+        row.version = int(row.version or 1) + 1
+        self.db.flush()
+        return True
 
     def create(self, ctx: TenantContext, **fields) -> CrmQuoteRevisionSnapshot:
         row = CrmQuoteRevisionSnapshot(
@@ -63,8 +84,11 @@ class QuoteRevisionRepository(CrmScopedRepository):
         remark: str | None = None,
         payload_json: dict | None = None,
     ) -> CrmQuoteRevisionSnapshot:
-        existing = self.get_for_revision(ctx, quote_id, revision_no)
+        existing = self.get_for_revision(ctx, quote_id, revision_no, include_deleted=True)
         if existing is not None:
+            existing.is_deleted = False
+            existing.deleted_at = None
+            existing.deleted_by = None
             existing.avg_margin_pct = avg_margin_pct
             existing.grand_total = grand_total
             existing.total_margin_amount = total_margin_amount
