@@ -513,9 +513,20 @@ export type SellingEntity = {
   version: number;
 };
 
-export async function listSellingEntities(): Promise<SellingEntity[]> {
-  const res = await resourceService.list<SellingEntity>(CRM_SELLING_ENTITIES_API);
-  return asArray(res.data);
+export async function listSellingEntities(companyId?: string | null): Promise<SellingEntity[]> {
+  const res = await resourceService.list<SellingEntity>(CRM_SELLING_ENTITIES_API, {
+    page_size: 200,
+    ...(companyId ? { company_id: companyId } : {}),
+  });
+  const rows = asArray(res.data);
+  // Unscoped admin lists can return one row per org company — keep unique entity codes.
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = (row.entity_code || row.entity_name || row.id).trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function getSellingEntity(id: string): Promise<SellingEntity> {
@@ -2044,13 +2055,25 @@ export async function createTask(body: TaskFormInput): Promise<CrmTask> {
 
 export type Option = { id: string; label: string; email?: string; userId?: string };
 
-export async function listLeadSourceOptions(): Promise<Option[]> {
-  const res = await resourceService.list("/crm/lead-sources");
+export async function listLeadSourceOptions(companyId?: string | null): Promise<Option[]> {
+  const res = await resourceService.list("/crm/lead-sources", {
+    page_size: 200,
+    ...(companyId ? { company_id: companyId } : {}),
+  });
   const rows = asArray(res.data as Record<string, unknown>[] | Record<string, unknown> | null);
-  return rows.map((r) => ({
+  const options = rows.map((r) => ({
     id: String(r.id),
     label: String(r.source_name ?? r.source_code ?? r.id),
+    code: String(r.source_code ?? r.source_name ?? r.id),
   }));
+  // Unscoped admin lists can return one row per org company — keep unique source codes.
+  const seen = new Set<string>();
+  return options.filter((opt) => {
+    const key = opt.code.trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map(({ id, label }) => ({ id, label }));
 }
 
 /** Marketing campaigns with TYPE = Event (for Source / Lead Source = Event). */

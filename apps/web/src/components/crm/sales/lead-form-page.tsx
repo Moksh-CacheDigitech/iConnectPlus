@@ -224,13 +224,14 @@ export function LeadFormPage({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [companyRow, gstRows, sources, events, meResponse, entities, leadRow, memberOptions] = await Promise.all([
-        getCompany(companyAccountId),
+      const companyRow = await getCompany(companyAccountId);
+      const orgCompanyId = companyRow.company_id;
+      const [gstRows, sources, events, meResponse, entities, leadRow, memberOptions] = await Promise.all([
         listCompanyGst(companyAccountId).catch(() => []),
-        listLeadSourceOptions().catch(() => []),
+        listLeadSourceOptions(orgCompanyId).catch(() => []),
         listMarketingEventOptions().catch(() => [] as Option[]),
         authService.me().catch(() => null),
-        listSellingEntities().catch(() => []),
+        listSellingEntities(orgCompanyId).catch(() => []),
         leadId ? getSalesLead(leadId).catch(() => null) : Promise.resolve(null),
         listCrmMemberOptions().catch(() => [] as Option[]),
       ]);

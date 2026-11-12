@@ -127,13 +127,15 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
     setLoading(true);
     setError(null);
     try {
-      const [oppRow, bp, employeeOptions, leadSourceOptions, marketingEventOptions] = await Promise.all([
+      const [oppRow, bp, employeeOptions, marketingEventOptions] = await Promise.all([
         getOpportunity(opportunityId),
         getOpportunityBlueprint(opportunityId),
         listCrmMemberOptions().catch(() => [] as Option[]),
-        listLeadSourceOptions().catch(() => [] as Option[]),
         listMarketingEventOptions().catch(() => [] as Option[]),
       ]);
+      const leadSourceOptions = await listLeadSourceOptions(oppRow.company_id).catch(
+        () => [] as Option[],
+      );
       setOpp(oppRow);
       setBlueprint(bp);
       setEmployees(employeeOptions);
@@ -591,11 +593,11 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
             entityType="opportunity"
             servicesSowOwnerUserId={
               opp.has_services ||
-              (opp.product_type || "")
-                .toLowerCase()
-                .split(/[,&]/)
-                .map((p) => p.trim())
-                .includes("services")
+                (opp.product_type || "")
+                  .toLowerCase()
+                  .split(/[,&]/)
+                  .map((p) => p.trim())
+                  .includes("services")
                 ? employees.find((e) => e.id === opp.owner_employee_id)?.userId ?? null
                 : null
             }
