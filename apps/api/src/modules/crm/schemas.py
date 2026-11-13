@@ -156,6 +156,7 @@ class SalesLeadUpdate(BaseModel):
     presales_call_aligned: bool | None = None
     presales_call_contact_name: str | None = None
     presales_call_by_product: str | None = None
+    custom_fields: dict[str, Any] | None = None
 
 
 class LeadAssignRequest(BaseModel):
@@ -264,6 +265,7 @@ class OpportunityCreate(BaseModel):
     probability_percent: Decimal = Decimal("0")
     expected_close_date: date | None = None
     current_stage: str = "qualification"
+    custom_fields: dict[str, Any] | None = None
 
 
 class OpportunityUpdate(BaseModel):
@@ -844,6 +846,7 @@ class CompanyCreate(BaseModel):
     shipping_country: str | None = None
     description: str | None = None
     master_customer_id: UUID | None = None
+    custom_fields: dict[str, Any] | None = None
 
     @field_validator(
         "customer_name",
@@ -921,6 +924,7 @@ class CompanyUpdate(BaseModel):
     shipping_country: str | None = None
     description: str | None = None
     status: str | None = None
+    custom_fields: dict[str, Any] | None = None
     version: int | None = None
 
     @field_validator(
@@ -998,6 +1002,7 @@ class CompanyResponse(OrmModel):
     master_customer_id: UUID | None
     status: str
     locked: bool
+    custom_fields: dict[str, Any] = Field(default_factory=dict)
     version: int
     created_at: datetime | None = None
 
@@ -1021,6 +1026,7 @@ class ContactCreate(BaseModel):
     title: str | None = Field(default=None, max_length=120, pattern=r"^[\w .'\-/&]{0,120}$")
     is_primary: bool = False
     owner_id: UUID | None = None
+    custom_fields: dict[str, Any] | None = None
 
     @field_validator("first_name", "last_name", "email", "phone", "mobile", "title")
     @classmethod
@@ -1041,6 +1047,7 @@ class ContactUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=120)
     is_primary: bool | None = None
     status: str | None = None
+    custom_fields: dict[str, Any] | None = None
     version: int | None = None
 
     @field_validator("first_name", "last_name", "email", "phone", "mobile", "title", "status")
@@ -1067,6 +1074,7 @@ class ContactResponse(OrmModel):
     is_primary: bool
     owner_id: UUID | None
     status: str
+    custom_fields: dict[str, Any] = Field(default_factory=dict)
     version: int
 
 
@@ -1133,6 +1141,7 @@ class LeadCreateFromCompany(BaseModel):
     presales_call_aligned: bool | None = None
     presales_call_contact_name: str | None = None
     presales_call_by_product: str | None = None
+    custom_fields: dict[str, Any] | None = None
 
 
 class LeadLostRequest(BaseModel):
@@ -1193,6 +1202,7 @@ class SalesLeadResponse(OrmModel):
     presales_call_aligned: bool | None = None
     presales_call_contact_name: str | None = None
     presales_call_by_product: str | None = None
+    custom_fields: dict[str, Any] = Field(default_factory=dict)
     version: int
 
 
@@ -1327,6 +1337,7 @@ class QuoteCreate(BaseModel):
     terms: str | None = None
     description: str | None = None
     reason_for_discount: str | None = None
+    custom_fields: dict[str, Any] | None = None
 
 
 class QuoteUpdate(BaseModel):
@@ -1586,6 +1597,7 @@ class OvfCreate(BaseModel):
     negotiated_by: str | None = Field(default=None, max_length=50)
     negotiation_remark: str | None = None
     early_payment_discount_pct: Decimal | None = None
+    custom_fields: dict[str, Any] | None = None
 
 
 class OvfUpdate(BaseModel):

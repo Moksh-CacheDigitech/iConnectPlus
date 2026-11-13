@@ -119,6 +119,7 @@ class CrmOpportunity(Base, *CrmTransactionMixin):
     )
     blueprint_state: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
     locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    custom_fields: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     boq_attached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     boq_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

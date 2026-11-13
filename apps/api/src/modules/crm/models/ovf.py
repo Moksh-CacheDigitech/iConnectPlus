@@ -88,6 +88,7 @@ class CrmOvf(Base, *CrmTransactionMixin):
     installation_details: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     approval_status: Mapped[str] = mapped_column(String(30), nullable=False, default="not_required")
+    custom_fields: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     shared_to_scm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     shared_to_scm_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scm_on_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

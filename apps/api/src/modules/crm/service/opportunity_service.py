@@ -89,6 +89,13 @@ class OpportunityService:
         fields.setdefault("document_date", date.today())
         fields.setdefault("status", OpportunityStatus.OPEN.value)
         fields.setdefault("current_stage", "qualification")
+        if "custom_fields" in fields:
+            from modules.crm.service.crm_settings_service import CrmSettingsService
+
+            effective = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+            fields["custom_fields"] = CrmSettingsService.sanitize_custom_fields(
+                effective, "opportunity", fields.get("custom_fields")
+            )
         revenue = Decimal(str(fields.get("expected_revenue", 0)))
         prob = Decimal(str(fields.get("probability_percent", 0)))
         fields["forecast_amount"] = (revenue * prob / Decimal("100")).quantize(Decimal("0.0001"))
@@ -118,6 +125,13 @@ class OpportunityService:
 
     def update(self, ctx: TenantContext, opportunity_id: UUID, **fields):
         opp = self.get(ctx, opportunity_id)
+        if "custom_fields" in fields:
+            from modules.crm.service.crm_settings_service import CrmSettingsService
+
+            effective = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+            fields["custom_fields"] = CrmSettingsService.sanitize_custom_fields(
+                effective, "opportunity", fields.get("custom_fields")
+            )
         if opp.distributor_discount_locked and "distributor_discount_percent" in fields:
             fields.pop("distributor_discount_percent", None)
         if (

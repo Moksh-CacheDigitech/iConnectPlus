@@ -207,27 +207,68 @@ TERMINAL_STATES: dict[str, set[str]] = {
 }
 
 
-def allowed_actions(entity: str, state: str) -> list[str]:
-    """Return the list of action names valid from ``state`` for ``entity``."""
+def _merged_state_actions(
+    entity: str,
+    state: str,
+    overlay_transitions: list[dict[str, Any]] | None = None,
+) -> dict[str, str]:
+    """Stock transitions for ``state``, plus Settings overlay rows for the entity.
+
+    Overlay rows look like ``{from, action, to, approval_step_key?}``. When
+    ``entity`` is omitted on a row it applies to opportunity (sales-flow builder).
+    """
     table = _TRANSITIONS.get(entity)
     if table is None:
         raise InvalidBlueprintState(f"Unknown blueprint entity '{entity}'")
-    return sorted(table.get(state, {}).keys())
+    merged = dict(table.get(state, {}))
+    if not overlay_transitions:
+        return merged
+    for raw in overlay_transitions:
+        if not isinstance(raw, dict):
+            continue
+        row_entity = str(raw.get("entity") or "opportunity").strip().lower()
+        if row_entity != entity:
+            continue
+        from_state = str(raw.get("from") or "").strip()
+        action = str(raw.get("action") or "").strip()
+        to_state = str(raw.get("to") or "").strip()
+        if not from_state or not action or not to_state:
+            continue
+        if from_state != state:
+            continue
+        merged[action] = to_state
+    return merged
 
 
-def transition(entity: str, state: str, action: str, ctx: Any = None) -> str:
+def allowed_actions(
+    entity: str,
+    state: str,
+    overlay_transitions: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    """Return the list of action names valid from ``state`` for ``entity``."""
+    return sorted(
+        _merged_state_actions(entity, state, overlay_transitions=overlay_transitions).keys()
+    )
+
+
+def transition(
+    entity: str,
+    state: str,
+    action: str,
+    ctx: Any = None,
+    overlay_transitions: list[dict[str, Any]] | None = None,
+) -> str:
     """Return the resulting state for ``action`` taken from ``state``.
 
     Raises :class:`InvalidBlueprintState` if the action is not permitted from
     the current state. ``ctx`` is accepted (and currently unused) so callers
     can pass request/service context for future extension without changing
-    the call signature.
+    the call signature. Optional ``overlay_transitions`` merges tenant Settings
+    custom edges onto the stock table.
     """
-    table = _TRANSITIONS.get(entity)
-    if table is None:
-        raise InvalidBlueprintState(f"Unknown blueprint entity '{entity}'")
-    state_actions = table.get(state)
-    if state_actions is None or action not in state_actions:
+    _ = ctx
+    state_actions = _merged_state_actions(entity, state, overlay_transitions=overlay_transitions)
+    if action not in state_actions:
         raise InvalidBlueprintState(
             f"Action '{action}' is not allowed for {entity} in state '{state}'"
         )

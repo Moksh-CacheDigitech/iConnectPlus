@@ -173,6 +173,7 @@ export type Company = {
   shipping_code: string | null;
   shipping_country: string | null;
   description: string | null;
+  custom_fields?: Record<string, unknown> | null;
   master_customer_id: string | null;
   status: string;
   locked: boolean;
@@ -212,6 +213,7 @@ export type CompanyFormInput = {
   shipping_code?: string | null;
   shipping_country?: string | null;
   description?: string | null;
+  custom_fields?: Record<string, unknown> | null;
 };
 
 export async function listCompanies(): Promise<Company[]> {
@@ -276,6 +278,7 @@ export function companyToFormInput(company: Company, customerName?: string): Com
     shipping_code: company.shipping_code,
     shipping_country: company.shipping_country,
     description: company.description,
+    custom_fields: company.custom_fields ?? null,
   };
 }
 
@@ -342,6 +345,7 @@ export type LeadCreateFromCompanyInput = {
   presales_call_contact_name?: string | null;
   /** JSON map of product type → { aligned, contact_name }. */
   presales_call_by_product?: string | null;
+  custom_fields?: Record<string, unknown> | null;
 };
 
 export async function createLeadFromCompany(
@@ -384,6 +388,7 @@ export type Contact = {
   owner_id: string | null;
   status: string;
   version: number;
+  custom_fields?: Record<string, unknown> | null;
 };
 
 export type ContactFormInput = {
@@ -397,6 +402,7 @@ export type ContactFormInput = {
   title?: string | null;
   is_primary?: boolean;
   owner_id?: string | null;
+  custom_fields?: Record<string, unknown> | null;
 };
 
 export async function listContacts(companyAccountId?: string): Promise<Contact[]> {
@@ -614,6 +620,7 @@ export type SalesLead = {
   lost_reason?: string | null;
   converted_opportunity_id: string | null;
   presales_owner_id?: string | null;
+  custom_fields?: Record<string, unknown> | null;
   version: number;
 };
 
@@ -742,6 +749,7 @@ export type Opportunity = {
   lease_interest_rate_pct?: number | null;
   lease_tenure_months?: number | null;
   lease_monthly_rental?: number | null;
+  custom_fields?: Record<string, unknown> | null;
   version: number;
   created_at?: string | null;
   notes?: string | null;
@@ -942,6 +950,7 @@ export type Quote = {
   description?: string | null;
   sales_order_id: string | null;
   parent_quote_id?: string | null;
+  custom_fields?: Record<string, unknown> | null;
   version: number;
   created_at?: string | null;
 };
@@ -978,6 +987,7 @@ export type QuoteFormInput = {
   terms?: string | null;
   description?: string | null;
   reason_for_discount?: string | null;
+  custom_fields?: Record<string, unknown> | null;
 };
 
 export type QuoteLine = {
@@ -1259,6 +1269,7 @@ export type Ovf = {
   freight_medium?: string | null;
   freight_weight_kg?: number | null;
   freight_insurance?: boolean;
+  custom_fields?: Record<string, unknown> | null;
   version: number;
   created_at?: string | null;
   updated_at?: string | null;
@@ -1333,6 +1344,7 @@ export type OvfFormInput = {
   negotiated_by?: string | null;
   negotiation_remark?: string | null;
   early_payment_discount_pct?: number | null;
+  custom_fields?: Record<string, unknown> | null;
 };
 
 export type OvfLine = {

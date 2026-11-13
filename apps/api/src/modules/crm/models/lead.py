@@ -16,7 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database.base import Base
@@ -164,3 +164,4 @@ class CrmLead(Base, *CrmTransactionMixin):
     blueprint_state: Mapped[str] = mapped_column(String(30), nullable=False, default="open", server_default="open")
     locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     convert_remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    custom_fields: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)

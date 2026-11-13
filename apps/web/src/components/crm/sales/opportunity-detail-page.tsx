@@ -21,6 +21,7 @@ import { resolveSalesStageLabel } from "@/lib/crm/sales-blueprint-stages";
 import { CrmDetailEditLink } from "@/components/crm/sales/crm-detail-edit-link";
 import { CrmRecordActionsMenu } from "@/components/crm/sales/crm-record-actions-menu";
 import { EntityAttachmentsList } from "@/components/crm/sales/entity-attachments-list";
+import { CrmCustomFieldsReadOnly } from "@/components/crm/sales/crm-custom-fields-section";
 import { LeadDetailsCard } from "@/components/crm/sales/lead-details-card";
 import { OpportunityDealControls } from "@/components/crm/sales/opportunity-deal-controls";
 import { CompanyWorkspaceNav } from "@/components/crm/company-workspace-nav";
@@ -35,7 +36,9 @@ import {
   printOpportunityPreview,
 } from "@/lib/crm/crm-record-actions";
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
+import { pageSectionVisible } from "@/lib/crm/crm-settings-ui";
 import { setCrmOpportunityContext, setCrmSidebarFocus } from "@/lib/crm-sidebar-focus";
+import { useCrmSettingsEffective } from "@/hooks/use-crm-settings";
 import { ApiClientError } from "@/services/api-client";
 import { listCompanyGst } from "@/services/crm-deal-controls-service";
 import {
@@ -106,6 +109,7 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
   const router = useRouter();
   const searchParams = useSearchParams();
   const fromMyJobs = searchParams.get("from") === "my-jobs";
+  const { settings } = useCrmSettingsEffective();
   const [opp, setOpp] = useState<Opportunity | null>(null);
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [blueprint, setBlueprint] = useState<BlueprintState | null>(null);
@@ -380,11 +384,17 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
       : {}),
   };
   const showQuotes =
-    quotes.length > 0 ||
-    ["quote_ready", "quote_in_progress", "po_pending", "po_approval", "ovf_ready", "won"].includes(
-      blueprint.state,
-    );
-  const showOvf = ovfs.length > 0 || ["ovf_ready", "won"].includes(blueprint.state);
+    pageSectionVisible(settings, "opportunity_detail", "quotes", true) &&
+    (quotes.length > 0 ||
+      ["quote_ready", "quote_in_progress", "po_pending", "po_approval", "ovf_ready", "won"].includes(
+        blueprint.state,
+      ));
+  const showOvf =
+    pageSectionVisible(settings, "opportunity_detail", "ovf", true) &&
+    (ovfs.length > 0 || ["ovf_ready", "won"].includes(blueprint.state));
+  const showBlueprint = pageSectionVisible(settings, "opportunity_detail", "blueprint", true);
+  const showDocuments = pageSectionVisible(settings, "opportunity_detail", "documents", true);
+  const showSummary = pageSectionVisible(settings, "opportunity_detail", "summary", true);
 
   const quoteFollowOnActions =
     blueprint.state === "quote_in_progress" && activeQuote
@@ -586,47 +596,49 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
           {banner ? <CrmErrorBanner>{banner.text}</CrmErrorBanner> : null}
           {error ? <CrmErrorBanner>{error}</CrmErrorBanner> : null}
 
-          <BlueprintActions
-            allowedActions={blueprintActions}
-            locked={blueprint.locked}
-            opportunityId={opp.id}
-            entityType="opportunity"
-            servicesSowOwnerUserId={
-              opp.has_services ||
-                (opp.product_type || "")
-                  .toLowerCase()
-                  .split(/[,&]/)
-                  .map((p) => p.trim())
-                  .includes("services")
-                ? employees.find((e) => e.id === opp.owner_employee_id)?.userId ?? null
-                : null
-            }
-            currentStageLabel={resolveSalesStageLabel({
-              entityType: "opportunity",
-              blueprintState: blueprint.state,
-              locked: blueprint.locked,
-              opportunity: opp,
-              quotes,
-              ovfs,
-            })}
-            showDealWonBadge={
-              String(opp.status || "").toLowerCase() === "won" ||
-              quotes.some((row) => row.quote_stage === "accepted")
-            }
-            excludeActions={CUSTOM_ACTIONS}
-            actionLabelOverrides={createOvfLabels}
-            defaultValues={{
-              deal_won_amount: activeQuote?.grand_total ?? existingOvf?.deal_won_amount ?? null,
-            }}
-            onAction={onBlueprintAction}
-            disabled={busy}
-          />
+          {showBlueprint ? (
+            <BlueprintActions
+              allowedActions={blueprintActions}
+              locked={blueprint.locked}
+              opportunityId={opp.id}
+              entityType="opportunity"
+              servicesSowOwnerUserId={
+                opp.has_services ||
+                  (opp.product_type || "")
+                    .toLowerCase()
+                    .split(/[,&]/)
+                    .map((p) => p.trim())
+                    .includes("services")
+                  ? employees.find((e) => e.id === opp.owner_employee_id)?.userId ?? null
+                  : null
+              }
+              currentStageLabel={resolveSalesStageLabel({
+                entityType: "opportunity",
+                blueprintState: blueprint.state,
+                locked: blueprint.locked,
+                opportunity: opp,
+                quotes,
+                ovfs,
+              })}
+              showDealWonBadge={
+                String(opp.status || "").toLowerCase() === "won" ||
+                quotes.some((row) => row.quote_stage === "accepted")
+              }
+              excludeActions={CUSTOM_ACTIONS}
+              actionLabelOverrides={createOvfLabels}
+              defaultValues={{
+                deal_won_amount: activeQuote?.grand_total ?? existingOvf?.deal_won_amount ?? null,
+              }}
+              onAction={onBlueprintAction}
+              disabled={busy}
+            />
+          ) : null}
 
-          {blueprint.po_validation ? (
+          {showBlueprint && blueprint.po_validation ? (
             <PoValidationChain validation={blueprint.po_validation} />
           ) : null}
 
-          {opp.blueprint_state ? (
+          {showDocuments && opp.blueprint_state ? (
             <OpportunityDealControls key={opp.version} opportunity={opp} onChanged={() => void load()} />
           ) : null}
 
@@ -788,7 +800,7 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
             </CrmListPanel>
           ) : null}
 
-          {sourceLead ? (
+          {showSummary && sourceLead ? (
             <LeadDetailsCard
               lead={sourceLead}
               company={company}
@@ -799,7 +811,7 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
               title="Opportunity Information"
               mergeFullName
             />
-          ) : opp.lead_id ? (
+          ) : showSummary && opp.lead_id ? (
             <CrmSection title="Source Lead" icon={Handshake}>
               <p className="text-xs text-muted-foreground">
                 Source lead could not be loaded.{" "}
@@ -811,6 +823,10 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
                 </Link>
               </p>
             </CrmSection>
+          ) : null}
+
+          {showSummary ? (
+            <CrmCustomFieldsReadOnly entity="opportunity" values={opp.custom_fields} />
           ) : null}
 
           {(fromMyJobs || blueprint.locked) && reviewAttachment ? (
@@ -854,17 +870,19 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
             </CrmSection>
           ) : null}
 
-          <CrmSection title="Attachments" icon={Paperclip}>
-            <EntityAttachmentsList
-              attachments={attachments}
-              entityType="opportunity"
-              entityId={opportunityId}
-              branchId={opp.branch_id}
-              companyId={opp.company_id}
-              highlightCategory={fromMyJobs || blueprint.locked ? reviewCategory : null}
-              onChanged={load}
-            />
-          </CrmSection>
+          {showDocuments ? (
+            <CrmSection title="Attachments" icon={Paperclip}>
+              <EntityAttachmentsList
+                attachments={attachments}
+                entityType="opportunity"
+                entityId={opportunityId}
+                branchId={opp.branch_id}
+                companyId={opp.company_id}
+                highlightCategory={fromMyJobs || blueprint.locked ? reviewCategory : null}
+                onChanged={load}
+              />
+            </CrmSection>
+          ) : null}
         </CrmPage>
       </div>
     </div>

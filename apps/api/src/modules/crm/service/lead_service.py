@@ -450,7 +450,7 @@ class LeadService:
         fields.setdefault("document_date", date.today())
         fields.setdefault("status", LeadStatus.NEW.value)
         row = self._repo.create(ctx, company_id=cid, branch_id=branch_id, lead_code=code, **fields)
-        if self._apply_sales_doc_requirements(row):
+        if self._apply_sales_doc_requirements(ctx, row):
             self._db.flush()
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,
@@ -493,6 +493,13 @@ class LeadService:
         # DR number is assigned at create and is the lead's unique ID - do not overwrite.
         fields.pop("dr_number", None)
         fields.pop("lead_code", None)
+        if "custom_fields" in fields:
+            from modules.crm.service.crm_settings_service import CrmSettingsService
+
+            effective = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+            fields["custom_fields"] = CrmSettingsService.sanitize_custom_fields(
+                effective, "lead", fields.get("custom_fields")
+            )
         # BOQ/SOW flags are derived from product mix after save — ignore client overrides.
         if self._boq_sow_mandatory(lead) or "product_type" in fields:
             fields.pop("requires_boq", None)
@@ -558,7 +565,7 @@ class LeadService:
         row = self._repo.update(ctx, lead_id, **fields)
         if row is None:
             raise NotFoundException("Lead not found")
-        if self._apply_sales_doc_requirements(row):
+        if self._apply_sales_doc_requirements(ctx, row):
             self._db.flush()
         self._audit.log_entity_change(
             tenant_id=ctx.tenant_id,
@@ -624,15 +631,16 @@ class LeadService:
             return False
         return cloud_variant_from_lead(lead) is None
 
-    @staticmethod
-    def _apply_sales_doc_requirements(lead: CrmLead | None) -> bool:
-        """Derive BOQ/SOW requirements from product mix.
+    def _apply_sales_doc_requirements(self, ctx: TenantContext, lead: CrmLead | None) -> bool:
+        """Derive BOQ/SOW requirements from product mix + tenant CRM Settings.
 
         - Non-cloud sales leads always require BOQ.
-        - SOW is required only when Services is in product_type.
+        - SOW is required when Services is in product_type and
+          policies.sow_required_when_services (default True).
         Returns True when flags changed.
         """
         from modules.crm.domain.product_types import product_type_includes_services
+        from modules.crm.service.crm_settings_service import CrmSettingsService
 
         if lead is None:
             return False
@@ -645,8 +653,20 @@ class LeadService:
                 lead.sow_attached = False
             return changed
 
+        effective = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
         want_boq = True
-        want_sow = product_type_includes_services(lead.product_type)
+        services = product_type_includes_services(lead.product_type)
+        policy_sow = CrmSettingsService.policy_flag(effective, "sow_required_when_services", True)
+        want_sow = bool(
+            services
+            and policy_sow
+            and CrmSettingsService.attachment_required(
+                effective,
+                "sow",
+                product_type=lead.product_type,
+                default=True,
+            )
+        )
         changed = False
         if bool(lead.requires_boq) != want_boq:
             lead.requires_boq = want_boq
@@ -763,12 +783,20 @@ class LeadService:
                 return
             if action in pending_actions:
                 return
-            # Services leads: SOW attach/approve My Jobs go only to the lead owner.
+            # Services leads: SOW attach/approve My Jobs go only to the lead owner
+            # when policies.sow_route_to_owner_when_services is enabled (default).
             from modules.crm.domain.product_types import product_type_includes_services
             from modules.crm.service.crm_notification_service import resolve_employee_user_id
+            from modules.crm.service.crm_settings_service import CrmSettingsService
 
-            if action == "provide_sow_attachment" and product_type_includes_services(
-                lead.product_type
+            settings = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+            route_sow_to_owner = CrmSettingsService.policy_flag(
+                settings, "sow_route_to_owner_when_services", True
+            )
+            if (
+                action == "provide_sow_attachment"
+                and product_type_includes_services(lead.product_type)
+                and route_sow_to_owner
             ):
                 owner_uid = resolve_employee_user_id(
                     self._db, ctx.tenant_id, lead.owner_employee_id
@@ -792,7 +820,10 @@ class LeadService:
                 remarks = (
                     "Required — lead converts to an opportunity when documents are attached"
                 )
-            team_role = APPROVAL_STEP_CATALOG[step_key][1]
+            from modules.crm.service.crm_settings_service import CrmSettingsService
+
+            effective = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+            _, team_role = CrmSettingsService.approval_step_meta(effective, step_key)
             tasks.route_approval(
                 ctx,
                 assigned_user_ids=user_ids,

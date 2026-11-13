@@ -9,6 +9,7 @@ import {
   Handshake,
   LayoutDashboard,
   ListTodo,
+  Settings,
   Target,
   UserCog,
   UserPlus,
@@ -22,8 +23,10 @@ import {
   setCrmSidebarFocus,
   type CrmSidebarFocus,
 } from "@/lib/crm-sidebar-focus";
-import { canManageModuleUsers } from "@/lib/module-access";
+import { canManageModuleUsers, isErpAdmin } from "@/lib/module-access";
 import { useAuthUser } from "@/hooks/use-auth-user";
+import { useCrmSettingsEffective } from "@/hooks/use-crm-settings";
+
 
 type CrmNavItem = {
   title: string;
@@ -111,16 +114,33 @@ function onCrmNavigate(item: ModuleNavItem) {
 export function CrmSidebar() {
   const pathname = usePathname();
   const { user, adminModuleKeys } = useAuthUser();
+  const { settings } = useCrmSettingsEffective();
 
   const isCrmAdmin = canManageModuleUsers("crm", adminModuleKeys, user?.userType);
+  const erpAdmin = isErpAdmin(user?.userType);
 
   const navItems = useMemo(() => {
-    const items: CrmNavItem[] = [...CRM_NAV];
+    const paneVisibility = new Map(
+      (settings?.navigation?.panes ?? []).map((pane) => [pane.href, pane.visible !== false]),
+    );
+    const items: CrmNavItem[] = CRM_NAV.filter((item) => {
+      if (!paneVisibility.size) return true;
+      return paneVisibility.get(item.href) !== false;
+    });
     if (isCrmAdmin) {
-      items.push({ title: "Users", href: "/crm/users", icon: UserCog });
+      const usersVisible = !paneVisibility.size || paneVisibility.get("/crm/users") !== false;
+      if (usersVisible) {
+        items.push({ title: "Users", href: "/crm/users", icon: UserCog });
+      }
+    }
+    if (erpAdmin) {
+      const settingsVisible = !paneVisibility.size || paneVisibility.get("/crm/settings") !== false;
+      if (settingsVisible) {
+        items.push({ title: "Settings", href: "/crm/settings", icon: Settings });
+      }
     }
     return items;
-  }, [isCrmAdmin]);
+  }, [erpAdmin, isCrmAdmin, settings]);
 
   return (
     <ModuleSidebar

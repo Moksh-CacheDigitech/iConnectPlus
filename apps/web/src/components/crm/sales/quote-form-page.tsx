@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Building2, FileInput, FileText, ListOrdered, MapPin, Plus, Scale, Trash2 } from "lucide-react";
 
 import { CrmErrorBanner, CrmIconBadge, CrmListPanel, CrmPage, CrmSection } from "@/components/crm/crm-ui";
+import { CrmCustomFieldsSection } from "@/components/crm/sales/crm-custom-fields-section";
 import { CrmSessionEmployeeField } from "@/components/crm/sales/crm-session-employee-field";
 import {
   FinanceField,
@@ -20,6 +21,9 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthUser } from "@/hooks/use-auth-user";
+import { useCrmSettingsEffective } from "@/hooks/use-crm-settings";
+import { quoteServiceTypeOptions } from "@/services/crm-settings-service";
+import { formFieldsMap, pushRequired } from "@/lib/crm/crm-settings-ui";
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
 import { resolveSessionEmployeeLabel } from "@/lib/crm/session-employee";
 import {
@@ -252,6 +256,10 @@ export function QuoteFormPage({
   const router = useRouter();
   const isEdit = Boolean(quoteId);
   const { user } = useAuthUser();
+  const { settings } = useCrmSettingsEffective();
+  const quoteFields = useMemo(() => formFieldsMap(settings, "quote"), [settings]);
+  const serviceTypeOptions = useMemo(() => quoteServiceTypeOptions(settings), [settings]);
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
   const [quote, setQuote] = useState<Quote | null>(null);
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -295,6 +303,7 @@ export function QuoteFormPage({
           ? await getSalesLead(opportunityRow.lead_id).catch(() => null)
           : null;
         setQuote(quoteRow);
+        setCustomFields((quoteRow.custom_fields as Record<string, unknown> | undefined) ?? {});
         setOpportunity(opportunityRow);
         setLeadProductType(leadRow?.product_type ?? opportunityRow.product_type ?? null);
         setLeadSubProductCategories(
@@ -305,7 +314,7 @@ export function QuoteFormPage({
           project_title: quoteRow.project_title ?? "",
           account_name: quoteRow.account_name ?? "",
           contact_id: quoteRow.contact_id ?? "",
-          service_type: normalizeQuoteServiceType(quoteRow.service_type),
+          service_type: normalizeQuoteServiceType(quoteRow.service_type, serviceTypeOptions),
           owner_name: quoteRow.owner_name ?? "",
           subject: quoteRow.subject ?? "",
           valid_until: quoteRow.valid_until ?? "",
@@ -421,7 +430,10 @@ export function QuoteFormPage({
         account_name: companyRow?.customer_name ?? "",
         contact_id: resolvedContact.contactId,
         service_type:
-          normalizeQuoteServiceType(leadRow?.product_type ?? opportunityRow.product_type) ||
+          normalizeQuoteServiceType(
+            leadRow?.product_type ?? opportunityRow.product_type,
+            serviceTypeOptions,
+          ) ||
           "",
         owner_name: ownerLabel,
         subject: opportunityRow.opportunity_name || "",
@@ -749,13 +761,15 @@ export function QuoteFormPage({
       terms: form.terms || null,
       description: form.description || null,
       reason_for_discount: form.reason_for_discount || null,
+      custom_fields: customFields,
     };
   }
 
   async function onSave() {
     if (!opportunity) return;
     const missing: string[] = [];
-    if (!form.valid_until.trim()) missing.push("Valid Until");
+    pushRequired(missing, quoteFields, "subject", "Subject", !form.subject.trim(), true);
+    pushRequired(missing, quoteFields, "valid_until", "Valid Until", !form.valid_until.trim(), true);
     if (lines.length === 0) {
       missing.push("At least one quoted item row");
     }
@@ -1360,6 +1374,9 @@ export function QuoteFormPage({
           </div>
         </div>
       </CrmListPanel>
+
+      <CrmCustomFieldsSection entity="quote" values={customFields} onChange={setCustomFields} />
+
       <RequiredFieldsDialog
         open={mandateOpen}
         message={mandateMessage}

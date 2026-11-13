@@ -858,6 +858,13 @@ class OvfService:
         approval_status = fields.pop("approval_status", None) or "not_required"
         if approval_status not in ("not_required", "pending", "approved", "rejected"):
             approval_status = "not_required"
+        if "custom_fields" in fields:
+            from modules.crm.service.crm_settings_service import CrmSettingsService
+
+            effective = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+            fields["custom_fields"] = CrmSettingsService.sanitize_custom_fields(
+                effective, "ovf", fields.get("custom_fields")
+            )
         row = self._repo.create(
             ctx,
             company_id=opp.company_id,
@@ -955,6 +962,13 @@ class OvfService:
 
         # Freight is written only via Ask SCM / SCM charges — ignore Sales payload.
         fields.pop("freight", None)
+        if "custom_fields" in fields:
+            from modules.crm.service.crm_settings_service import CrmSettingsService
+
+            effective = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+            fields["custom_fields"] = CrmSettingsService.sanitize_custom_fields(
+                effective, "ovf", fields.get("custom_fields")
+            )
 
         vendor_days = int(fields.get("vendor_payment_days", ovf.vendor_payment_days) or 0)
         customer_days = int(fields.get("customer_payment_days", ovf.customer_payment_days) or 0)
@@ -1215,9 +1229,25 @@ class OvfService:
         raise ConflictException(f"Unsupported OVF blueprint action '{action}'")
 
     def share_to_scm(self, ctx: TenantContext, ovf_id: UUID) -> CrmOvf:
+        from modules.crm.service.crm_settings_service import CrmSettingsService
+
         ovf = self.get(ctx, ovf_id)
         if ovf.shared_to_scm:
             return ovf
+        settings = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+        if CrmSettingsService.policy_flag(
+            settings, "share_to_scm_requires_approved_ovf", True
+        ):
+            status = (ovf.approval_status or "").strip().lower()
+            state = (ovf.blueprint_state or "").strip().lower()
+            if status not in {"approved", "auto_approved"} and state not in {
+                "approved",
+                "shared_scm",
+            }:
+                raise ConflictException(
+                    "OVF must be approved before sharing to SCM "
+                    "(CRM Settings → Policies → share to scm requires approved ovf)."
+                )
         sales_blueprint_engine.assert_not_locked(ovf)
         next_state = sales_blueprint_engine.transition("ovf", ovf.blueprint_state, "share_to_scm")
         row = self._repo.update(

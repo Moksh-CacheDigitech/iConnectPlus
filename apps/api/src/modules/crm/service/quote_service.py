@@ -121,6 +121,13 @@ class QuoteService:
     def update(self, ctx: TenantContext, quote_id: UUID, **fields) -> CrmQuote:
         quote = self.get(ctx, quote_id)
         sales_blueprint_engine.assert_not_locked(quote)
+        if "custom_fields" in fields:
+            from modules.crm.service.crm_settings_service import CrmSettingsService
+
+            effective = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+            fields["custom_fields"] = CrmSettingsService.sanitize_custom_fields(
+                effective, "quote", fields.get("custom_fields")
+            )
         row = self._repo.update(ctx, quote_id, **fields)
         if row is None:
             raise NotFoundException("Quote not found")
@@ -435,6 +442,13 @@ class QuoteService:
         fields.setdefault("approval_status", "not_required")
         if not (fields.get("terms") or "").strip():
             fields["terms"] = DEFAULT_GENERAL_TERMS
+        if "custom_fields" in fields:
+            from modules.crm.service.crm_settings_service import CrmSettingsService
+
+            effective = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+            fields["custom_fields"] = CrmSettingsService.sanitize_custom_fields(
+                effective, "quote", fields.get("custom_fields")
+            )
         row = self._repo.create(
             ctx,
             company_id=opp.company_id,

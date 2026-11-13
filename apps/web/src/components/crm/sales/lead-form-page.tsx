@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { CrmErrorBanner, CrmPage, CrmSection } from "@/components/crm/crm-ui";
+import { CrmCustomFieldsSection } from "@/components/crm/sales/crm-custom-fields-section";
 import { BlueprintActions } from "@/components/crm/sales/blueprint-actions";
 import { KycContactDesignationField } from "@/components/crm/sales/kyc-contact-designation-field";
 import { LeadPartnerRowsTable } from "@/components/crm/sales/lead-partner-rows-table";
@@ -68,9 +69,13 @@ import {
   parseLeadSourcingChannels,
 } from "@/lib/crm/lead-sourcing-channels";
 import { useAuthUser } from "@/hooks/use-auth-user";
+import { useCrmSettingsEffective } from "@/hooks/use-crm-settings";
+import { formFieldsMap, pushRequired } from "@/lib/crm/crm-settings-ui";
 import { ApiClientError, authService } from "@/services/api-client";
 import type { UserProfile } from "@/types/api";
+import { catalogOptions } from "@/services/crm-settings-service";
 import { listCompanyGst } from "@/services/crm-deal-controls-service";
+
 import {
   createLeadFromCompany,
   getCompany,
@@ -92,13 +97,10 @@ import {
 } from "@/services/sales-crm-service";
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
 
-const ENGAGEMENT_SCORES = [25, 50, 75, 100] as const;
-
 const DEFAULT_ENTITY_EMAIL = "info@cachedigitech.com";
 const DEFAULT_ENTITY_CONTACT = "18003094333";
-const REQUIREMENT_TYPES = ["New Requirement", "Expansion"];
-const PURCHASE_MODELS = ["CAPEX", "OPEX"];
-const INDUSTRIES = [
+
+const FALLBACK_INDUSTRIES = [
   "IT & Technology",
   "Manufacturing",
   "Healthcare",
@@ -109,6 +111,9 @@ const INDUSTRIES = [
   "Telecom",
   "Others",
 ];
+const FALLBACK_REQUIREMENT_TYPES = ["New Requirement", "Expansion"];
+const FALLBACK_PURCHASE_MODELS = ["CAPEX", "OPEX"];
+const FALLBACK_ENGAGEMENT_SCORES = [25, 50, 75, 100] as const;
 
 const EMPTY: LeadCreateFromCompanyInput = {
   branch_id: "",
@@ -195,6 +200,8 @@ export function LeadFormPage({
 }) {
   const router = useRouter();
   const { user, adminModuleKeys } = useAuthUser();
+  const { settings } = useCrmSettingsEffective();
+  const leadFields = formFieldsMap(settings, "lead");
   const isAdmin = isCrmModuleAdmin(adminModuleKeys, user?.userType);
   const isEdit = Boolean(leadId);
   const [company, setCompany] = useState<Company | null>(null);
@@ -204,6 +211,7 @@ export function LeadFormPage({
   const [marketingEvents, setMarketingEvents] = useState<Option[]>([]);
   const [leadOwnerLabel, setLeadOwnerLabel] = useState("");
   const [form, setForm] = useState<LeadCreateFromCompanyInput>(EMPTY);
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -217,6 +225,75 @@ export function LeadFormPage({
   const [oemRows, setOemRows] = useState<LeadPartnerRow[]>([emptyLeadPartnerRow()]);
   const [distributorRows, setDistributorRows] = useState<LeadPartnerRow[]>([emptyLeadPartnerRow()]);
   const [distributorNameOptions, setDistributorNameOptions] = useState<string[]>(["IN STOCK"]);
+
+  const industryCatalogValues = useMemo(() => {
+    const opts = catalogOptions(settings, "industries");
+    if (opts.length > 0) return new Set(opts.map((option) => option.value));
+    return new Set(FALLBACK_INDUSTRIES);
+  }, [settings]);
+
+  const requirementTypeOptions = useMemo(() => {
+    const opts = catalogOptions(settings, "requirement_types");
+    if (opts.length > 0) return opts;
+    return FALLBACK_REQUIREMENT_TYPES.map((value, order) => ({
+      value,
+      label: value,
+      enabled: true,
+      order,
+    }));
+  }, [settings]);
+
+  const purchaseModelOptions = useMemo(() => {
+    const opts = catalogOptions(settings, "purchase_models");
+    if (opts.length > 0) return opts;
+    return FALLBACK_PURCHASE_MODELS.map((value, order) => ({
+      value,
+      label: value,
+      enabled: true,
+      order,
+    }));
+  }, [settings]);
+
+  const engagementScoreOptions = useMemo(() => {
+    const opts = catalogOptions(settings, "engagement_scores");
+    if (opts.length > 0) return opts;
+    return FALLBACK_ENGAGEMENT_SCORES.map((value, order) => ({
+      value: String(value),
+      label: `${value}%`,
+      enabled: true,
+      order,
+    }));
+  }, [settings]);
+
+  const productTypeOptions = useMemo(() => {
+    const opts = catalogOptions(settings, "product_types");
+    if (opts.length === 0) return undefined;
+    return opts.map((option) => option.value);
+  }, [settings]);
+
+  const hardwareChannelOptions = useMemo(() => {
+    const opts = catalogOptions(settings, "hardware_sourcing_channels");
+    if (opts.length > 0) return opts.map((option) => option.value);
+    return [...HARDWARE_SOURCING_CHANNELS];
+  }, [settings]);
+
+  const serviceChannelOptions = useMemo(() => {
+    const opts = catalogOptions(settings, "service_sourcing_channels");
+    if (opts.length > 0) return opts.map((option) => option.value);
+    return [...SERVICE_SOURCING_CHANNELS];
+  }, [settings]);
+
+  const oemNameOptions = useMemo(() => {
+    const opts = catalogOptions(settings, "oem_names");
+    if (opts.length > 0) return opts.map((option) => option.label || option.value);
+    return undefined;
+  }, [settings]);
+
+  const distributorCatalogOptions = useMemo(() => {
+    const opts = catalogOptions(settings, "distributor_names");
+    if (opts.length > 0) return opts.map((option) => option.label || option.value);
+    return [] as string[];
+  }, [settings]);
 
   const selectedLeadSource = leadSources.find((source) => source.id === form.lead_source_id);
   const isMultiTierSource = isMultiTierLeadSourceLabel(selectedLeadSource?.label);
@@ -289,6 +366,15 @@ export function LeadFormPage({
       const inheritedSource = sources.find(
         (source) => normalizeSourceMatchKey(source.label) === companySourceKey,
       );
+      if (leadRow) {
+        setCustomFields(
+          leadRow.custom_fields && typeof leadRow.custom_fields === "object"
+            ? { ...leadRow.custom_fields }
+            : {},
+        );
+      } else {
+        setCustomFields({});
+      }
       setForm((f) => {
         if (leadRow) {
           return {
@@ -371,7 +457,9 @@ export function LeadFormPage({
               ? companyRow.marketing_event_id ?? ""
               : ""),
           industry:
-            rawIndustry && !INDUSTRIES.includes(rawIndustry) ? rawIndustry : companyRow.industry,
+            rawIndustry && !industryCatalogValues.has(rawIndustry)
+              ? rawIndustry
+              : companyRow.industry,
           portal_link: f.portal_link || companyRow.website || "",
           street: companyRow.billing_street,
           city: companyRow.billing_city,
@@ -397,7 +485,7 @@ export function LeadFormPage({
     } finally {
       setLoading(false);
     }
-  }, [companyAccountId, leadId, router]);
+  }, [companyAccountId, industryCatalogValues, leadId, router]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -443,7 +531,20 @@ export function LeadFormPage({
 
   const selectedProductTypes = parseLeadProductTypes(form.product_type);
   const selectedSubProductCategories = parseLeadSubProductCategories(form.sub_product_category);
-  const subProductCategoryOptions = subProductOptionsForTypes(selectedProductTypes);
+  const subProductCategoryOptions = useMemo(() => {
+    const catalogOpts = catalogOptions(settings, "sub_product_categories");
+    if (catalogOpts.length > 0 && selectedProductTypes.length > 0) {
+      const parents = new Set(selectedProductTypes.map((t) => t.trim()));
+      const fromCatalog = catalogOpts
+        .filter((o) => {
+          const parent = String(o.meta?.parent_value ?? "").trim();
+          return !parent || parents.has(parent);
+        })
+        .map((o) => o.label || o.value);
+      if (fromCatalog.length > 0) return fromCatalog;
+    }
+    return [...subProductOptionsForTypes(selectedProductTypes)];
+  }, [settings, selectedProductTypes]);
   const isCloudProduct = isCloudLeadProductType(form.product_type);
   const showHardwareSourcing = leadNeedsHardwareSourcing(selectedProductTypes);
   const showServiceSourcing = leadNeedsServiceSourcing(selectedProductTypes);
@@ -495,12 +596,17 @@ export function LeadFormPage({
       .filter(Boolean)
       .join(", ");
     void loadCrmDistributorOptions(selectedNames).then((options) => {
-      if (!cancelled) setDistributorNameOptions(options);
+      if (cancelled) return;
+      const merged = [...options];
+      for (const name of distributorCatalogOptions) {
+        if (!merged.includes(name)) merged.push(name);
+      }
+      setDistributorNameOptions(merged);
     });
     return () => {
       cancelled = true;
     };
-  }, [distributorRows]);
+  }, [distributorRows, distributorCatalogOptions]);
 
   function onEntityPickChange(value: string) {
     setEntityPick(value);
@@ -533,33 +639,57 @@ export function LeadFormPage({
       return;
     }
     const missing: string[] = [];
-    if (!form.project_title?.trim()) missing.push("Project Title");
-    if (!form.email?.trim()) missing.push("Email");
-    if (!form.first_name?.trim()) missing.push("First Name");
-    if (!form.last_name?.trim()) missing.push("Last Name");
-    if (!form.product_type?.trim() || selectedProductTypes.length === 0) {
-      missing.push("Product Type");
-    }
-    if (!form.mobile?.trim()) missing.push("Mobile");
-    if (!form.designation?.trim()) missing.push("Designation");
-    if (!form.lead_source_id) missing.push("Lead Source");
+    pushRequired(missing, leadFields, "project_title", "Project Title", !form.project_title?.trim(), false);
+    pushRequired(missing, leadFields, "email", "Email", !form.email?.trim(), true);
+    pushRequired(missing, leadFields, "first_name", "First Name", !form.first_name?.trim(), true);
+    pushRequired(missing, leadFields, "last_name", "Last Name", !form.last_name?.trim(), false);
+    pushRequired(
+      missing,
+      leadFields,
+      "product_type",
+      "Product Type",
+      !form.product_type?.trim() || selectedProductTypes.length === 0,
+      true,
+    );
+    pushRequired(missing, leadFields, "mobile", "Mobile", !form.mobile?.trim(), true);
+    pushRequired(missing, leadFields, "designation", "Designation", !form.designation?.trim(), false);
+    pushRequired(missing, leadFields, "lead_source_id", "Lead Source", !form.lead_source_id, true);
     if (isMultiTierSource && !form.partner_names?.trim()) missing.push("Partner Names");
     if (isEventSource && !form.marketing_event_id) missing.push("Event");
-    if (selectedSubProductCategories.length === 0) {
-      missing.push(isCloudLeadProductType(form.product_type) ? "Sub Product" : "Sub Product Category");
-    }
+    pushRequired(
+      missing,
+      leadFields,
+      "sub_product_category",
+      isCloudLeadProductType(form.product_type) ? "Sub Product" : "Sub Product Category",
+      selectedSubProductCategories.length === 0,
+      true,
+    );
     if (!form.requirement_type) missing.push("Requirement Type");
-    if (!form.purchase_model) missing.push("Purchase Model");
+    pushRequired(missing, leadFields, "purchase_model", "Purchase Model", !form.purchase_model, false);
     if (showHardwareSourcing && !(sourcingChannels.hardware && sourcingChannels.hardware.length > 0)) {
       missing.push("Hardware Sourcing Channel");
     }
     if (showServiceSourcing && !sourcingChannels.service?.trim()) {
       missing.push("Service Sourcing Channel");
     }
-    if (form.expected_amount === undefined || form.expected_amount === null || Number.isNaN(Number(form.expected_amount))) {
-      missing.push("Expected Order Value");
-    }
-    if (!form.expected_closure_date?.trim()) missing.push("Expected Closure Date");
+    pushRequired(
+      missing,
+      leadFields,
+      "expected_amount",
+      "Expected Order Value",
+      form.expected_amount === undefined ||
+      form.expected_amount === null ||
+      Number.isNaN(Number(form.expected_amount)),
+      true,
+    );
+    pushRequired(
+      missing,
+      leadFields,
+      "expected_closure_date",
+      "Expected Closure Date",
+      !form.expected_closure_date?.trim(),
+      true,
+    );
     const saleType = resolveLeadSaleType(
       form.sale_type,
       form.end_customer_name,
@@ -615,6 +745,7 @@ export function LeadFormPage({
         requires_boq: Boolean(form.requires_boq) && !isCloudProduct,
         requires_sow: selectedProductTypes.includes("Services"),
         distributor_department: null,
+        custom_fields: Object.keys(customFields).length > 0 ? customFields : null,
       };
       if (isEdit && leadId && existingLead) {
         const ownerPatch =
@@ -798,6 +929,7 @@ export function LeadFormPage({
             <LeadProductTypeMultiSelect
               value={selectedProductTypes}
               onChange={onProductTypesChange}
+              options={productTypeOptions}
             />
           </FinanceField>
 
@@ -822,9 +954,9 @@ export function LeadFormPage({
               onChange={(e) => set("requirement_type", e.target.value)}
             >
               <option value="">None</option>
-              {REQUIREMENT_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {type}
+              {requirementTypeOptions.map((type) => (
+                <option key={type.value} value={type.value}>
+                  {type.label}
                 </option>
               ))}
             </FinanceSelect>
@@ -841,9 +973,9 @@ export function LeadFormPage({
               onChange={(e) => set("purchase_model", e.target.value)}
             >
               <option value="">None</option>
-              {PURCHASE_MODELS.map((model) => (
-                <option key={model} value={model}>
-                  {model}
+              {purchaseModelOptions.map((model) => (
+                <option key={model.value} value={model.value}>
+                  {model.label}
                 </option>
               ))}
             </FinanceSelect>
@@ -855,9 +987,9 @@ export function LeadFormPage({
               onChange={(e) => set("engagement_score", e.target.value ? Number(e.target.value) : undefined)}
             >
               <option value="">None</option>
-              {ENGAGEMENT_SCORES.map((score) => (
-                <option key={score} value={score}>
-                  {score}%
+              {engagementScoreOptions.map((score) => (
+                <option key={score.value} value={Number(score.value)}>
+                  {score.label.includes("%") ? score.label : `${score.label}%`}
                 </option>
               ))}
             </FinanceSelect>
@@ -869,7 +1001,7 @@ export function LeadFormPage({
                 aria-label="Hardware sourcing channels"
                 className="flex flex-wrap gap-3 rounded-lg border border-input px-2.5 py-2"
               >
-                {HARDWARE_SOURCING_CHANNELS.map((channel) => {
+                {hardwareChannelOptions.map((channel) => {
                   const checked = (sourcingChannels.hardware ?? []).includes(channel);
                   return (
                     <label
@@ -896,7 +1028,7 @@ export function LeadFormPage({
                 onChange={(e) => setSourcingChannel("service", e.target.value)}
               >
                 <option value="">None</option>
-                {SERVICE_SOURCING_CHANNELS.map((channel) => (
+                {serviceChannelOptions.map((channel) => (
                   <option key={channel} value={channel}>
                     {channel}
                   </option>
@@ -995,7 +1127,7 @@ export function LeadFormPage({
         icon={Package}
         nameLabel="OEM Name"
         rows={oemRows}
-        nameOptions={LEAD_OEM_OPTIONS}
+        nameOptions={oemNameOptions ?? LEAD_OEM_OPTIONS}
         onChange={onOemRowsChange}
         nameRequired
       />
@@ -1126,6 +1258,8 @@ export function LeadFormPage({
           </FinanceField>
         </div>
       </CrmSection>
+
+      <CrmCustomFieldsSection entity="lead" values={customFields} onChange={setCustomFields} />
 
       <CrmSection title="Lead Remarks" icon={MessageSquareText}>
         <FinanceField label="Remarks">

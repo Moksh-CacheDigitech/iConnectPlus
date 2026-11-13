@@ -255,20 +255,40 @@ class OpportunityBlueprintService:
             )
         return opp.blueprint_state
 
+    def _blueprint_overlay_transitions(self, ctx: TenantContext) -> list[dict[str, Any]]:
+        from modules.crm.service.crm_settings_service import CrmSettingsService
+
+        settings = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+        block = settings.get("blueprint") if isinstance(settings, dict) else None
+        rows = block.get("transitions") if isinstance(block, dict) else None
+        if not isinstance(rows, list):
+            return []
+        return [r for r in rows if isinstance(r, dict)]
+
     def state(self, ctx: TenantContext, opportunity_id: UUID) -> dict[str, Any]:
         opp = self._reconcile_post_lead_docs(ctx, self.get(ctx, opportunity_id))
         is_sales_blueprint = opp.blueprint_state is not None
         current = opp.blueprint_state or "open"
+        overlay_transitions = self._blueprint_overlay_transitions(ctx)
         if not is_sales_blueprint:
             allowed: list[str] = []
         elif opp.locked:
             # While locked, only Lost remains available to the actor; approve/reject
             # run exclusively through My Jobs.
-            allowed = ["lost"] if "lost" in sales_blueprint_engine.allowed_actions("opportunity", current) else []
+            allowed = (
+                ["lost"]
+                if "lost"
+                in sales_blueprint_engine.allowed_actions(
+                    "opportunity", current, overlay_transitions=overlay_transitions
+                )
+                else []
+            )
         else:
             allowed = [
                 action
-                for action in sales_blueprint_engine.allowed_actions("opportunity", current)
+                for action in sales_blueprint_engine.allowed_actions(
+                    "opportunity", current, overlay_transitions=overlay_transitions
+                )
                 if action not in _GATED_OPPORTUNITY_ACTIONS or action in {"create_quote", "create_ovf"}
             ]
             # Keep create_quote / create_ovf for UI CTAs; drop quote_accepted / deal_won
@@ -295,6 +315,14 @@ class OpportunityBlueprintService:
             "won",
         }:
             allowed = [action for action in allowed if action != "lost"]
+        from modules.crm.service.crm_settings_service import CrmSettingsService
+
+        settings = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+        allowed = [
+            action
+            for action in allowed
+            if CrmSettingsService.blueprint_action_enabled(settings, action, True)
+        ]
         return {
             "entity_type": "opportunity",
             "entity_id": opp.id,
@@ -504,7 +532,13 @@ class OpportunityBlueprintService:
         if action == "deal_reg" and is_cloud_opportunity(opp):
             raise ConflictException("Deal registration is not used for cloud consumption opportunities")
 
-        next_state = sales_blueprint_engine.transition("opportunity", current, action, ctx)
+        next_state = sales_blueprint_engine.transition(
+            "opportunity",
+            current,
+            action,
+            ctx,
+            overlay_transitions=self._blueprint_overlay_transitions(ctx),
+        )
         updates: dict[str, Any] = {}
 
         if action == "attach_contract":
@@ -835,12 +869,14 @@ class OpportunityBlueprintService:
 
     def _default_doc_approver_ids(self, ctx: TenantContext, doc: str) -> list[UUID]:
         """Resolve Default task owners for BOQ/SOW approval steps."""
-        from modules.crm.domain.approval_step_owners import APPROVAL_STEP_CATALOG
         from modules.crm.service.approval_step_owner_service import ApprovalStepOwnerService
         from modules.crm.service.approval_task_service import ApprovalTaskService
+        from modules.crm.service.crm_settings_service import CrmSettingsService
 
         step_key = "boq_approval" if doc == "boq" else "sow_approval"
-        label = APPROVAL_STEP_CATALOG[step_key][0]
+
+        settings = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+        label, _ = CrmSettingsService.approval_step_meta(settings, step_key)
         owners = ApprovalStepOwnerService(self._db).list_user_ids(ctx, step_key)
         if not owners:
             owners = ApprovalTaskService(self._db)._admin_recipient_ids(ctx)
@@ -871,10 +907,15 @@ class OpportunityBlueprintService:
         opp: CrmOpportunity,
         payload: dict[str, Any] | None = None,
     ) -> list[UUID]:
-        """SOW recipients: owner-only for Services deals; otherwise payload / defaults."""
+        """SOW recipients: owner-only for Services deals when Settings policy allows."""
         from modules.crm.domain.product_types import entity_has_services
+        from modules.crm.service.crm_settings_service import CrmSettingsService
 
-        if entity_has_services(opp):
+        settings = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+        route_to_owner = CrmSettingsService.policy_flag(
+            settings, "sow_route_to_owner_when_services", True
+        )
+        if entity_has_services(opp) and route_to_owner:
             return self._services_sow_assignee_ids(ctx, opp)
         payload = payload or {}
         if payload.get("assigned_user_ids") or payload.get("assigned_user_id"):
@@ -888,12 +929,13 @@ class OpportunityBlueprintService:
 
         Services deals: SOW approval goes only to the opportunity owner (lead assignee).
         """
-        from modules.crm.domain.approval_step_owners import APPROVAL_STEP_CATALOG
         from modules.crm.service.approval_task_service import ApprovalTaskService
+        from modules.crm.service.crm_settings_service import CrmSettingsService
 
         action = "approve_boq" if doc == "boq" else "approve_sow"
         step_key = "boq_approval" if doc == "boq" else "sow_approval"
-        team_role = APPROVAL_STEP_CATALOG[step_key][1]
+        settings = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+        _, team_role = CrmSettingsService.approval_step_meta(settings, step_key)
         pending = ApprovalTaskService(self._db).list(
             ctx,
             company_id=opp.company_id,
@@ -904,8 +946,13 @@ class OpportunityBlueprintService:
         if any(task.action == action for task in pending):
             return
         from modules.crm.domain.product_types import entity_has_services
+        from modules.crm.service.crm_settings_service import CrmSettingsService
 
-        services_sow = doc == "sow" and entity_has_services(opp)
+        settings = CrmSettingsService(self._db).get_effective(ctx, require_erp_admin=False)
+        route_to_owner = CrmSettingsService.policy_flag(
+            settings, "sow_route_to_owner_when_services", True
+        )
+        services_sow = doc == "sow" and entity_has_services(opp) and route_to_owner
         assigned = (
             self._sow_assignee_ids(ctx, opp)
             if doc == "sow"

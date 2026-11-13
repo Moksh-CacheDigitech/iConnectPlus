@@ -73,6 +73,7 @@ class CrmQuote(Base, *CrmTransactionMixin):
     quote_stage: Mapped[str] = mapped_column(String(30), nullable=False, default="draft")
     approval_status: Mapped[str] = mapped_column(String(30), nullable=False, default="not_required")
     locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    custom_fields: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     entity_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     entity_email: Mapped[str | None] = mapped_column(String(255), nullable=True)

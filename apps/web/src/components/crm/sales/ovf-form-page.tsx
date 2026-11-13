@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, ClipboardCheck, IndianRupee } from "lucide-react";
 
 import { CrmErrorBanner, CrmPage, CrmSection } from "@/components/crm/crm-ui";
+import { CrmCustomFieldsSection } from "@/components/crm/sales/crm-custom-fields-section";
 import { CrmSessionEmployeeField } from "@/components/crm/sales/crm-session-employee-field";
 import {
   OvfOrderLinesSection,
@@ -42,6 +43,8 @@ import { Input } from "@/components/ui/input";
 import { ApiClientError } from "@/services/api-client";
 import { extractCustomerPo } from "@/services/crm-deal-controls-service";
 import { useAuthUser } from "@/hooks/use-auth-user";
+import { useCrmSettingsEffective } from "@/hooks/use-crm-settings";
+import { formFieldsMap, pushRequired } from "@/lib/crm/crm-settings-ui";
 import { loadCrmDistributorOptions } from "@/lib/crm/lead-distributor-options";
 import { computeFinanceCostPct } from "@/lib/crm/ovf-finance-cost";
 import { resolveSessionEmployeeLabel } from "@/lib/crm/session-employee";
@@ -178,6 +181,7 @@ async function distributorOptionsForOpportunity(opportunityRow: Opportunity): Pr
 export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: string }) {
   const router = useRouter();
   const { user } = useAuthUser();
+  const { settings } = useCrmSettingsEffective();
   const isEdit = Boolean(ovfId);
   const [ovf, setOvf] = useState<Ovf | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -234,6 +238,7 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
   const [serviceChargeTotal, setServiceChargeTotal] = useState(0);
   const [leadProductType, setLeadProductType] = useState<string | null>(null);
   const [marginInputsDirty, setMarginInputsDirty] = useState(false);
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
   const showSupportingItems = opportunityIncludesServices(opportunity, leadProductType);
 
   const load = useCallback(async () => {
@@ -286,6 +291,7 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
         const copyPriorPo = ovfPoAttachments.length === 0 && poAttachments.length > 0;
         const copyPriorQuote = ovfQuoteAttachments.length === 0 && quoteAttachments.length > 0;
         setOvf(ovfRow);
+        setCustomFields((ovfRow.custom_fields as Record<string, unknown> | undefined) ?? {});
         setQuote(quoteRow);
         setOpportunity(opportunityRow);
         if (opportunityRow.lead_id) {
@@ -693,6 +699,7 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
       total_margin_amount: Number(totalMarginAmount.toFixed(2)),
       total_margin_pct: Number(totalMarginPct.toFixed(2)),
       finance_cost_pct: Number(financeCostPct.toFixed(2)),
+      custom_fields: customFields,
     };
   }
 
@@ -782,7 +789,8 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
   async function onSave() {
     if (!quote || !opportunity) return;
     const missing: string[] = [];
-    if (!form.po_number.trim()) missing.push("PO Number");
+    const ovfFields = formFieldsMap(settings, "ovf");
+    pushRequired(missing, ovfFields, "po_number", "PO Number", !form.po_number.trim(), true);
     if (!form.shipping_address.trim()) missing.push("Shipping Address");
     if (missing.length > 0) {
       setMandateMessage(missingRequiredMessage(missing));
@@ -1064,6 +1072,8 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
         readOnlyLines
         disabled={saving}
       />
+
+      <CrmCustomFieldsSection entity="ovf" values={customFields} onChange={setCustomFields} />
 
       <RequiredFieldsDialog
         open={mandateOpen}
