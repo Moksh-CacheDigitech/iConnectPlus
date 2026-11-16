@@ -272,7 +272,7 @@ def default_crm_settings() -> dict[str, Any]:
                 "fields": [
                     _field("subject", "Subject", field_type="text", required=True, order=0),
                     _field("project_title", "Project Title", field_type="text", required=False, order=1),
-                    _field("valid_until", "Valid Until", field_type="date", required=True, order=2),
+                    _field("valid_until", "Price Validity Date", field_type="date", required=True, order=2),
                     _field(
                         "service_type",
                         "Service Type",

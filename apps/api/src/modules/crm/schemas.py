@@ -1482,6 +1482,8 @@ class QuoteLineCreate(BaseModel):
     qty: Decimal = Decimal("1")
     unit_cost: Decimal = Decimal("0")
     unit_sell: Decimal = Decimal("0")
+    # Optional entered markup % (up to 10 d.p.); when set with unit_cost, drives unit_sell.
+    margin_pct: Decimal | None = None
     gst_pct: Decimal = Decimal("0")
 
 
@@ -1494,6 +1496,7 @@ class QuoteLineUpdate(BaseModel):
     qty: Decimal | None = None
     unit_cost: Decimal | None = None
     unit_sell: Decimal | None = None
+    margin_pct: Decimal | None = None
     gst_pct: Decimal | None = None
     version: int | None = None
 

@@ -27,6 +27,7 @@ from modules.crm.service.cloud_flow import (
 )
 from modules.crm.service.crm_record_visibility import CrmRecordVisibility
 from modules.crm.service.crm_scope_validator import CrmScopeValidator
+from modules.crm.service.document_number_service import is_deal_reg_number
 from modules.crm.service.engines import sales_blueprint_engine
 from modules.foundation.domain.value_objects import TenantContext
 
@@ -233,19 +234,23 @@ class OpportunityBlueprintService:
 
     def next_deal_reg_number(self, ctx: TenantContext, opportunity_id: UUID) -> str:
         """Preview the DR number for Deal Registration (does not persist)."""
+        from modules.crm.service.document_number_service import DocumentNumberService
+
         opp = self.get(ctx, opportunity_id)
         if opp.deal_reg_number:
             return opp.deal_reg_number
+        entity_name = None
         if opp.lead_id is not None:
             from modules.crm.models import CrmLead
 
             lead = self._db.get(CrmLead, opp.lead_id)
             lead_dr = (getattr(lead, "dr_number", None) or getattr(lead, "lead_code", None) or "").strip()
-            if lead_dr.startswith("DR-"):
+            if is_deal_reg_number(lead_dr):
                 return lead_dr
-        from modules.crm.service.document_number_service import DocumentNumberService
-
-        return DocumentNumberService(self._db).next_deal_reg_number(opp.company_id)
+            entity_name = getattr(lead, "entity_name", None) if lead is not None else None
+        return DocumentNumberService(self._db).next_deal_reg_number(
+            opp.company_id, entity_name=entity_name
+        )
 
     def _require_blueprint(self, opp: CrmOpportunity) -> str:
         if not opp.blueprint_state:
@@ -343,7 +348,7 @@ class OpportunityBlueprintService:
         approved the opportunity lands on Attach Vendor Quotation.
         """
         current = opp.blueprint_state or "open"
-        has_dr = (opp.deal_reg_number or opp.opportunity_code or "").strip().startswith("DR-")
+        has_dr = is_deal_reg_number(opp.deal_reg_number or opp.opportunity_code)
 
         # Already past docs but still sitting on Deal Registration with a DR → OEM next.
         if current == "deal_reg" and has_dr and (opp.boq_approved or opp.sow_approved):
@@ -463,7 +468,7 @@ class OpportunityBlueprintService:
             actions = [action for action in actions if action != "send_sow_for_attachment"]
 
         # Deal Registration only when docs are ready AND no DR yet (DR now comes from lead create).
-        has_dr = (opp.deal_reg_number or opp.opportunity_code or "").strip().startswith("DR-")
+        has_dr = is_deal_reg_number(opp.deal_reg_number or opp.opportunity_code)
         if not opp.boq_approved and not opp.sow_approved:
             actions = [action for action in actions if action != "deal_reg"]
         elif has_dr:
@@ -698,19 +703,23 @@ class OpportunityBlueprintService:
                     "Attach a BOQ or SOW before Deal Registration"
                 )
             reg_no = (payload.get("deal_reg_number") or "").strip() or (opp.deal_reg_number or "").strip()
+            entity_name = None
             if not reg_no and opp.lead_id is not None:
                 from modules.crm.models import CrmLead
 
                 lead = self._db.get(CrmLead, opp.lead_id)
                 lead_dr = (getattr(lead, "dr_number", None) or getattr(lead, "lead_code", None) or "").strip()
-                if lead_dr.startswith("DR-"):
+                if is_deal_reg_number(lead_dr):
                     reg_no = lead_dr
+                entity_name = getattr(lead, "entity_name", None) if lead is not None else None
             if not reg_no:
                 from modules.crm.service.document_number_service import DocumentNumberService
 
-                reg_no = DocumentNumberService(self._db).next_deal_reg_number(opp.company_id)
+                reg_no = DocumentNumberService(self._db).next_deal_reg_number(
+                    opp.company_id, entity_name=entity_name
+                )
             updates["deal_reg_number"] = reg_no
-            if not (opp.opportunity_code or "").startswith("DR-"):
+            if not is_deal_reg_number(opp.opportunity_code):
                 updates["opportunity_code"] = reg_no
         elif action == "oem_received":
             # Legacy acknowledgement step — kept for history replay only.
@@ -987,7 +996,7 @@ class OpportunityBlueprintService:
         )
         sow_attached = bool(updates.get("sow_attached", opp.sow_attached))
         boq_attached = bool(updates.get("boq_attached", opp.boq_attached))
-        has_dr = (opp.deal_reg_number or opp.opportunity_code or "").strip().startswith("DR-")
+        has_dr = is_deal_reg_number(opp.deal_reg_number or opp.opportunity_code)
 
         if approved_doc == "boq" and sow_attached and not sow_ok:
             self._auto_raise_doc_approval(ctx, opp, doc="sow")

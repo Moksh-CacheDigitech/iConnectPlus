@@ -11,7 +11,7 @@ Product rules enforced here:
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 from uuid import UUID
 
@@ -39,6 +39,10 @@ from modules.platform.compat.audit_facade import PlatformAuditFacade
 from modules.master_data.service.employee_service import EmployeeService
 
 
+_MONEY = Decimal("0.0001")
+_MARGIN_PCT = Decimal("0.0000000001")
+
+
 def _first(*values: Any) -> Any:
     for value in values:
         if value is None:
@@ -47,6 +51,24 @@ def _first(*values: Any) -> Any:
             continue
         return value
     return None
+
+
+def _quantize_margin_pct(value: Decimal | str | float | int | None) -> Decimal:
+    return Decimal(str(value or 0)).quantize(_MARGIN_PCT, rounding=ROUND_HALF_UP)
+
+
+def _apply_entered_margin(fields: dict[str, Any]) -> dict[str, Any]:
+    """When margin_pct is provided with unit_cost, derive unit_sell and keep the entered %."""
+    if "margin_pct" not in fields or fields.get("margin_pct") is None:
+        return fields
+    margin_pct = _quantize_margin_pct(fields["margin_pct"])
+    fields["margin_pct"] = margin_pct
+    if "unit_cost" in fields and fields.get("unit_cost") is not None:
+        unit_cost = Decimal(str(fields["unit_cost"] or 0))
+        fields["unit_sell"] = (unit_cost * (Decimal("1") + margin_pct / Decimal("100"))).quantize(
+            _MONEY, rounding=ROUND_HALF_UP
+        )
+    return fields
 
 
 class QuoteService:
@@ -486,6 +508,7 @@ class QuoteService:
         quote = self._lock_quote_for_lines(ctx, quote_id)
         existing = self._lines.list_for_quote(ctx, quote_id)
         fields.setdefault("line_no", len(existing) + 1)
+        fields = _apply_entered_margin(dict(fields))
         line = self._lines.create(ctx, company_id=quote.company_id, branch_id=quote.branch_id, quote_id=quote_id, **fields)
         self._recompute(ctx, quote_id)
         return line
@@ -495,6 +518,13 @@ class QuoteService:
         if line is None:
             raise NotFoundException("Quote line not found")
         self._lock_quote_for_lines(ctx, line.quote_id)
+        fields = dict(fields)
+        if "margin_pct" in fields and fields.get("margin_pct") is not None and "unit_cost" not in fields:
+            fields["unit_cost"] = line.unit_cost
+        if "unit_cost" in fields and fields.get("unit_cost") is not None and "margin_pct" not in fields:
+            # Cost changed without a new margin — re-apply the stored markup %.
+            fields["margin_pct"] = line.margin_pct
+        fields = _apply_entered_margin(fields)
         if "qty" in fields and fields["qty"] is not None:
             self._assert_qty_within_balance(ctx, line, Decimal(str(fields["qty"])))
         updated = self._lines.update(ctx, line_id, **fields)
@@ -711,29 +741,41 @@ class QuoteService:
             raise NotFoundException("Quote not found")
         lines = self._lines.list_for_quote(ctx, quote_id)
         computed_lines: list[CrmQuoteLine] = []
+        stored_margins: list[Decimal] = []
         for line in lines:
             result = margin_engine.compute_line_margin(line.qty, line.unit_cost, line.unit_sell)
             gst_amount = (result.line_total * Decimal(str(line.gst_pct or 0)) / Decimal("100")).quantize(
-                Decimal("0.0001")
+                _MONEY
             )
+            # Keep an explicitly entered margin % (up to 10 d.p.); only backfill
+            # from cost/sell when the line has no stored markup yet.
+            stored_pct = _quantize_margin_pct(line.margin_pct)
+            margin_pct = stored_pct if stored_pct != 0 else result.margin_pct
             self._lines.update(
                 ctx,
                 line.id,
-                margin_pct=result.margin_pct,
+                margin_pct=margin_pct,
                 margin_amount=result.margin_amount,
                 gst_amount=gst_amount,
                 line_total=result.line_total,
             )
+            stored_margins.append(margin_pct)
             computed_lines.append(line)
 
         margin_result = margin_engine.evaluate_quote_margin(
             (line.line_type, line.qty, line.unit_cost, line.unit_sell) for line in computed_lines
         )
+        if stored_margins:
+            avg_margin_pct = (sum(stored_margins, Decimal("0")) / Decimal(len(stored_margins))).quantize(
+                _MARGIN_PCT, rounding=ROUND_HALF_UP
+            )
+        else:
+            avg_margin_pct = margin_result.avg_margin_pct
         grand_total = margin_result.total_sell_amount + Decimal(str(quote.freight or 0))
         return self._repo.update(
             ctx,
             quote_id,
-            avg_margin_pct=margin_result.avg_margin_pct,
+            avg_margin_pct=avg_margin_pct,
             total_margin_amount=margin_result.total_margin_amount,
             grand_total=grand_total,
         )

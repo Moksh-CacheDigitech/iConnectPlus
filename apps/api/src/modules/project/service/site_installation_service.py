@@ -91,9 +91,116 @@ class SiteInstallationService:
         self._assignment.ensure_project_access(ctx, project_id, project.company_id)
         existing = self._repo.get_by_project(ctx, project_id)
         if existing is not None:
-            return existing
+            return self._ensure_cloud_po_lines(ctx, existing)
         self._module_admin.ensure_admin(ctx)
         return self._create_for_project(ctx, project, **fields)
+
+    def _ensure_cloud_po_lines(
+        self, ctx: TenantContext, row: PrjSiteInstallation
+    ) -> PrjSiteInstallation:
+        """Backfill / refresh cloud PO snapshot from queue handoffs when incomplete."""
+        existing_lines = list(getattr(row, "cloud_po_lines", None) or [])
+        needs_qty = bool(existing_lines) and any(
+            not isinstance(line, dict)
+            or line.get("quantity") in (None, "", 0, "0")
+            for line in existing_lines
+        )
+        if existing_lines and not needs_qty:
+            return row
+        cloud = (row.cloud_name or "").strip()
+        if not cloud:
+            return row
+        from modules.project.repository.po_queue_handoff_repository import (
+            PoQueueHandoffRepository,
+        )
+
+        siblings = PoQueueHandoffRepository(self._db).list_by_cloud_name(
+            ctx, row.company_id, cloud, include_deleted=True
+        )
+        if not siblings:
+            return row
+
+        def _line_qty(sibling: object) -> int | None:
+            try:
+                rack = int(str(getattr(sibling, "rack_quantity", None) or "0").strip() or "0")
+            except ValueError:
+                rack = 0
+            try:
+                server = int(
+                    str(getattr(sibling, "server_quantity", None) or "0").strip() or "0"
+                )
+            except ValueError:
+                server = 0
+            total = max(0, rack) + max(0, server)
+            return total if total > 0 else None
+
+        def _line_key(project: str, circle: str, site: str, line_type: str, po: str) -> tuple:
+            return (
+                (project or "").casefold(),
+                (circle or "").casefold(),
+                (site or "").casefold(),
+                (line_type or "").casefold(),
+                (po or "").casefold(),
+            )
+
+        sibling_qty: dict[tuple, int] = {}
+        for sibling in siblings:
+            key = _line_key(
+                sibling.project_name or "",
+                sibling.circle_name or "",
+                sibling.site_name or "",
+                (getattr(sibling, "line_type", None) or sibling.server_type or ""),
+                sibling.customer_po_number or "",
+            )
+            qty = _line_qty(sibling) or 0
+            sibling_qty[key] = sibling_qty.get(key, 0) + qty
+
+        if existing_lines and needs_qty:
+            refreshed: list[dict] = []
+            changed = False
+            for line in existing_lines:
+                if not isinstance(line, dict):
+                    refreshed.append(line)  # type: ignore[arg-type]
+                    continue
+                next_line = dict(line)
+                if next_line.get("quantity") in (None, "", 0, "0"):
+                    key = _line_key(
+                        str(next_line.get("project_name") or ""),
+                        str(next_line.get("circle_name") or ""),
+                        str(next_line.get("site_name") or ""),
+                        str(next_line.get("line_type") or ""),
+                        str(next_line.get("customer_po_number") or ""),
+                    )
+                    qty = sibling_qty.get(key) or 0
+                    if qty > 0:
+                        next_line["quantity"] = qty
+                        changed = True
+                refreshed.append(next_line)
+            if not changed:
+                return row
+            updated = self._repo.update(ctx, row.id, cloud_po_lines=refreshed)
+            return updated or row
+
+        snapshot = [
+            {
+                "project_name": (sibling.project_name or "").strip() or None,
+                "circle_name": (sibling.circle_name or "").strip() or None,
+                "site_name": (sibling.site_name or "").strip() or None,
+                "line_type": (
+                    (getattr(sibling, "line_type", None) or sibling.server_type or "")
+                    .strip()
+                    or None
+                ),
+                "quantity": _line_qty(sibling),
+                "customer_po_number": (sibling.customer_po_number or "").strip() or None,
+                "document_date": (
+                    sibling.document_date.isoformat() if sibling.document_date else None
+                ),
+            }
+            for sibling in siblings
+        ]
+        updated = self._repo.update(ctx, row.id, cloud_po_lines=snapshot)
+        return updated or row
 
     def create_for_project(
         self, ctx: TenantContext, project_id: UUID, **fields

@@ -54,7 +54,22 @@ export function quoteLineMarkupPct(
   const cost = Number(unitCost) || 0;
   const sell = Number(unitSell) || 0;
   if (cost <= 0) return Number(fallback) || 0;
-  return Number((((sell - cost) / cost) * 100).toFixed(3));
+  // Preserve up to 10 decimal places for vendor-matched margin %.
+  return Number((((sell - cost) / cost) * 100).toFixed(10));
+}
+
+/** Format a margin % for inputs without forcing trailing zeros past significant digits. */
+export function formatMarginPctInput(
+  value: number | string | null | undefined,
+  fallback: number | string | null | undefined = 0,
+): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    const fb = Number(fallback);
+    return Number.isFinite(fb) ? String(fb) : "0";
+  }
+  // Trim floating noise while keeping up to 10 decimal places.
+  return Number(n.toFixed(10)).toString();
 }
 
 export function truncateId(id?: string | null): string {
@@ -360,9 +375,15 @@ export async function createLeadFromCompany(
   );
 }
 
-export async function peekNextLeadDrNumber(companyId?: string): Promise<string> {
+export async function peekNextLeadDrNumber(
+  companyId?: string,
+  entityName?: string,
+): Promise<string> {
+  const query: Record<string, string> = {};
+  if (companyId) query.company_id = companyId;
+  if (entityName?.trim()) query.entity_name = entityName.trim();
   const res = await apiClient<{ dr_number: string }>("/crm/leads/next-dr-number", {
-    query: companyId ? { company_id: companyId } : undefined,
+    query: Object.keys(query).length ? query : undefined,
   });
   return unwrap(res).dr_number;
 }
@@ -1022,6 +1043,7 @@ export type QuoteLineFormInput = {
   qty?: number;
   unit_cost?: number;
   unit_sell?: number;
+  margin_pct?: number;
   gst_pct?: number;
 };
 

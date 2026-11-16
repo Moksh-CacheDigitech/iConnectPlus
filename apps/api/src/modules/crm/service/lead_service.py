@@ -429,9 +429,15 @@ class LeadService:
         self._db.flush()
         return employee_id
 
-    def peek_next_dr_number(self, ctx: TenantContext, company_id: UUID | None = None) -> str:
+    def peek_next_dr_number(
+        self,
+        ctx: TenantContext,
+        company_id: UUID | None = None,
+        *,
+        entity_name: str | None = None,
+    ) -> str:
         cid = self._scope.resolve_company_id(ctx, company_id)
-        return self._numbers.next_deal_reg_number(cid)
+        return self._numbers.next_deal_reg_number(cid, entity_name=entity_name)
 
     def create(self, ctx: TenantContext, *, branch_id: UUID, company_id: UUID | None = None, **fields):
         cid = self._scope.resolve_company_id(ctx, company_id)
@@ -443,7 +449,9 @@ class LeadService:
         fields.pop("new_dr_number", None)
         is_sales_lead = fields.get("company_account_id") is not None
         if is_sales_lead:
-            code = self._numbers.next_deal_reg_number(cid)
+            code = self._numbers.next_deal_reg_number(
+                cid, entity_name=fields.get("entity_name")
+            )
             fields["dr_number"] = code
         else:
             code = self._numbers.generate(CrmEntityType.LEAD, cid, CrmLead, "lead_code")
@@ -727,8 +735,10 @@ class LeadService:
         )
         if by_lead is not None:
             return by_lead
+        from modules.crm.service.document_number_service import is_deal_reg_number
+
         dr_number = (lead.dr_number or lead.lead_code or "").strip()
-        if not dr_number.startswith("DR-"):
+        if not is_deal_reg_number(dr_number):
             return None
         return (
             self._db.query(CrmOpportunity)
@@ -1143,9 +1153,13 @@ class LeadService:
                 opp_fields["purchase_model"] = purchase_model
             # One number from lead create to closure: reuse the lead's DR as the
             # opportunity number; quotes / OVF / tracking hang off that same code.
+            from modules.crm.service.document_number_service import is_deal_reg_number
+
             dr_number = (lead.dr_number or lead.lead_code or "").strip()
-            if not dr_number.startswith("DR-"):
-                dr_number = self._numbers.next_deal_reg_number(lead.company_id)
+            if not is_deal_reg_number(dr_number):
+                dr_number = self._numbers.next_deal_reg_number(
+                    lead.company_id, entity_name=lead.entity_name
+                )
                 self._repo.update(ctx, lead_id, dr_number=dr_number)
             opp_fields["opportunity_code"] = dr_number
             opp_fields["deal_reg_number"] = dr_number

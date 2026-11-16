@@ -17,6 +17,7 @@ import { ApprovalBanner } from "@/components/crm/sales/approval-banner";
 import { CrmEntityRejectionAlert } from "@/components/crm/sales/crm-approval-inbox-listener";
 import { BlueprintActions } from "@/components/crm/sales/blueprint-actions";
 import { PoValidationChain } from "@/components/crm/sales/po-validation-chain";
+import { SalesStageBadge } from "@/components/crm/sales/sales-stage-badge";
 import { resolveSalesStageLabel } from "@/lib/crm/sales-blueprint-stages";
 import { CrmDetailEditLink } from "@/components/crm/sales/crm-detail-edit-link";
 import { CrmRecordActionsMenu } from "@/components/crm/sales/crm-record-actions-menu";
@@ -26,7 +27,6 @@ import { LeadDetailsCard } from "@/components/crm/sales/lead-details-card";
 import { OpportunityDealControls } from "@/components/crm/sales/opportunity-deal-controls";
 import { CompanyWorkspaceNav } from "@/components/crm/company-workspace-nav";
 import { PageHeader } from "@/components/layout/page-header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   buildOvfPrintPdfAttachmentById,
@@ -548,18 +548,15 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
                 Stage / status
               </p>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                <Badge
-                  variant="outline"
-                  className={
-                    opp.current_stage === "won" || opp.status === "won"
-                      ? "border-emerald-200 bg-emerald-50 capitalize text-emerald-800"
-                      : "capitalize"
-                  }
-                >
-                  {opp.current_stage === "won" || opp.status === "won"
-                    ? "Deal won"
-                    : opp.current_stage.replaceAll("_", " ")}
-                </Badge>
+                <SalesStageBadge
+                  label={resolveSalesStageLabel({
+                    entityType: "opportunity",
+                    blueprintState: opp.blueprint_state || opp.current_stage,
+                    opportunity: opp,
+                  })}
+                  state={opp.blueprint_state || opp.current_stage}
+                  entityType="opportunity"
+                />
                 <span className="text-xs capitalize text-muted-foreground">{opp.status}</span>
               </div>
             </div>
@@ -691,9 +688,16 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
                               ) : null}
                             </td>
                             <td className="px-4 py-2">
-                              <Badge variant="outline" className="capitalize">
-                                {q.quote_stage.replaceAll("_", " ")}
-                              </Badge>
+                              <SalesStageBadge
+                                label={resolveSalesStageLabel({
+                                  entityType: "quote",
+                                  blueprintState: q.quote_stage,
+                                  quote: q,
+                                  locked: q.locked,
+                                })}
+                                state={q.quote_stage}
+                                entityType="quote"
+                              />
                             </td>
                             <td className="px-4 py-2">{formatInr(q.grand_total)}</td>
                             <td className="px-4 py-2">{q.avg_margin_pct}%</td>
@@ -783,9 +787,15 @@ export function OpportunityDetailPage({ opportunityId }: { opportunityId: string
                               )}
                             </td>
                             <td className="px-4 py-2">
-                              <Badge variant="outline" className="capitalize">
-                                {o.blueprint_state.replaceAll("_", " ")}
-                              </Badge>
+                              <SalesStageBadge
+                                label={resolveSalesStageLabel({
+                                  entityType: "ovf",
+                                  blueprintState: o.blueprint_state,
+                                  ovf: o,
+                                })}
+                                state={o.blueprint_state}
+                                entityType="ovf"
+                              />
                             </td>
                             <td className="px-4 py-2">
                               {o.deal_won ? formatInr(o.deal_won_amount ?? 0) : "-"}

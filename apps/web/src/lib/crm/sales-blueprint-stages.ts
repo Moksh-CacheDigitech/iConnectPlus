@@ -197,3 +197,62 @@ export function resolveSalesStageLabel(ctx: SalesStageContext): string {
       return state.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase()) || "-";
   }
 }
+
+/**
+ * Stage color bands for status identification:
+ * - pre_po (orange): Lead → … → Deal Won (inclusive)
+ * - post_po (green): Customer PO / OVF path onward
+ * - lost (red): Deal Lost
+ */
+export type SalesStageTone = "pre_po" | "post_po" | "lost" | "neutral";
+
+const POST_PO_LABEL_RE =
+  /customer\s*po|ovf\b|shared\s*to\s*scm|po\s*received|po\s*attached|po\s*approved|po\s*sent/i;
+
+const POST_PO_STATE_RE =
+  /^(po_pending|po_approval|ovf_ready|ovf_|shared_scm|customer_po)/i;
+
+/** Classify a human stage label (Current State / timeline / reports). */
+export function salesStageToneFromLabel(label: string | null | undefined): SalesStageTone {
+  const text = (label || "").trim();
+  if (!text || text === "-") return "neutral";
+  const lower = text.toLowerCase();
+  if (/\blost\b/.test(lower)) return "lost";
+  // Deal Won stays orange even if it appears again later in the path.
+  if (/^deal\s*won\b/.test(lower) || lower.includes("deal won ·")) return "pre_po";
+  if (POST_PO_LABEL_RE.test(lower)) return "post_po";
+  return "pre_po";
+}
+
+/** Classify a raw blueprint / quote / opportunity stage key. */
+export function salesStageToneFromState(
+  state: string | null | undefined,
+  entityType?: BlueprintEntity | "opportunity" | "quote" | "ovf" | "lead" | string,
+): SalesStageTone {
+  const raw = (state || "").trim().toLowerCase();
+  if (!raw) return "neutral";
+  if (raw === "lost") return "lost";
+
+  if (entityType === "ovf") {
+    if (raw === "deal_won") return "post_po";
+    return "post_po";
+  }
+
+  if (raw === "won" || raw === "accepted" || raw === "deal_won") return "pre_po";
+  if (POST_PO_STATE_RE.test(raw)) return "post_po";
+  if (entityType === "quote") return "pre_po";
+  return "pre_po";
+}
+
+export function salesStageBadgeClassName(tone: SalesStageTone): string {
+  switch (tone) {
+    case "post_po":
+      return "border-emerald-200 bg-emerald-100 text-emerald-800 hover:bg-emerald-100";
+    case "pre_po":
+      return "border-orange-200 bg-orange-100 text-orange-900 hover:bg-orange-100";
+    case "lost":
+      return "border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/10";
+    default:
+      return "border-border bg-muted text-muted-foreground hover:bg-muted";
+  }
+}

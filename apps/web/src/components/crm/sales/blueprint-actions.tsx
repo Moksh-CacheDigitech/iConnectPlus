@@ -4,9 +4,13 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { Paperclip } from "lucide-react";
 
 import { ApproverMultiSelect } from "@/components/crm/sales/approver-multi-select";
+import {
+  RequiredFieldsDialog,
+  missingRequiredMessage,
+} from "@/components/crm/sales/required-fields-dialog";
+import { SalesStageBadge } from "@/components/crm/sales/sales-stage-badge";
 import { FinanceField, FinanceTextarea } from "@/components/finance/journals/finance-form-field";
 import { ConfirmDialog } from "@/components/finance/journals/confirm-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiClientError } from "@/services/api-client";
@@ -399,6 +403,9 @@ export function BlueprintActions({
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mandateOpen, setMandateOpen] = useState(false);
+  const [mandateMessage, setMandateMessage] = useState("");
+  const [mandateFields, setMandateFields] = useState<string[]>([]);
   const [approvalUsers, setApprovalUsers] = useState<
     { id: string; label: string; name: string; email: string }[]
   >([]);
@@ -632,35 +639,32 @@ export function BlueprintActions({
       dispatchAction === "attach_oem_quote" ||
       dispatchAction === "attach_po" ||
       dispatchAction === "attach_contract";
+    const missing: string[] = [];
     for (const field of config.fields) {
       if (field.required && field.type === "approver") {
-        if (approverIds.length === 0) {
-          setError(`${field.label} is required`);
-          return;
-        }
+        if (approverIds.length === 0) missing.push(field.label);
         continue;
       }
       if (field.required && field.type === "checkbox") {
         if (values[field.key] !== "true") {
-          setError("Confirm you have read and verified the customer PO terms & conditions");
-          return;
+          missing.push("Confirm customer PO terms & conditions");
         }
         continue;
       }
       if (field.required && field.type !== "file" && !values[field.key]?.trim()) {
-        setError(`${field.label} is required`);
-        return;
+        missing.push(field.label);
+        continue;
       }
       if (field.required && field.type === "file") {
-        if (isMultiFile && files.length === 0) {
-          setError(`${field.label} is required`);
-          return;
-        }
-        if (!isMultiFile && !file) {
-          setError(`${field.label} is required`);
-          return;
-        }
+        if (isMultiFile && files.length === 0) missing.push(field.label);
+        if (!isMultiFile && !file) missing.push(field.label);
       }
+    }
+    if (missing.length > 0) {
+      setMandateFields(missing);
+      setMandateMessage(missingRequiredMessage(missing));
+      setMandateOpen(true);
+      return;
     }
     if (dispatchAction === "attach_oem_quote") {
       const uploadList = isMultiFile ? files : file ? [file] : [];
@@ -780,14 +784,10 @@ export function BlueprintActions({
             Current State
           </span>
           {currentStageLabel && currentStageLabel !== "Deal Won" ? (
-            <Badge className="rounded-full border-transparent bg-blue-600 px-3 py-0.5 text-xs font-semibold text-white hover:bg-blue-600">
-              {currentStageLabel}
-            </Badge>
+            <SalesStageBadge label={currentStageLabel} />
           ) : null}
           {showDealWonBadge || currentStageLabel === "Deal Won" ? (
-            <Badge className="rounded-full border border-emerald-200 bg-emerald-100 px-3 py-0.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100">
-              Deal Won
-            </Badge>
+            <SalesStageBadge label="Deal Won" />
           ) : null}
         </div>
       ) : null}
@@ -1055,6 +1055,16 @@ export function BlueprintActions({
         ) : null}
         {error ? <p className="mt-3 text-xs text-destructive">{error}</p> : null}
       </ConfirmDialog>
+
+      <RequiredFieldsDialog
+        open={mandateOpen}
+        message={mandateMessage}
+        fields={mandateFields}
+        onClose={() => {
+          setMandateOpen(false);
+          setMandateFields([]);
+        }}
+      />
     </div>
   );
 }
@@ -1064,9 +1074,5 @@ export function BlueprintStateBadge({ state, label }: { state?: string; label?: 
     label?.trim() ||
     state?.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase()) ||
     "-";
-  return (
-    <Badge className="rounded-full border-transparent bg-blue-600 px-3 py-0.5 text-xs font-semibold text-white hover:bg-blue-600">
-      {text}
-    </Badge>
-  );
+  return <SalesStageBadge label={text} state={state} />;
 }

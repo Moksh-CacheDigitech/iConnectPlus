@@ -111,7 +111,7 @@ class CrmOvf(Base, *CrmTransactionMixin):
 
     additional_charges: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
     freight: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
-    total_margin_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False, default=0)
+    total_margin_pct: Mapped[Decimal] = mapped_column(Numeric(22, 10), nullable=False, default=0)
     total_margin_amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
 
     locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
@@ -141,7 +141,7 @@ class CrmOvf(Base, *CrmTransactionMixin):
     # receivables, stock held against the deal, and approved execution
     # expenses until Finance marks the full payment received.
     margin_at_approval_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
-    margin_at_approval_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    margin_at_approval_pct: Mapped[Decimal | None] = mapped_column(Numeric(22, 10), nullable=True)
     execution_expense_total: Mapped[Decimal] = mapped_column(
         Numeric(18, 4), nullable=False, default=0, server_default="0"
     )
@@ -153,7 +153,7 @@ class CrmOvf(Base, *CrmTransactionMixin):
         Numeric(6, 3), nullable=False, default=0, server_default="0"
     )
     live_margin_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
-    live_margin_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    live_margin_pct: Mapped[Decimal | None] = mapped_column(Numeric(22, 10), nullable=True)
     live_margin_as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     full_payment_received: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"

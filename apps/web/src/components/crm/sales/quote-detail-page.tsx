@@ -672,7 +672,7 @@ export function QuoteDetailPage({ quoteId }: { quoteId: string }) {
             value={textOrDash(quote.project_title)}
           />
           <CrmReadOnlyField label="Account Name" value={textOrDash(quote.account_name)} />
-          <CrmReadOnlyField label="Valid Until *" value={textOrDash(quote.valid_until)} />
+          <CrmReadOnlyField label="Price Validity Date *" value={textOrDash(quote.valid_until)} />
           <CrmReadOnlyField label="Contact Name" value={contactName} />
           <CrmReadOnlyField label="Quote Owner" value={textOrDash(quote.owner_name)} />
           <CrmReadOnlyField label="Quote No." value={formatCrmCode(quote.quote_no)} />

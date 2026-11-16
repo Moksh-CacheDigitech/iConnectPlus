@@ -25,7 +25,10 @@ import { useCrmSettingsEffective } from "@/hooks/use-crm-settings";
 import { quoteServiceTypeOptions } from "@/services/crm-settings-service";
 import { formFieldsMap, pushRequired } from "@/lib/crm/crm-settings-ui";
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
-import { resolveSessionEmployeeLabel } from "@/lib/crm/session-employee";
+import {
+  resolveSessionEmployeeLabel,
+  stripEmployeeCodeSuffix,
+} from "@/lib/crm/session-employee";
 import {
   normalizeQuoteServiceType,
   parseLeadProductTypes,
@@ -50,6 +53,7 @@ import {
   listContacts,
   listCrmMemberOptions,
   listQuoteLines,
+  formatMarginPctInput,
   peekNextQuoteNumber,
   quoteLineMarkupPct,
   updateQuote,
@@ -315,7 +319,7 @@ export function QuoteFormPage({
           account_name: quoteRow.account_name ?? "",
           contact_id: quoteRow.contact_id ?? "",
           service_type: normalizeQuoteServiceType(quoteRow.service_type, serviceTypeOptions),
-          owner_name: quoteRow.owner_name ?? "",
+          owner_name: stripEmployeeCodeSuffix(quoteRow.owner_name ?? ""),
           subject: quoteRow.subject ?? "",
           valid_until: quoteRow.valid_until ?? "",
           entity_name: quoteRow.entity_name ?? "",
@@ -354,8 +358,10 @@ export function QuoteFormPage({
               qty: String(line.qty ?? 1),
               unit_cost: String(line.unit_cost ?? 0),
               unit_sell: String(line.unit_cost ?? 0),
-              margin_pct: String(
-                quoteLineMarkupPct(line.unit_cost, line.unit_sell, line.margin_pct),
+              margin_pct: formatMarginPctInput(
+                line.margin_pct != null && Number(line.margin_pct) !== 0
+                  ? line.margin_pct
+                  : quoteLineMarkupPct(line.unit_cost, line.unit_sell, line.margin_pct),
               ),
               gst_pct: String(line.gst_pct ?? 0),
               vendorFile: null,
@@ -423,8 +429,10 @@ export function QuoteFormPage({
         : "";
       const ownerLabel =
         resolveSessionEmployeeLabel(employeeRows, user) ||
-        employeeRows.find((employee) => employee.id === opportunityRow.owner_employee_id)?.label ||
-        "";
+        stripEmployeeCodeSuffix(
+          employeeRows.find((employee) => employee.id === opportunityRow.owner_employee_id)?.label ||
+          "",
+        );
       setForm({
         project_title: opportunityRow.project_title || opportunityRow.opportunity_name || "",
         account_name: companyRow?.customer_name ?? "",
@@ -682,6 +690,7 @@ export function QuoteFormPage({
       qty: Number(line.qty) || 1,
       unit_cost: unitPrice,
       unit_sell: unitPrice * (1 + marginPct / 100),
+      margin_pct: marginPct,
       gst_pct: Number(line.gst_pct) || 0,
     };
   }
@@ -737,7 +746,7 @@ export function QuoteFormPage({
       project_title: form.project_title.trim() || null,
       account_name: form.account_name.trim() || null,
       service_type: form.service_type || null,
-      owner_name: form.owner_name.trim() || null,
+      owner_name: stripEmployeeCodeSuffix(form.owner_name.trim()) || null,
       valid_until: form.valid_until || null,
       entity_name: form.entity_name || null,
       entity_email: form.entity_email || null,
@@ -769,7 +778,7 @@ export function QuoteFormPage({
     if (!opportunity) return;
     const missing: string[] = [];
     pushRequired(missing, quoteFields, "subject", "Subject", !form.subject.trim(), true);
-    pushRequired(missing, quoteFields, "valid_until", "Valid Until", !form.valid_until.trim(), true);
+    pushRequired(missing, quoteFields, "valid_until", "Price Validity Date", !form.valid_until.trim(), true);
     if (lines.length === 0) {
       missing.push("At least one quoted item row");
     }
@@ -901,7 +910,7 @@ export function QuoteFormPage({
               onChange={(event) => setField("account_name", event.target.value)}
             />
           </FinanceField>
-          <FinanceField label="Valid Until *">
+          <FinanceField label="Price Validity Date *">
             <Input
               type="date"
               value={form.valid_until}
@@ -1151,10 +1160,10 @@ export function QuoteFormPage({
                         </td>
                         <td className="px-2 py-2">
                           <Input
-                            className="w-20"
+                            className="w-28"
                             type="number"
                             min={0}
-                            step="0.01"
+                            step="any"
                             value={line.margin_pct}
                             onChange={(e) => setLine(line.key, "margin_pct", e.target.value)}
                           />
@@ -1295,10 +1304,10 @@ export function QuoteFormPage({
                         </td>
                         <td className="px-2 py-2">
                           <Input
-                            className="w-20"
+                            className="w-28"
                             type="number"
                             min={0}
-                            step="0.01"
+                            step="any"
                             value={line.margin_pct}
                             onChange={(e) => setLine(line.key, "margin_pct", e.target.value)}
                           />
@@ -1358,7 +1367,7 @@ export function QuoteFormPage({
         <div className="ml-auto w-full max-w-sm space-y-2.5 px-4 py-4 text-xs sm:px-5">
           <div className="flex items-baseline justify-between gap-6">
             <span className="shrink-0 text-muted-foreground">Margin in Avg (%)</span>
-            <span className="tabular-nums text-foreground">{totals.avgMargin.toFixed(3)}%</span>
+            <span className="tabular-nums text-foreground">{formatMarginPctInput(totals.avgMargin)}%</span>
           </div>
           <div className="flex items-baseline justify-between gap-6">
             <span className="shrink-0 text-muted-foreground">Total Margin Amount</span>

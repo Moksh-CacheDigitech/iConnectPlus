@@ -22,6 +22,7 @@ import { LeadProductTypeMultiSelect } from "@/components/crm/sales/lead-product-
 import { LeadSubProductCategoryMultiSelect } from "@/components/crm/sales/lead-sub-product-category-multi-select";
 import {
   RequiredFieldsDialog,
+  isCustomFieldValueEmpty,
   missingRequiredMessage,
 } from "@/components/crm/sales/required-fields-dialog";
 import {
@@ -73,7 +74,7 @@ import { useCrmSettingsEffective } from "@/hooks/use-crm-settings";
 import { formFieldsMap, pushRequired } from "@/lib/crm/crm-settings-ui";
 import { ApiClientError, authService } from "@/services/api-client";
 import type { UserProfile } from "@/types/api";
-import { catalogOptions } from "@/services/crm-settings-service";
+import { catalogOptions, customFormFields } from "@/services/crm-settings-service";
 import { listCompanyGst } from "@/services/crm-deal-controls-service";
 
 import {
@@ -217,6 +218,7 @@ export function LeadFormPage({
   const [error, setError] = useState<string | null>(null);
   const [mandateOpen, setMandateOpen] = useState(false);
   const [mandateMessage, setMandateMessage] = useState("");
+  const [mandateFields, setMandateFields] = useState<string[]>([]);
   const [entityCatalog, setEntityCatalog] = useState<SellingEntity[]>([]);
   const [entityPick, setEntityPick] = useState("");
   const [blueprint, setBlueprint] = useState<BlueprintState | null>(null);
@@ -619,6 +621,9 @@ export function LeadFormPage({
         entity_gst: "",
         entity_contact: "",
       }));
+      if (!isEdit) {
+        void peekNextLeadDrNumber(company?.company_id).then(setNextDrNumber).catch(() => setNextDrNumber(""));
+      }
       return;
     }
     const entity = entityCatalog.find((entry) => entry.id === value);
@@ -631,6 +636,11 @@ export function LeadFormPage({
       entity_gst: entity.entity_gst ?? "",
       entity_contact: entity.entity_contact?.trim() || DEFAULT_ENTITY_CONTACT,
     }));
+    if (!isEdit) {
+      void peekNextLeadDrNumber(company?.company_id, entity.entity_name)
+        .then(setNextDrNumber)
+        .catch(() => setNextDrNumber(""));
+    }
   }
 
   async function onSave() {
@@ -703,8 +713,15 @@ export function LeadFormPage({
     if (!form.entity_address?.trim()) missing.push("Entity Address");
     if (!form.entity_contact?.trim()) missing.push("Entity Contact Number");
     if (!oemRows.some((row) => row.name.trim())) missing.push("OEM Name");
+    for (const field of customFormFields(settings, "lead")) {
+      if (!field.required) continue;
+      if (isCustomFieldValueEmpty(customFields[field.key])) {
+        missing.push(field.label || field.key);
+      }
+    }
     if (missing.length > 0) {
       setMandateMessage(missingRequiredMessage(missing));
+      setMandateFields(missing);
       setMandateOpen(true);
       return;
     }
@@ -1140,6 +1157,15 @@ export function LeadFormPage({
         nameOptions={distributorNameOptions}
         onChange={onDistributorRowsChange}
         allowCustomName
+        companyId={company?.company_id}
+        branchId={form.branch_id || company?.branch_id}
+        onDistributorCreated={(name) => {
+          setDistributorNameOptions((prev) =>
+            prev.some((option) => option.toLowerCase() === name.toLowerCase())
+              ? prev
+              : [...prev, name],
+          );
+        }}
       />
 
       <CrmSection title="Sale Type" icon={Handshake}>
@@ -1294,7 +1320,11 @@ export function LeadFormPage({
       <RequiredFieldsDialog
         open={mandateOpen}
         message={mandateMessage}
-        onClose={() => setMandateOpen(false)}
+        fields={mandateFields}
+        onClose={() => {
+          setMandateOpen(false);
+          setMandateFields([]);
+        }}
       />
     </CrmPage>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
 import { ElevenLabsConvaiWidget } from "@/components/elevenlabs/convai-widget";
@@ -25,8 +25,22 @@ export function AppShell({ children }: AppShellProps) {
   /** QR scan focus mode — full portal without the assets dock (better on phones). */
   const qrScanMode =
     searchParams.get("from") === "qr" && pathname.startsWith("/assets/information-portal/");
+
+  // Keep a single scrollport (main). Body/html scroll creates a second right-edge bar
+  // when this flex child's min-height:auto grows past the viewport.
+  useEffect(() => {
+    const html = document.documentElement;
+    const { body } = document;
+    html.classList.add("erp-app-shell-lock");
+    body.classList.add("erp-app-shell-lock");
+    return () => {
+      html.classList.remove("erp-app-shell-lock");
+      body.classList.remove("erp-app-shell-lock");
+    };
+  }, []);
+
   return (
-    <div className="flex h-dvh w-full max-w-[100dvw] overflow-hidden bg-background">
+    <div className="flex h-dvh max-h-dvh min-h-0 w-full max-w-[100dvw] flex-1 overflow-hidden bg-background">
       <ShellSidebar pathname={pathname} standalone={standalone} hideSidebar={qrScanMode} />
       <div id="erp-workspace-main" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <AppTopbar />

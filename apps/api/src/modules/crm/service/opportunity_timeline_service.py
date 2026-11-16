@@ -1,7 +1,10 @@
 """Aggregate opportunity activity into a chronological timeline.
 
 Timeline cards use the same Current State labels as BlueprintActions:
-Lead Open → … → Deal Won.
+Lead Open → … → Deal Won → Customer PO → OVF Shared to SCM.
+
+Sales leads issue the DR number at lead create; that value is shown on the
+Lead Open card (not as a later Deal Registration step).
 """
 
 from __future__ import annotations
@@ -109,7 +112,8 @@ _ACTION_MILESTONE: dict[str, str] = {
     "send_sow_approval": "SOW Sent for Approval",
     "approve_boq": "BOQ Attached",
     "approve_sow": "SOW Attached",
-    "deal_reg": "Deal Registration Submitted",
+    # Single DR milestone — DR number is the primary tracking id (summary carries the value).
+    "deal_reg": "Deal Registration",
     "oem_received": "Vendor Quotation Received",
     "attach_oem_quote": "Vendor Quotation Attached",
     "create_quote": "Quote Created",
@@ -489,6 +493,18 @@ class OpportunityTimelineService:
             )
 
         # ── Hardware happy-path Current State milestones ─────────────────
+        # Sales leads receive their DR number at lead create — surface it on
+        # Lead Open and do not invent a later "Deal Registration" card.
+        from modules.crm.service.document_number_service import is_deal_reg_number
+
+        lead_dr = ""
+        if lead is not None:
+            lead_dr = (
+                getattr(lead, "dr_number", None) or getattr(lead, "lead_code", None) or ""
+            ).strip()
+            if not is_deal_reg_number(lead_dr):
+                lead_dr = ""
+
         if lead is not None:
             add_milestone(
                 "Lead Open",
@@ -496,7 +512,7 @@ class OpportunityTimelineService:
                 entity_type="lead",
                 entity_id=lead.id,
                 event_type="created",
-                summary=getattr(lead, "lead_code", None),
+                summary=lead_dr or getattr(lead, "lead_code", None),
                 action="create",
                 to_state="open",
                 actor_id=lead.created_by,
@@ -509,7 +525,7 @@ class OpportunityTimelineService:
                     or opp.created_at,
                     entity_type="lead",
                     entity_id=lead.id,
-                    summary=opp.opportunity_code,
+                    summary=opp.opportunity_code or lead_dr or None,
                     action="convert",
                     to_state="converted",
                     actor_id=lead.updated_by or lead.created_by,
@@ -670,54 +686,22 @@ class OpportunityTimelineService:
                 action="approve_boq",
                 to_state="deal_reg",
             )
-        if opp.boq_approved or opp.sow_approved or (opp.blueprint_state or "") in {
-            "deal_reg",
-            "oem_pending",
-            "oem_attached",
-            "quote_ready",
-            "quote_in_progress",
-            "po_pending",
-            "po_approval",
-            "ovf_ready",
-            "won",
-        }:
-            if opp.boq_approved or opp.sow_approved:
-                add_milestone(
-                    "Deal Registration",
-                    occurred_at=hist_to_state("deal_reg")
-                    or hist_time("approve_boq", "approve_sow")
-                    or bump(opp.updated_at, 3),
-                    entity_type="opportunity",
-                    entity_id=opp.id,
-                    action="approve_boq",
-                    to_state="deal_reg",
-                )
-
-        if (
-            opp.blueprint_state
-            in {
-                "oem_pending",
-                "oem_attached",
-                "quote_ready",
-                "quote_in_progress",
-                "po_pending",
-                "po_approval",
-                "ovf_ready",
-                "won",
-            }
-            or hist_time("deal_reg")
-            or opp.deal_reg_number
-        ):
+        # Deal Registration card only for legacy deals that got a DR later via
+        # the deal_reg action — not when the number was already issued on lead create.
+        if not lead_dr and hist_time("deal_reg"):
+            opp_dr = (opp.deal_reg_number or opp.opportunity_code or "").strip()
             add_milestone(
-                "Deal Registration Submitted",
+                "Deal Registration",
                 occurred_at=hist_time("deal_reg")
-                or hist_to_state("oem_pending")
-                or bump(opp.updated_at, 4),
+                or hist_to_state("deal_reg")
+                or bump(opp.updated_at, 3),
                 entity_type="opportunity",
                 entity_id=opp.id,
                 action="deal_reg",
-                to_state="oem_pending",
-                summary=opp.deal_reg_number,
+                to_state="deal_reg",
+                summary=opp.deal_reg_number
+                or (opp_dr if is_deal_reg_number(opp_dr) else None),
+                actor_actions=("deal_reg",),
             )
 
         # Legacy acknowledgement click only — new flow attaches the quotation directly.

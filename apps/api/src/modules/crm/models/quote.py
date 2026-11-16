@@ -98,7 +98,7 @@ class CrmQuote(Base, *CrmTransactionMixin):
     shipping_country: Mapped[str | None] = mapped_column(String(100), nullable=True)
     freight: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
     grand_total: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
-    avg_margin_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False, default=0)
+    avg_margin_pct: Mapped[Decimal] = mapped_column(Numeric(22, 10), nullable=False, default=0)
     total_margin_amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
     vendor_quote_attached: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
@@ -148,7 +148,7 @@ class CrmQuoteLine(Base, *CrmTransactionMixin):
     qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=1)
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
     unit_sell: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
-    margin_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False, default=0)
+    margin_pct: Mapped[Decimal] = mapped_column(Numeric(22, 10), nullable=False, default=0)
     margin_amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
     gst_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=0)
     gst_amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
@@ -179,7 +179,7 @@ class CrmQuoteRevisionSnapshot(Base, *CrmTransactionMixin):
         index=True,
     )
     revision_no: Mapped[int] = mapped_column(Integer, nullable=False)
-    avg_margin_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False, default=0)
+    avg_margin_pct: Mapped[Decimal] = mapped_column(Numeric(22, 10), nullable=False, default=0)
     grand_total: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
     total_margin_amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=0)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)

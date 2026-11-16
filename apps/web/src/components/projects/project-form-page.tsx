@@ -95,6 +95,7 @@ export function ProjectFormPage({ projectId }: { projectId?: string }) {
   const searchParams = useSearchParams();
   const poId = searchParams.get("po_id");
   const handoffId = searchParams.get("handoff_id");
+  const fromCloudQueue = searchParams.get("cloud") === "1";
   const [linkedPoId, setLinkedPoId] = useState<string | null>(poId);
 
   const load = useCallback(async (): Promise<{ values?: FormValues; lookups?: Lookups }> => {
@@ -228,7 +229,15 @@ export function ProjectFormPage({ projectId }: { projectId?: string }) {
       }
     }
 
+    const handoff = handoffId
+      ? await getProjectPoHandoffById(handoffId).catch(() => null)
+      : poId
+        ? await getProjectPoHandoff(poId).catch(() => null)
+        : null;
+
+    // Cloud-wise queue: project is named after the unique cloud, not wave/PO.
     const projectTitle =
+      handoff?.cloud_name?.trim() ||
       prefill?.project_title?.trim() ||
       scmInstall?.projectName?.trim() ||
       ovfProjectTitle ||
@@ -249,11 +258,6 @@ export function ProjectFormPage({ projectId }: { projectId?: string }) {
         ? rawServerType
         : "";
 
-    const handoff = handoffId
-      ? await getProjectPoHandoffById(handoffId).catch(() => null)
-      : poId
-        ? await getProjectPoHandoff(poId).catch(() => null)
-        : null;
     const customerPoNumber =
       (prefill?.customer_po_number || "").trim() ||
       (handoff?.customer_po_number || "").trim() ||
@@ -336,6 +340,7 @@ export function ProjectFormPage({ projectId }: { projectId?: string }) {
             delivery_type: v.delivery_type,
             site_name: orNull(siteName),
             circle: orNull(v.circle),
+            cloud_name: fromCloudQueue ? orNull(v.project_name) : undefined,
             application: orNull(v.server_type),
             server_qty: intOrNull(v.server_qty),
             rack_qty: intOrNull(v.rack_qty),
@@ -513,7 +518,7 @@ export function ProjectFormPage({ projectId }: { projectId?: string }) {
         fields: intakeFields,
       },
     ];
-  }, [isEdit, poId, handoffId, linkedPoId]);
+  }, [isEdit, poId, handoffId, fromCloudQueue, linkedPoId]);
 
   return (
     <ProjectsRecordForm

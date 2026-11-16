@@ -22,7 +22,8 @@ import {
 } from "@/components/crm/sales/lead-list-columns";
 import { useCrmSettingsEffective } from "@/hooks/use-crm-settings";
 import { PageHeader } from "@/components/layout/page-header";
-import { Badge } from "@/components/ui/badge";
+import { SalesStageBadge } from "@/components/crm/sales/sales-stage-badge";
+import { resolveSalesStageLabel } from "@/lib/crm/sales-blueprint-stages";
 import { ApiClientError } from "@/services/api-client";
 import { formatCrmCode } from "@/lib/crm/format-crm-code";
 import { formatInr, fullName, listSalesLeads, type SalesLead } from "@/services/sales-crm-service";
@@ -113,9 +114,15 @@ export function LeadListPage({
         return row.expected_amount ? formatInr(row.expected_amount) : "-";
       case "blueprint_state":
         return (
-          <Badge variant="outline" className="capitalize">
-            {row.blueprint_state.replaceAll("_", " ")}
-          </Badge>
+          <SalesStageBadge
+            label={resolveSalesStageLabel({
+              entityType: "lead",
+              blueprintState: row.blueprint_state,
+              lead: row,
+            })}
+            state={row.blueprint_state}
+            entityType="lead"
+          />
         );
       case "status":
         return <FinanceStatusBadge status={row.status} />;

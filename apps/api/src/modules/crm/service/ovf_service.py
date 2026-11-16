@@ -400,7 +400,7 @@ class OvfService:
                     "description": cust["description"],
                     "qty": cust["qty"],
                     "margin_amount": round(margin_amt, 4),
-                    "margin_pct": round(margin_pct, 3),
+                    "margin_pct": round(margin_pct, 10),
                 }
             )
 
@@ -413,7 +413,7 @@ class OvfService:
         margin_pct_header = float(ovf.total_margin_pct or 0)
         if not margin_pct_header and customer_sell_total:
             display_margin = float(ovf.total_margin_amount or margin_net)
-            margin_pct_header = round(display_margin / customer_sell_total * 100.0, 3)
+            margin_pct_header = round(display_margin / customer_sell_total * 100.0, 10)
 
         billing_parts = [ovf.billing_address, ovf.billing_state, ovf.billing_country]
         shipping_parts = [ovf.shipping_address, ovf.shipping_state, ovf.shipping_country]
@@ -544,7 +544,7 @@ class OvfService:
             "vendor_tax_amount": round(vendor_tax, 4),
             "vendor_total_with_tax": round(vendor_with_tax, 4),
             "total_margin_amount": margin_amount,
-            "margin_pct": round(margin_pct, 3),
+            "margin_pct": round(margin_pct, 10),
             "description": "; ".join(desc_parts) if desc_parts else None,
             "customer_po_number": ovf.po_number,
             "customer_po_date": self._resolve_customer_po_display_date(ctx, ovf),

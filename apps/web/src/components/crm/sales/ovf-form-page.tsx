@@ -659,7 +659,9 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
   const marginAmountDisplay =
     marginInputsDirty && Number.isFinite(totalMarginAmount) ? totalMarginAmount.toFixed(2) : "";
   const marginPctDisplay =
-    marginInputsDirty && Number.isFinite(totalMarginPct) ? totalMarginPct.toFixed(2) : "";
+    marginInputsDirty && Number.isFinite(totalMarginPct)
+      ? Number(totalMarginPct.toFixed(10)).toString()
+      : "";
 
   function ovfPayload() {
     const weeksMin = Number(form.delivery_weeks_min) || Number(form.delivery_weeks_max) || null;
@@ -697,7 +699,7 @@ export function OvfFormPage({ quoteId, ovfId }: { quoteId?: string; ovfId?: stri
       customer_payment_days: Number(form.customer_payment_days) || 0,
       additional_charges: Number(Number(form.additional_charges || 0).toFixed(2)),
       total_margin_amount: Number(totalMarginAmount.toFixed(2)),
-      total_margin_pct: Number(totalMarginPct.toFixed(2)),
+      total_margin_pct: Number(totalMarginPct.toFixed(10)),
       finance_cost_pct: Number(financeCostPct.toFixed(2)),
       custom_fields: customFields,
     };

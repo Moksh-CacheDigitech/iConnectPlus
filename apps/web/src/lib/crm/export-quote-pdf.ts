@@ -7,6 +7,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
 import { downloadPdf, openPdfInNewTab } from "@/lib/crm/open-pdf-preview";
+import { stripEmployeeCodeSuffix } from "@/lib/crm/session-employee";
 import type { Quote, QuoteLine } from "@/services/sales-crm-service";
 
 export type QuoteExportSeller = {
@@ -264,7 +265,9 @@ export async function exportQuotePdf(
   const { quote, lines } = input;
   const seller = input.seller?.companyName ? input.seller : CACHE_LETTERHEAD;
   const subject = (input.subject || quote.subject || "Quotation").trim();
-  const ownerName = (input.ownerName || quote.owner_name || "-").trim();
+  const ownerName = stripEmployeeCodeSuffix(
+    (input.ownerName || quote.owner_name || "-").trim(),
+  ) || "-";
   const customerName = (input.customerName || quote.entity_name || quote.account_name || "-")
     .trim()
     .toUpperCase();
@@ -300,7 +303,7 @@ export async function exportQuotePdf(
   let rightY = logoY + CACHE_LOGO.h + 4.5;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text(pdfSafe(`Validity Date: ${validity}`), metaX, rightY, { align: "right" });
+  doc.text(pdfSafe(`Price Validity Date: ${validity}`), metaX, rightY, { align: "right" });
   rightY += lineH;
   doc.text(pdfSafe(`Ref.: ${ref}`), metaX, rightY, { align: "right" });
   rightY += lineH;
