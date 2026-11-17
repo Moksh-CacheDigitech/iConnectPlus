@@ -494,6 +494,8 @@ class ProcInvoiceGenerationTaskService:
         number = invoice_number.strip()
         if not number:
             raise ConflictException("Invoice number is required")
+        if not (file_name or "").strip() or not (content_base64 or "").strip():
+            raise ConflictException("Invoice document attachment is required")
 
         scm_qty, scm_amount = self.billing_totals_for_batch(
             ctx,

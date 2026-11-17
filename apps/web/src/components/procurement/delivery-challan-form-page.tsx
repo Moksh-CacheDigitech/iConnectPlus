@@ -8,8 +8,10 @@ import {
   Eye,
   FileDown,
   FileText,
+  FileUp,
   ListChecks,
   Package,
+  Paperclip,
   PenLine,
   Trash2,
   Truck,
@@ -30,6 +32,7 @@ import {
   DeliveryBillTakenBadge,
   DeliveryBillTakenButton,
 } from "@/components/procurement/delivery-bill-taken-badge";
+import { assertSafeUploadFile } from "@/lib/safe-attachment";
 import { ApiClientError, formatApiError } from "@/services/api-client";
 import {
   getInvoiceGenerationTaskForBatch,
@@ -38,13 +41,18 @@ import {
   listInvoiceGenerationTasksForOrder,
   listOrderReceiptBatches,
   listProcurementInventory,
+  listReceiptBatchAttachments,
   listVendorOptions,
+  openReceiptBatchAttachment,
+  saveReceiptBatchVendorInvoice,
   type ProcInvoiceGenerationTask,
   type ProcOrder,
+  type ReceiptBatchAttachment,
   type ScmOvfPreview,
   type ScmReceiptBatch,
   type VendorOption,
 } from "@/services/procurement-service";
+import { fileToBase64 } from "@/services/sales-crm-service";
 import {
   expandGrnNumberList,
   fullPoChallanLines,
@@ -120,7 +128,8 @@ function pickBillingInvoiceTask(
 const NO_SPINNER =
   "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
-const PDF_DOCUMENT_TYPE = "DELIVERY CHALLAN";
+const PDF_DOCUMENT_TYPE_DC = "DELIVERY CHALLAN";
+const PDF_DOCUMENT_TYPE_BILLING = "BILLING";
 const PDF_COPY_LABEL = "ORIGINAL FOR CONSIGNEE";
 const DELIVERY_CHALLAN_LIST_HREF = "/procurement/delivery-challan";
 
@@ -231,6 +240,12 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
   const backLabel = challanBackLabel(backHref, grnKind || kindParam);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
+  const [invoiceDocument, setInvoiceDocument] = useState<{
+    id: string;
+    fileName: string;
+  } | null>(null);
+  const [invoiceDocBusy, setInvoiceDocBusy] = useState(false);
+  const invoiceFileInputRef = useRef<HTMLInputElement>(null);
   const [loadedOrder, setLoadedOrder] = useState<ProcOrder | null>(null);
   const [ovfContext, setOvfContext] = useState<ScmOvfPreview | null>(null);
   const [grnBatches, setGrnBatches] = useState<ScmReceiptBatch[]>([]);
@@ -340,10 +355,17 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
         entityName: entityPdf.entityName,
         entityAddressBlock: entityPdf.entityAddressBlock,
         entityGstBlock: entityPdf.entityGstBlock,
-        documentType: PDF_DOCUMENT_TYPE,
+        documentType:
+          grnKind === "billing" ? PDF_DOCUMENT_TYPE_BILLING : PDF_DOCUMENT_TYPE_DC,
         copyLabel: PDF_COPY_LABEL,
-        challanNumber,
-        challanDate,
+        challanNumber:
+          grnKind === "billing"
+            ? invoiceNumber.trim() || challanNumber
+            : challanNumber,
+        challanDate:
+          grnKind === "billing"
+            ? invoiceDate.trim() || challanDate
+            : challanDate,
         customerName,
         customerBillTo,
         customerShipTo,
@@ -364,6 +386,9 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
       }),
     [
       entityPdf,
+      grnKind,
+      invoiceNumber,
+      invoiceDate,
       challanNumber,
       challanDate,
       customerName,
@@ -392,6 +417,15 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
     if (!loadedOrder || prefillBusy) return;
     applyLinesFromSource();
   }, [applyLinesFromSource, loadedOrder, prefillBusy, itemsSourceMode, selectedGrnKeys, effectiveGrnBatches]);
+
+  useEffect(() => {
+    if (prefillBusy || grnKind !== "billing") {
+      if (grnKind !== "billing") setInvoiceDocument(null);
+      return;
+    }
+    void refreshBillingInvoiceDocument();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh when billing context settles
+  }, [prefillBusy, grnKind, invoiceNumber, effectiveGrnBatches, orderId, orderIdParam]);
 
   function applyPrefillHeader(
     order: ProcOrder,
@@ -1025,15 +1059,26 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
       purchaseOrderNumber.trim(),
       ovfContext,
     );
+    const resolvedKind: GrnChallanKind =
+      grnKind === "billing" || grnKind === "delivery_challan"
+        ? grnKind
+        : "delivery_challan";
     return {
       id: recordId,
       orderId,
-      challanNumber: challanNumber.trim(),
-      challanDate,
+      challanNumber:
+        resolvedKind === "billing"
+          ? invoiceNumber.trim() || challanNumber.trim()
+          : challanNumber.trim(),
+      challanDate:
+        resolvedKind === "billing"
+          ? invoiceDate.trim() || challanDate
+          : challanDate,
       entityName: entity.entityName,
       entityAddressBlock: entity.entityAddressBlock,
       entityGstBlock: entity.entityGstBlock,
-      documentType: PDF_DOCUMENT_TYPE,
+      documentType:
+        resolvedKind === "billing" ? PDF_DOCUMENT_TYPE_BILLING : PDF_DOCUMENT_TYPE_DC,
       copyLabel: PDF_COPY_LABEL,
       customerName: customerName.trim(),
       customerBillTo: customerBillTo.trim(),
@@ -1055,7 +1100,7 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
       itemsSourceMode,
       selectedGrnKeys: resolveSaveGrnKeys(),
       selectedGrnNumbers,
-      grnKind: grnKind === "billing" || grnKind === "delivery_challan" ? grnKind : "delivery_challan",
+      grnKind: resolvedKind,
       invoiceNumber: invoiceNumber.trim() || undefined,
       invoiceDate: invoiceDate.trim() || undefined,
       lines,
@@ -1192,10 +1237,170 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
     }
   }
 
+  function pickInvoiceAttachment(
+    attachments: ReceiptBatchAttachment[],
+  ): ReceiptBatchAttachment | null {
+    if (!attachments.length) return null;
+    const byName = attachments.find((file) =>
+      /invoice/i.test(file.file_name || ""),
+    );
+    return byName || attachments[attachments.length - 1] || attachments[0] || null;
+  }
+
+  async function resolveBillingInvoiceBatchIds(): Promise<string[]> {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    const push = (value: string | null | undefined) => {
+      const id = String(value || "").trim();
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      ids.push(id);
+    };
+
+    const keySet = new Set(
+      (selectedGrnKeys.length > 0
+        ? selectedGrnKeys
+        : effectiveGrnBatches.map((batch) => receiptBatchKey(batch))
+      )
+        .map((key) => key.trim())
+        .filter(Boolean),
+    );
+    for (const batch of effectiveGrnBatches) {
+      if (keySet.has(receiptBatchKey(batch))) push(batch.id);
+    }
+
+    // po-grn-stock / synthetic keys often won't match receiptBatchKey — use invoice task batch.
+    try {
+      const resolvedOrderId = String(orderId || orderIdParam || loadedOrder?.id || "").trim();
+      if (resolvedOrderId) {
+        const tasks = await listInvoiceGenerationTasksForOrder(resolvedOrderId);
+        const preferred =
+          tasks.find(
+            (task) =>
+              task.status === "completed" &&
+              Boolean(task.invoice_number?.trim()) &&
+              (!invoiceNumber.trim() ||
+                task.invoice_number?.trim() === invoiceNumber.trim()),
+          ) ||
+          pickBillingInvoiceTask(tasks) ||
+          null;
+        if (preferred?.receipt_batch_id) push(preferred.receipt_batch_id);
+      }
+    } catch {
+      /* optional */
+    }
+
+    for (const batch of effectiveGrnBatches) push(batch.id);
+    return ids;
+  }
+
+  async function resolveBillingInvoiceDocument(): Promise<{
+    id: string;
+    fileName: string;
+  } | null> {
+    if (invoiceDocument?.id) return invoiceDocument;
+    const batchIds = await resolveBillingInvoiceBatchIds();
+    for (const batchId of batchIds) {
+      const batch = effectiveGrnBatches.find((row) => String(row.id) === batchId);
+      try {
+        const attachments =
+          batch?.attachments && batch.attachments.length > 0
+            ? batch.attachments
+            : await listReceiptBatchAttachments(batchId);
+        const file = pickInvoiceAttachment(attachments);
+        if (file?.id) {
+          return {
+            id: String(file.id),
+            fileName: file.file_name || "Invoice document",
+          };
+        }
+      } catch {
+        /* try next */
+      }
+    }
+    return null;
+  }
+
+  async function refreshBillingInvoiceDocument() {
+    if (grnKind !== "billing") {
+      setInvoiceDocument(null);
+      return;
+    }
+    try {
+      const doc = await resolveBillingInvoiceDocument();
+      setInvoiceDocument(doc);
+    } catch {
+      setInvoiceDocument(null);
+    }
+  }
+
+  async function onAttachInvoiceDocument(file: File | null) {
+    if (!file || grnKind !== "billing") return;
+    const batchIds = await resolveBillingInvoiceBatchIds();
+    const batchId = batchIds[0] || "";
+    if (!batchId) {
+      setLoadError("No billing GRN batch found to attach the invoice document.");
+      return;
+    }
+    const branchId = loadedOrder?.branch_id || "";
+    const companyId = loadedOrder?.company_id || null;
+    if (!branchId) {
+      setLoadError("Branch context is required to attach the invoice document.");
+      return;
+    }
+    setInvoiceDocBusy(true);
+    setLoadError(null);
+    try {
+      assertSafeUploadFile(file);
+      const content_base64 = await fileToBase64(file);
+      await saveReceiptBatchVendorInvoice(batchId, {
+        vendor_invoice_number: invoiceNumber.trim() || null,
+        vendor_invoice_date: invoiceDate.trim() || null,
+        file_name: file.name,
+        content_base64,
+        content_type: file.type || null,
+        branch_id: branchId,
+        company_id: companyId,
+      });
+      // Refresh batch list so attachment summaries stick for later preview.
+      if (orderId || orderIdParam) {
+        const batches = await listOrderReceiptBatches(String(orderId || orderIdParam));
+        setGrnBatches(batches);
+      }
+      const attachments = await listReceiptBatchAttachments(batchId);
+      const attached = pickInvoiceAttachment(attachments);
+      if (!attached?.id) {
+        throw new Error("Invoice document uploaded but could not be opened yet. Try Preview again.");
+      }
+      setInvoiceDocument({
+        id: String(attached.id),
+        fileName: attached.file_name || file.name,
+      });
+      setBanner("Invoice document attached. You can preview it now.");
+    } catch (err) {
+      setLoadError(formatApiError(err, "Failed to attach invoice document"));
+    } finally {
+      setInvoiceDocBusy(false);
+      if (invoiceFileInputRef.current) invoiceFileInputRef.current.value = "";
+    }
+  }
+
   async function onPreviewPdf() {
     setPdfBusy(true);
     setLoadError(null);
     try {
+      // Billing: open the Accounts-attached invoice document, not a generated challan draft.
+      if (grnKind === "billing") {
+        const doc = await resolveBillingInvoiceDocument();
+        if (!doc?.id) {
+          throw new Error(
+            "No invoice document is attached for this billing GRN yet. Attach the invoice file below, then preview.",
+          );
+        }
+        setInvoiceDocument(doc);
+        await openReceiptBatchAttachment(doc.id);
+        return;
+      }
       await openDeliveryChallanPdfPreview(pdfInput, { watermark: !hasSaved });
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Failed to preview PDF");
@@ -1260,18 +1465,20 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
           Save
         </Button>
       ) : null}
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="cursor-pointer transition-colors duration-200"
-        onClick={() => void onPreviewPdf()}
-        disabled={prefillBusy || pdfBusy}
-        title={hasSaved ? "Preview PDF" : "Preview draft PDF with watermark"}
-      >
-        <Eye className="mr-1.5 size-3.5" />
-        {hasSaved ? "Preview PDF" : "Preview draft"}
-      </Button>
+      {grnKind !== "billing" ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="cursor-pointer transition-colors duration-200"
+          onClick={() => void onPreviewPdf()}
+          disabled={prefillBusy || pdfBusy}
+          title={hasSaved ? "Preview PDF" : "Preview draft PDF with watermark"}
+        >
+          <Eye className="mr-1.5 size-3.5" />
+          {hasSaved ? "Preview PDF" : "Preview draft"}
+        </Button>
+      ) : null}
       {hasSaved ? (
         <Button
           type="button"
@@ -1358,6 +1565,42 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
                     title="Fetched from Accounts invoice generation"
                   />
                 </FinanceField>
+                <div className="sm:col-span-2 lg:col-span-4 space-y-1.5">
+                  <span className="text-xs font-medium text-foreground">Invoice document *</span>
+                  <input
+                    ref={invoiceFileInputRef}
+                    type="file"
+                    className="sr-only"
+                    accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx,application/pdf,image/*"
+                    disabled={invoiceDocBusy || isLocked || hasSaved}
+                    onChange={(e) => void onAttachInvoiceDocument(e.target.files?.[0] || null)}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 cursor-pointer gap-1.5 transition-colors duration-200"
+                      disabled={invoiceDocBusy || isLocked || hasSaved}
+                      onClick={() => invoiceFileInputRef.current?.click()}
+                    >
+                      <Paperclip className="size-3.5" aria-hidden />
+                      {invoiceDocument?.id ? "Replace file" : "Attach document"}
+                    </Button>
+                    {invoiceDocument?.fileName ? (
+                      <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-border/70 bg-muted/30 px-2 py-1 text-xs text-foreground">
+                        <FileUp className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                        <span className="truncate" title={invoiceDocument.fileName}>
+                          {invoiceDocument.fileName}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        Accounts completed this invoice without a file — attach it here to preview.
+                      </span>
+                    )}
+                  </div>
+                </div>
               </>
             ) : (
               <>

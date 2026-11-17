@@ -159,19 +159,18 @@ export function InvoiceGenerationTaskDialog({
       setError("Invoice date is required.");
       return;
     }
+    if (!attachment) {
+      setError("Attach the invoice document before completing.");
+      return;
+    }
     const { qty, amount } = scmTotals(task);
     setSaving(true);
     setError(null);
     try {
-      let file_name: string | null = null;
-      let content_base64: string | null = null;
-      let content_type: string | null = null;
-      if (attachment) {
-        assertSafeUploadFile(attachment);
-        file_name = attachment.name;
-        content_base64 = await fileToBase64(attachment);
-        content_type = attachment.type || null;
-      }
+      assertSafeUploadFile(attachment);
+      const file_name = attachment.name;
+      const content_base64 = await fileToBase64(attachment);
+      const content_type = attachment.type || null;
       await submitInvoiceGenerationTask(task.id, {
         invoice_number: invoiceNumber.trim(),
         invoice_date: invoiceDate.trim(),
@@ -317,7 +316,7 @@ export function InvoiceGenerationTaskDialog({
               </p>
 
               <div className="space-y-1.5">
-                <span className="text-xs font-medium text-foreground">Invoice document</span>
+                <span className="text-xs font-medium text-foreground">Invoice document *</span>
                 <input
                   ref={fileInputRef}
                   type="file"

@@ -106,7 +106,11 @@ class LeaveTypeService:
         return row
 
     def create(self, ctx: TenantContext, company_id: UUID | None = None, **fields):
-        cid = self._scope.resolve_company_id(ctx, company_id)
+        cid = self._scope.resolve_write_company_id(
+            ctx,
+            company_id=company_id or fields.pop("company_id", None),
+            branch_id=fields.pop("branch_id", None),
+        )
         return self._repo.create(ctx, company_id=cid, **fields)
 
     def update(self, ctx: TenantContext, row_id: UUID, **fields):

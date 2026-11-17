@@ -1036,6 +1036,7 @@ const TAB_CONFIG: Partial<Record<HrSetupTabId, TabConfig>> = {
       archive: "inactive",
     },
     buildCreateBody: (f) => ({
+      ...(f.company_id ? { company_id: f.company_id } : {}),
       leave_type_code: f.leave_type_code,
       leave_type_name: f.leave_type_name,
       is_paid: f.is_paid === "true",

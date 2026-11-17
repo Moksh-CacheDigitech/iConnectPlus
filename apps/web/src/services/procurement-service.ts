@@ -1781,10 +1781,22 @@ export async function openReceiptBatchAttachment(attachmentId: string): Promise<
   if (!response.ok) {
     throw new Error(`Failed to open attachment (${response.status})`);
   }
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  window.open(url, "_blank", "noopener,noreferrer");
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  const headerType = response.headers.get("content-type");
+  const disposition = response.headers.get("content-disposition") || "";
+  const nameMatch = /filename\*?=(?:UTF-8''|")?([^\";]+)/i.exec(disposition);
+  const fileName = nameMatch ? decodeURIComponent(nameMatch[1].replace(/"/g, "")) : "invoice";
+  const raw = await response.blob();
+  const blob =
+    headerType && !raw.type
+      ? new Blob([raw], { type: headerType.split(";")[0].trim() })
+      : raw;
+  if (isInlineSafeAttachment(fileName, blob.type || headerType)) {
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return;
+  }
+  triggerBlobDownload(blob, fileName || "invoice");
 }
 
 export type ScmCommercialAttachment = {
