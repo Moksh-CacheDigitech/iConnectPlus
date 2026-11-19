@@ -10,11 +10,14 @@ import {
   Inbox,
   LayoutDashboard,
   Ticket,
+  UserCog,
   Wrench,
 } from "lucide-react";
 
 import { ModuleSidebar } from "@/components/layout/module-sidebar";
+import { useAuthUser } from "@/hooks/use-auth-user";
 import { useUserPermissions } from "@/hooks/use-user-permissions";
+import { canManageModuleUsers } from "@/lib/module-access";
 import {
   hasServiceFieldEngineerRole,
   isServiceFieldEngineerOnly,
@@ -28,7 +31,7 @@ export type ServiceNavItem = {
   fieldEngineerOnly?: boolean;
 };
 
-/** Service ITSM workspace panes (aligned with Service-management). */
+/** Service ITSM workspace panes (Service-management feature set on main shell). */
 export const SERVICE_NAV: readonly ServiceNavItem[] = [
   { title: "Overview", href: "/service", icon: LayoutDashboard },
   { title: "Request Tickets", href: "/service/service-request-tickets", icon: Ticket },
@@ -43,15 +46,6 @@ export const SERVICE_NAV: readonly ServiceNavItem[] = [
   { title: "Resolved", href: "/service/resolved-tickets", icon: CheckCircle2 },
 ];
 
-function canViewServiceMailbox(permissions: string[] | undefined | null): boolean {
-  const perms = permissions ?? [];
-  return (
-    perms.includes("service.request:read") ||
-    perms.includes("service.request:update") ||
-    perms.includes("service.request:approve")
-  );
-}
-
 function filterServiceNav(
   items: readonly ServiceNavItem[],
   opts: {
@@ -65,7 +59,8 @@ function filterServiceNav(
 
   return items.filter((item) => {
     if (item.fieldEngineerOnly) return isFe;
-    if (item.mailboxAccess) return canViewServiceMailbox(opts.permissions) && !feOnly;
+    // Mailbox is a core Service pane from Service-management — visible to all non-FE-only users.
+    if (item.mailboxAccess) return !feOnly;
     if (feOnly) return false;
     return true;
   });
@@ -79,17 +74,31 @@ function isServiceNavActive(pathname: string, href: string): boolean {
 /** Left sidebar for the Service workspace (main shell). */
 export function ServiceSidebar() {
   const pathname = usePathname();
+  const { user, adminModuleKeys } = useAuthUser();
   const { profile, loading } = useUserPermissions();
 
-  const navItems = useMemo(
-    () =>
-      filterServiceNav(SERVICE_NAV, {
-        permissions: profile?.permissions,
-        roleCodes: profile?.roleCodes,
-        roleNames: profile?.roleNames,
-      }),
-    [profile?.permissions, profile?.roleCodes, profile?.roleNames],
-  );
+  const navItems = useMemo(() => {
+    const items = filterServiceNav(SERVICE_NAV, {
+      permissions: profile?.permissions,
+      roleCodes: profile?.roleCodes,
+      roleNames: profile?.roleNames,
+    });
+    const feOnly = isServiceFieldEngineerOnly(
+      profile?.roleCodes,
+      profile?.permissions,
+      profile?.roleNames,
+    );
+    if (!feOnly && canManageModuleUsers("service", adminModuleKeys, user?.userType)) {
+      items.push({ title: "Users", href: "/service/users", icon: UserCog });
+    }
+    return items;
+  }, [
+    adminModuleKeys,
+    profile?.permissions,
+    profile?.roleCodes,
+    profile?.roleNames,
+    user?.userType,
+  ]);
 
   return (
     <ModuleSidebar

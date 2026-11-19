@@ -7,6 +7,7 @@ import { LogIn } from "lucide-react";
 
 import { AppTopbarNotifications } from "@/components/layout/app-topbar-notifications";
 import { CompanyContextBadge } from "@/components/layout/company-context-badge";
+import { ServiceNotificationsBell } from "@/components/layout/service-notifications-bell";
 import { ShellGlobalSearch } from "@/components/layout/shell-global-search";
 import { isHrPath } from "@/config/hr-nav";
 import { useAuthUser } from "@/hooks/use-auth-user";
@@ -40,6 +41,7 @@ export function AppTopbar() {
 
       <div className="flex shrink-0 items-center gap-2">
         {showEntitySwitcher ? <CompanyContextBadge /> : null}
+        {signedIn ? <ServiceNotificationsBell /> : null}
         <AppTopbarNotifications />
         {!signedIn && !loading ? (
           <Link
