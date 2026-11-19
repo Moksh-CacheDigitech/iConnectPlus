@@ -184,13 +184,8 @@ class MailboxInboxService:
     def __init__(self, db: Session) -> None:
         self._db = db
 
-    def _mailbox_source_ready(self) -> None:
-        if settings.mailapi_configured or settings.graph_mail_configured:
-            return
-        raise RuntimeError(
-            "Mailbox not configured. Set MAILAPI_ENABLED/BASE_URL/API_KEY (preferred) "
-            "or MICROSOFT_* / AZURE_* + GRAPH_MAILBOX_EMAIL."
-        )
+    def _mailbox_source_ready(self) -> bool:
+        return bool(settings.mailapi_configured or settings.graph_mail_configured)
 
     def _list_via_graph(self, *, top: int) -> MailboxMessagesResult:
         graph = GraphEmailAdapter()
@@ -215,7 +210,11 @@ class MailboxInboxService:
         )
 
     def list_messages(self, *, top: int = 50) -> MailboxMessagesResult:
-        self._mailbox_source_ready()
+        if not self._mailbox_source_ready():
+            return self._offline_result(
+                "Mailbox not configured. Set MAILAPI_ENABLED/BASE_URL/API_KEY "
+                "(preferred) or MICROSOFT_* / AZURE_* + GRAPH_MAILBOX_EMAIL."
+            )
         if settings.mailapi_configured:
             adapter = MailApiAdapter()
             if not adapter.ping():
@@ -240,7 +239,11 @@ class MailboxInboxService:
             return self._offline_result(f"Graph mailbox read failed: {exc}")
 
     def get_message(self, graph_id: str) -> MailboxMessageDetail:
-        self._mailbox_source_ready()
+        if not self._mailbox_source_ready():
+            raise RuntimeError(
+                "Mailbox not configured. Set MAILAPI_ENABLED/BASE_URL/API_KEY "
+                "(preferred) or MICROSOFT_* / AZURE_* + GRAPH_MAILBOX_EMAIL."
+            )
         if settings.mailapi_configured:
             adapter = MailApiAdapter()
             if not adapter.ping():

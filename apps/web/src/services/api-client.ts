@@ -248,12 +248,12 @@ async function apiClientExecute<T>(
   }
 
   if (!response.ok || payload.success === false) {
-    const errorPayload = payload as ErrorResponse;
+    const errorPayload = payload as ErrorResponse & { detail?: unknown };
     if (auth && response.status === 401) {
       clearTokens();
     }
     throw new ApiClientError(
-      errorPayload.message ?? "API request failed",
+      resolveErrorMessage(errorPayload),
       response.status,
       errorPayload.errors ?? [],
     );
@@ -262,10 +262,40 @@ async function apiClientExecute<T>(
   return payload as ApiResponse<T>;
 }
 
+function resolveErrorMessage(payload: {
+  message?: string;
+  detail?: unknown;
+  errors?: string[];
+}): string {
+  if (typeof payload.message === "string" && payload.message.trim()) {
+    return payload.message;
+  }
+  const detail = payload.detail;
+  if (typeof detail === "string" && detail.trim()) {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item) {
+          return String((item as { msg: unknown }).msg);
+        }
+        return "";
+      })
+      .filter(Boolean);
+    if (parts.length > 0) return parts.join("; ");
+  }
+  if (payload.errors && payload.errors.length > 0) {
+    return payload.errors.join("; ");
+  }
+  return "API request failed";
+}
+
 async function parseErrorMessage(response: Response): Promise<string> {
   try {
-    const payload = (await response.json()) as ErrorResponse;
-    return payload.message ?? "API request failed";
+    const payload = (await response.json()) as ErrorResponse & { detail?: unknown };
+    return resolveErrorMessage(payload);
   } catch {
     return "API request failed";
   }
@@ -329,9 +359,9 @@ async function apiUploadUnqueued<T>(
   }
 
   if (!response.ok || payload.success === false) {
-    const errorPayload = payload as ErrorResponse;
+    const errorPayload = payload as ErrorResponse & { detail?: unknown };
     throw new ApiClientError(
-      errorPayload.message ?? "API request failed",
+      resolveErrorMessage(errorPayload),
       response.status,
       errorPayload.errors ?? [],
     );

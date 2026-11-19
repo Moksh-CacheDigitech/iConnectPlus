@@ -110,17 +110,13 @@ def list_mailbox_messages(
     before returning the inbox (no separate POST needed).
     """
     _ = ctx
-    if not settings.mailapi_configured and not settings.graph_mail_configured:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Mailbox not configured. Set MAILAPI_ENABLED/BASE_URL/API_KEY "
-                "or MICROSOFT_* / AZURE_* + GRAPH_MAILBOX_EMAIL."
-            ),
-        )
 
     poll_summary: str | None = None
-    if poll and settings.email_ticket_enabled:
+    if (
+        poll
+        and settings.email_ticket_enabled
+        and (settings.mailapi_configured or settings.graph_mail_configured)
+    ):
         from modules.service.tasks import poll_support_mailbox
 
         poll_result = poll_support_mailbox()
@@ -138,15 +134,12 @@ def list_mailbox_messages(
     try:
         result = MailboxInboxService(db).list_messages(top=top)
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        result = MailboxInboxService(db)._offline_result(str(exc))
     except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"Mailbox unavailable: {exc}. "
-                "MailAPI at MAILAPI_BASE_URL must be running for connectplus@ inbox."
-            ),
-        ) from exc
+        result = MailboxInboxService(db)._offline_result(
+            f"Mailbox unavailable: {exc}. "
+            "Configure MAILAPI_* or Graph credentials, then Refresh."
+        )
     result.poll_summary = poll_summary
     return APIResponse(message="OK", data=result)
 
