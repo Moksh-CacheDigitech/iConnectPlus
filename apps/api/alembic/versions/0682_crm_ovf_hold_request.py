@@ -7,8 +7,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0678_crm_ovf_hold_request"
-down_revision: str | Sequence[str] | None = "0677_prj_site_cloud_po_lines"
+revision: str = "0682_crm_ovf_hold_request"
+down_revision: str | Sequence[str] | None = "0681_svc_sla_pause_duration"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
