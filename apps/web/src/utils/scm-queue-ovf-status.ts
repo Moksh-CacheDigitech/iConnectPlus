@@ -51,7 +51,9 @@ function openDistributorCount(row: ScmOvfStatusSource): number {
 function activeOrders(row: ScmOvfStatusSource): ScmLinkedPurchaseOrder[] {
   return linkedOrders(row).filter((order) => {
     const s = (order.status || "").toLowerCase();
-    return s !== "cancelled";
+    if (s === "cancelled") return false;
+    // A vendor-rejected PO is stopped, so it no longer covers any item.
+    return (order.fulfillment_stage || "").toLowerCase() !== "vendor_rejected";
   });
 }
 
@@ -87,10 +89,18 @@ export function scmOvfPoItemCoverage(row: ScmOvfStatusSource): {
   covered: number;
   total: number;
 } {
-  const fromQty = qtyCoverage(row);
-  if (fromQty) return fromQty;
-
   const groups = row.po_groups;
+  const hasGroupQty =
+    Array.isArray(groups) &&
+    groups.some((group) => Number.isFinite(Number(group.required_qty)) && Number(group.required_qty) > 0);
+
+  // Per-distributor coverage first: an over-ordered distributor must not hide
+  // another distributor's items that still need a PO.
+  if (!hasGroupQty) {
+    const fromQty = qtyCoverage(row);
+    if (fromQty) return fromQty;
+  }
+
   if (Array.isArray(groups) && groups.length > 0) {
     let covered = 0;
     let total = 0;
@@ -175,6 +185,9 @@ export function deriveScmOvfQueueStatus(
   }
 
   if (covered + 1e-9 < total) return "partial";
+
+  // A distributor group that still has no PO means items are left to create.
+  if (openDistributorCount(row) > 0) return "partial";
 
   // All required qty/items have a PO (draft or issued), including finalize-pending.
   return "close";

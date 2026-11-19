@@ -15,7 +15,13 @@ import { listModuleMembers, type ModuleUserRecord } from "@/services/module-user
 
 type OwnerOption = { id: string; label: string; name: string; email: string };
 
-const STEP_ORDER = ["accept_po", "management_po", "invoice_generation"] as const;
+const STEP_ORDER = [
+  "accept_po",
+  "management_po",
+  "invoice_generation",
+  "hold_decision",
+  "freight_finance",
+] as const;
 
 function toOption(id: string, name: string, email: string): OwnerOption {
   const display = (name || email || "User").trim();
@@ -124,7 +130,7 @@ export function ProcurementApproversPanel() {
           <div>
             <p className="text-sm font-semibold text-foreground">Approvers</p>
             <p className="text-[11px] text-muted-foreground">
-              Accept PO, Management approval, and Invoice generation — selected users own each step
+              Accept PO, Management, Invoice, Hold, and Freight & finance — selected users own each step
             </p>
           </div>
         </div>

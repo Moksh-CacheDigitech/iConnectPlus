@@ -237,6 +237,7 @@ export type ScmLinkedPurchaseOrder = {
   document_number?: string | null;
   company_po_number?: string | null;
   status?: string | null;
+  fulfillment_stage?: string | null;
   /** Sum of active PO line quantities. */
   total_qty?: number | null;
 };
@@ -408,6 +409,7 @@ export type ScmOvfPreview = {
   /** Customer delivery date / period from OVF (often YYYY-MM-DD). */
   delivery_period?: string | null;
   customer_name: string | null;
+  customer_account_number?: string | null;
   quote_name: string | null;
   account_name: string | null;
   owner_name: string | null;
@@ -460,6 +462,13 @@ export type ScmOvfPreview = {
   scm_last_hold_released_at?: string | null;
   scm_hold_history?: ScmOvfHoldHistoryEntry[];
   scm_on_hold_remark?: string | null;
+  scm_hold_request_status?: "pending" | "accepted" | "rejected" | string | null;
+  scm_hold_request_remark?: string | null;
+  scm_hold_requested_at?: string | null;
+  scm_charge_request_status?: "pending" | "accepted" | "rejected" | string | null;
+  scm_charge_request_freight?: number | null;
+  scm_charge_request_finance_pct?: number | null;
+  scm_charge_requested_at?: string | null;
   purchase_order_status?: string | null;
   stock_fulfillment_status?: "none" | "partial" | "complete" | string;
   remaining_demand_qty?: number;
@@ -807,6 +816,7 @@ export async function createPoFromOvf(
       unit_price: number;
       rate_currency?: "INR" | "USD";
       tax_rate?: number;
+      description?: string | null;
     }>;
   },
 ): Promise<ProcOrder> {
@@ -1285,6 +1295,73 @@ export type ProcApprovalCapabilities = {
 
 export async function listScmFinalizeApprovals(): Promise<ScmFinalizeApproval[]> {
   const res = await apiClient<ScmFinalizeApproval[]>(`${SCM_API}/finalize-approvals`);
+  return unwrapData(res);
+}
+
+export type ScmHoldApproval = {
+  id: string;
+  ovf_id: string;
+  ovf_no: string;
+  customer_name: string | null;
+  owner_name: string | null;
+  status: "pending" | "accepted" | "rejected";
+  remark: string | null;
+  requested_at: string | null;
+  requested_by_name: string | null;
+};
+
+export async function listScmHoldApprovals(): Promise<ScmHoldApproval[]> {
+  const res = await apiClient<ScmHoldApproval[]>(`${SCM_API}/hold-approvals`);
+  return unwrapData(res);
+}
+
+export async function acceptScmOvfHold(ovfId: string): Promise<ScmOvfPreview> {
+  const res = await apiClient<ScmOvfPreview>(`${SCM_API}/ovf/${ovfId}/accept-hold`, {
+    method: "POST",
+  });
+  invalidateScmOvfPreviewCache(ovfId);
+  return unwrapData(res);
+}
+
+export async function rejectScmOvfHold(ovfId: string): Promise<ScmOvfPreview> {
+  const res = await apiClient<ScmOvfPreview>(`${SCM_API}/ovf/${ovfId}/reject-hold`, {
+    method: "POST",
+  });
+  invalidateScmOvfPreviewCache(ovfId);
+  return unwrapData(res);
+}
+
+export type ScmChargeApproval = {
+  id: string;
+  ovf_id: string;
+  ovf_no: string;
+  customer_name: string | null;
+  owner_name: string | null;
+  status: "pending" | "accepted" | "rejected";
+  freight: number;
+  finance_cost_pct: number;
+  requested_at: string | null;
+  requested_by_name: string | null;
+};
+
+export async function listScmChargeApprovals(): Promise<ScmChargeApproval[]> {
+  const res = await apiClient<ScmChargeApproval[]>(`${SCM_API}/charge-approvals`);
+  return unwrapData(res);
+}
+
+export async function acceptScmOvfCharges(ovfId: string): Promise<ScmOvfPreview> {
+  const res = await apiClient<ScmOvfPreview>(`${SCM_API}/ovf/${ovfId}/accept-charges`, {
+    method: "POST",
+  });
+  invalidateScmOvfPreviewCache(ovfId);
+  return unwrapData(res);
+}
+
+export async function rejectScmOvfCharges(ovfId: string): Promise<ScmOvfPreview> {
+  const res = await apiClient<ScmOvfPreview>(`${SCM_API}/ovf/${ovfId}/reject-charges`, {
+    method: "POST",
+  });
+  invalidateScmOvfPreviewCache(ovfId);
   return unwrapData(res);
 }
 

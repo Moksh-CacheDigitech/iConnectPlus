@@ -553,7 +553,7 @@ function lineDescription(
   product: string,
   extra?: string | null,
 ): string {
-  const fromField = (extra || "").trim();
+  const fromField = (extra || "").replace(/^\[quote:[^\]]+\]\s*/i, "").trim();
   if (fromField && fromField.toLowerCase() !== product.trim().toLowerCase()) {
     return fromField;
   }

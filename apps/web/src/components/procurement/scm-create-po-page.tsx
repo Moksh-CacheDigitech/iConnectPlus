@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/finance/journals/confirm-dialog";
+import { DocumentPreviewContent } from "@/components/hr/shared/document-preview-content";
 import { FinanceField, FinanceSelect, FinanceTextarea } from "@/components/finance/journals/finance-form-field";
 import { PageHeader } from "@/components/layout/page-header";
 import {
@@ -35,6 +36,7 @@ import {
   type VendorFormDraft,
   type VendorFormAddressBlock,
 } from "@/components/procurement/vendor-form-fields";
+import { parseVendorQuoteNo } from "@/components/crm/sales/ovf-order-lines-section";
 import {
   ScmCommercialDocumentsPanel,
   type PendingScmCommercialDocument,
@@ -67,7 +69,7 @@ import {
 import { fileToBase64 } from "@/services/sales-crm-service";
 import {
   buildPoTaxesFromBuckets,
-  previewPurchaseOrderPdf,
+  downloadPurchaseOrderPdf,
   type PurchaseOrderPdfInput,
 } from "@/utils/purchase-order-pdf";
 import { ensureScmOvfPdfAttached } from "@/utils/scm-ovf-pdf-attach";
@@ -748,6 +750,7 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
   );
   const [poShippingExtras, setPoShippingExtras] = useState<PoShippingOption[]>([]);
   const [pdfPreviewBusy, setPdfPreviewBusy] = useState(false);
+  const [pdfPreviewDataUrl, setPdfPreviewDataUrl] = useState<string | null>(null);
   const [scmDocuments, setScmDocuments] = useState<PendingScmCommercialDocument[]>([]);
   const [ovfDocsRefreshKey, setOvfDocsRefreshKey] = useState(0);
   const [usdConvertLineId, setUsdConvertLineId] = useState<string | null>(null);
@@ -1141,7 +1144,7 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
             return {
               id: crypto.randomUUID(),
               itemDetails: ln.product_name,
-              description: (ln.description || "").trim(),
+              description: parseVendorQuoteNo(ln.description).description,
               partNumber: "",
               hsnCode: "",
               poType: "Goods" as const,
@@ -1820,6 +1823,7 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
       unit_price: number;
       rate_currency: "INR" | "USD";
       tax_rate: number;
+      description: string | null;
     }> = [];
     for (const row of lines) {
       const productName = row.itemDetails.trim();
@@ -1840,6 +1844,7 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
         unit_price: unitPrice,
         rate_currency: usd ? "USD" : "INR",
         tax_rate: usd ? 0 : toNumber(row.taxPct),
+        description: (row.description || "").trim() || null,
       });
     }
     if (poLines.length === 0) {
@@ -2012,7 +2017,17 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
         taxes,
         termsAndConditions: [],
       };
-      await previewPurchaseOrderPdf(input);
+      const built = await downloadPurchaseOrderPdf(input, undefined, {
+        asBase64: true,
+        preview: true,
+        watermark: true,
+      });
+      const base64 = built && "base64" in built ? built.base64 : "";
+      if (!base64) {
+        setError("Failed to preview PO PDF");
+        return;
+      }
+      setPdfPreviewDataUrl(`data:application/pdf;base64,${base64}`);
     } catch (err) {
       setError(
         err instanceof Error && err.message.trim()
@@ -2546,9 +2561,8 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
                 <Input
                   type="date"
                   value={form.purchaseDate ?? ""}
-                  onChange={(e) => setField("purchaseDate", e.target.value)}
-                  disabled={disabled}
-                  className="h-8"
+                  readOnly
+                  className="h-8 cursor-default bg-muted/30 font-medium text-foreground"
                 />
               </PoField>
               <PoField label="Payment terms">
@@ -2559,16 +2573,15 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
                         <Input
                           ref={paymentTermsInputRef}
                           value={form.paymentTerms ?? ""}
-                          onChange={(e) => setField("paymentTerms", e.target.value)}
-                          disabled={disabled}
-                          className="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0"
+                          readOnly
+                          className="h-8 min-w-0 flex-1 cursor-default rounded-none border-0 bg-muted/30 shadow-none focus-visible:ring-0"
                           placeholder="e.g. Net 15 days or Due on receipt"
                           aria-label="Payment terms"
                           autoComplete="off"
                         />
                         <button
                           type="button"
-                          disabled={disabled}
+                          disabled
                           aria-haspopup="listbox"
                           aria-expanded={paymentTermsMenuOpen}
                           aria-label="Payment terms presets"
@@ -2640,7 +2653,7 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
                         min={1}
                         step={1}
                         inputMode="numeric"
-                        disabled={disabled}
+                        readOnly
                         value={paymentTermsDaysValue(form.paymentTerms)}
                         onChange={(e) => {
                           const raw = e.target.value.replace(/[^\d]/g, "");
@@ -2675,26 +2688,23 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
               <PoField label="Customer PO number">
                 <Input
                   value={form.customerPoNumber ?? ""}
-                  onChange={(e) => setField("customerPoNumber", e.target.value)}
-                  disabled={disabled}
-                  className="h-8"
+                  readOnly
+                  className="h-8 cursor-default bg-muted/30 font-medium text-foreground"
                 />
               </PoField>
               <PoField label="Customer PO date">
                 <Input
                   type="date"
                   value={form.customerPoDate ?? ""}
-                  onChange={(e) => setField("customerPoDate", e.target.value)}
-                  disabled={disabled}
-                  className="h-8"
+                  readOnly
+                  className="h-8 cursor-default bg-muted/30 font-medium text-foreground"
                 />
               </PoField>
               <PoField label="Customer name">
                 <Input
                   value={form.customerName ?? ""}
-                  onChange={(e) => setField("customerName", e.target.value)}
-                  disabled={disabled}
-                  className="h-8"
+                  readOnly
+                  className="h-8 cursor-default bg-muted/30 font-medium text-foreground"
                 />
               </PoField>
               <PoField label="Customer delivery date">
@@ -3168,6 +3178,7 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
             companyId={preview.company_id}
             title="OVF document"
             allowUpload={false}
+            collapsedSummary
             className="border-border bg-card"
             refreshKey={ovfDocsRefreshKey}
           />
@@ -3227,6 +3238,42 @@ export function ScmCreatePoPage({ ovfId }: { ovfId: string }) {
           ) : null}
         </>
       ) : null}
+
+      {pdfPreviewDataUrl
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-label="PO preview"
+            >
+              <div className="flex max-h-[90vh] w-full max-w-3xl flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-sm font-semibold tracking-tight text-foreground">
+                    PO preview
+                  </h2>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="cursor-pointer transition-colors duration-200"
+                    onClick={() => setPdfPreviewDataUrl(null)}
+                  >
+                    Close
+                  </Button>
+                </div>
+                <DocumentPreviewContent
+                  fileName="PO-preview.pdf"
+                  dataUrl={pdfPreviewDataUrl}
+                  mimeType="application/pdf"
+                  viewOnly
+                  frameClassName="max-h-[70vh]"
+                />
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       <ConfirmDialog
         open={draftDialogOpen}

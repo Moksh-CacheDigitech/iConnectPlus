@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, Eye, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronDown, Eye, Plus, Trash2 } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/finance/journals/confirm-dialog";
+import { DocumentPreviewContent } from "@/components/hr/shared/document-preview-content";
 import { FinanceField, FinanceSelect, FinanceTextarea } from "@/components/finance/journals/finance-form-field";
 import { PageHeader } from "@/components/layout/page-header";
 import {
@@ -46,8 +48,8 @@ import {
   isGrnNonBilledStockRow,
 } from "@/utils/procurement-inventory-report";
 import {
+  downloadPurchaseOrderPdf,
   purchaseOrderPdfInputFromOrder,
-  previewPurchaseOrderPdf,
 } from "@/utils/purchase-order-pdf";
 
 const TAX_OPTIONS = ["0", "5", "12", "18", "28"] as const;
@@ -214,6 +216,7 @@ export function ProcurementManualCreatePoPage() {
   const [vendorDraft, setVendorDraft] = useState<VendorFormDraft>(() => emptyVendorFormDraft());
   const [orgScope, setOrgScope] = useState<{ company_id: string; branch_id: string } | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfPreviewDataUrl, setPdfPreviewDataUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -600,7 +603,18 @@ export function ProcurementManualCreatePoPage() {
           shippingAddress,
         },
       );
-      await previewPurchaseOrderPdf(input, { watermark: true });
+      input.customerGstin = vendorGstNumber.trim() || undefined;
+      const built = await downloadPurchaseOrderPdf(input, undefined, {
+        asBase64: true,
+        preview: true,
+        watermark: true,
+      });
+      const base64 = built && "base64" in built ? built.base64 : "";
+      if (!base64) {
+        setError("Failed to preview PO PDF");
+        return;
+      }
+      setPdfPreviewDataUrl(`data:application/pdf;base64,${base64}`);
     } catch (err) {
       setError(
         err instanceof Error && err.message.trim()
@@ -687,7 +701,7 @@ export function ProcurementManualCreatePoPage() {
       return;
     }
     if (selectedKeys.size > 0 && stockUnitIds.length === 0 && importLineIds.length === 0) {
-      setError("Selected stock units are missing inventory IDs. Refresh stock and try again.");
+      setError("Selected stock units are missing inventory IDs. Reload the page and try again.");
       return;
     }
 
@@ -727,19 +741,6 @@ export function ProcurementManualCreatePoPage() {
         backLabel={backLabel}
         title="Create purchase order"
         titleClassName="text-2xl font-semibold tracking-tight sm:text-3xl"
-        actions={
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="cursor-pointer transition-colors duration-200"
-            disabled={loading || busy}
-            onClick={() => void load()}
-          >
-            <RefreshCw className={cn("mr-1.5 size-3.5", loading && "animate-spin")} />
-            Refresh stock
-          </Button>
-        }
       />
 
       {error ? (
@@ -749,9 +750,7 @@ export function ProcurementManualCreatePoPage() {
       ) : null}
 
       <section className="space-y-3 rounded-lg border border-border bg-card p-4">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          References
-        </h2>
+        <h2 className="text-sm font-semibold text-foreground">PO details</h2>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <FinanceField label="PO number" error={peekError ?? undefined}>
             <Input
@@ -783,11 +782,9 @@ export function ProcurementManualCreatePoPage() {
       </section>
 
       <section className="space-y-3 rounded-lg border border-border bg-card p-4">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Vendor
-        </h2>
+        <h2 className="text-sm font-semibold text-foreground">Vendor</h2>
         <div className="space-y-4">
-          <FinanceField label="Vendor" className="max-w-xl">
+          <div className="max-w-xl">
             <div className="flex gap-2">
               <FinanceSelect
                 value={vendorId}
@@ -812,7 +809,7 @@ export function ProcurementManualCreatePoPage() {
                 Add vendor
               </Button>
             </div>
-          </FinanceField>
+          </div>
 
           {vendorId ? (
             <div className="space-y-4">
@@ -1105,9 +1102,6 @@ export function ProcurementManualCreatePoPage() {
 
       <section className="grid gap-4 rounded-lg border border-border bg-card p-4 lg:grid-cols-2">
         <div className="space-y-3">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Freight
-          </h2>
           <div className="grid gap-3 sm:grid-cols-2">
             <FinanceField label="Freight (INR)">
               <Input
@@ -1321,6 +1315,42 @@ export function ProcurementManualCreatePoPage() {
           </FinanceField>
         </div>
       </ConfirmDialog>
+
+      {pdfPreviewDataUrl
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-label="PO preview"
+            >
+              <div className="flex max-h-[90vh] w-full max-w-3xl flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-sm font-semibold tracking-tight text-foreground">
+                    PO preview
+                  </h2>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="cursor-pointer transition-colors duration-200"
+                    onClick={() => setPdfPreviewDataUrl(null)}
+                  >
+                    Close
+                  </Button>
+                </div>
+                <DocumentPreviewContent
+                  fileName="PO-preview.pdf"
+                  dataUrl={pdfPreviewDataUrl}
+                  mimeType="application/pdf"
+                  viewOnly
+                  frameClassName="max-h-[70vh]"
+                />
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

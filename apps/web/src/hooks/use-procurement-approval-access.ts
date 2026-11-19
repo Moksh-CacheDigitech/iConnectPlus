@@ -44,6 +44,8 @@ export function useProcurementApprovalAccess() {
   const canDecideApprovals = Boolean(caps?.can_decide_approvals || isAdmin);
   const canDecideAcceptPo = isAdmin || steps.has("accept_po");
   const canDecideManagement = isAdmin || steps.has("management_po");
+  const canDecideHold = steps.has("hold_decision");
+  const canDecideFreight = steps.has("freight_finance");
 
   function canDecideStage(stage: ScmApprovalStage | null | undefined): boolean {
     if (isAdmin) return true;
@@ -59,6 +61,8 @@ export function useProcurementApprovalAccess() {
     canDecideApprovals,
     canDecideAcceptPo,
     canDecideManagement,
+    canDecideHold,
+    canDecideFreight,
     canDecideStage,
     refresh,
   };

@@ -422,6 +422,15 @@ class OvfService:
         if not distributor_name:
             distributor_name = _aggregate_distributor_names(vendor_dtos)
 
+        customer_account_number = None
+        if ovf.company_account_id:
+            try:
+                account = self._companies.get(ctx, ovf.company_account_id)
+            except (NotFoundException, ForbiddenException):
+                account = None
+            if account is not None:
+                customer_account_number = (getattr(account, "account_number", None) or "").strip() or None
+
         return {
             "ovf_id": ovf.id,
             "ovf_no": ovf.ovf_no,
@@ -434,6 +443,7 @@ class OvfService:
             "po_date": self._resolve_customer_po_display_date(ctx, ovf),
             "delivery_period": ovf.delivery_period,
             "customer_name": ovf.customer_name,
+            "customer_account_number": customer_account_number,
             "quote_name": ovf.quote_name,
             "account_name": ovf.account_name,
             "owner_name": ovf.owner_name,
@@ -452,6 +462,22 @@ class OvfService:
             "scm_last_hold_released_at": getattr(ovf, "scm_last_hold_released_at", None),
             "scm_hold_history": serialize_scm_hold_history(ovf),
             "scm_on_hold_remark": getattr(ovf, "scm_on_hold_remark", None),
+            "scm_hold_request_status": getattr(ovf, "scm_hold_request_status", None),
+            "scm_hold_request_remark": getattr(ovf, "scm_hold_request_remark", None),
+            "scm_hold_requested_at": getattr(ovf, "scm_hold_requested_at", None),
+            "scm_hold_requested_by": getattr(ovf, "scm_hold_requested_by", None),
+            "scm_charge_request_status": getattr(ovf, "scm_charge_request_status", None),
+            "scm_charge_request_freight": (
+                float(ovf.scm_charge_request_freight)
+                if getattr(ovf, "scm_charge_request_freight", None) is not None
+                else None
+            ),
+            "scm_charge_request_finance_pct": (
+                float(ovf.scm_charge_request_finance_pct)
+                if getattr(ovf, "scm_charge_request_finance_pct", None) is not None
+                else None
+            ),
+            "scm_charge_requested_at": getattr(ovf, "scm_charge_requested_at", None),
             "freight": freight,
             "additional_charges": float(ovf.additional_charges or 0),
             "vendor_payment_days": int(ovf.vendor_payment_days or 0),
@@ -1313,6 +1339,59 @@ class OvfService:
         )
         return row
 
+    def request_scm_hold(
+        self,
+        ctx: TenantContext,
+        ovf_id: UUID,
+        *,
+        remark: str,
+    ) -> CrmOvf:
+        """Queue a hold. The OVF stays open until a Hold approver accepts it."""
+        ovf = self.get(ctx, ovf_id)
+        if not ovf.shared_to_scm:
+            raise ConflictException("OVF has not been shared to SCM")
+        if bool(ovf.scm_on_hold):
+            raise ConflictException("OVF is already on SCM hold")
+        if (getattr(ovf, "scm_hold_request_status", None) or "") == "pending":
+            raise ConflictException("A hold request is already waiting for approval")
+        remark_text = (remark or "").strip()
+        if not remark_text:
+            raise ConflictException("Hold remark is required")
+        now = datetime.now(timezone.utc)
+        row = self._repo.update(
+            ctx,
+            ovf_id,
+            scm_hold_request_status="pending",
+            scm_hold_request_remark=remark_text,
+            scm_hold_requested_at=now,
+            scm_hold_requested_by=ctx.user_id,
+        )
+        self._log(ctx, ovf, ovf.blueprint_state, ovf.blueprint_state, "scm_hold_requested", remark_text)
+        return row
+
+    def decide_scm_hold(self, ctx: TenantContext, ovf_id: UUID, *, accept: bool) -> CrmOvf:
+        """A Hold approver accepts (places on hold) or rejects a pending hold request."""
+        ovf = self.get(ctx, ovf_id)
+        if (getattr(ovf, "scm_hold_request_status", None) or "") != "pending":
+            raise ConflictException("This OVF has no pending hold request")
+        remark = (getattr(ovf, "scm_hold_request_remark", None) or "").strip()
+        if accept:
+            self.set_scm_on_hold(ctx, ovf_id, on_hold=True, remark=remark or "Approved hold")
+            row = self._repo.update(ctx, ovf_id, scm_hold_request_status="accepted")
+            self._log(ctx, ovf, ovf.blueprint_state, ovf.blueprint_state, "scm_hold_accepted", remark)
+            return row
+        row = self._repo.update(ctx, ovf_id, scm_hold_request_status="rejected")
+        self._log(ctx, ovf, ovf.blueprint_state, ovf.blueprint_state, "scm_hold_rejected", remark)
+        return row
+
+    def list_scm_hold_requests(self, ctx: TenantContext) -> list[CrmOvf]:
+        rows = self._repo.list_shared_to_scm(ctx, None)
+        return [
+            row
+            for row in rows
+            if (getattr(row, "scm_hold_request_status", None) or "") in {"pending", "accepted", "rejected"}
+        ]
+
     def request_freight_from_scm(
         self,
         ctx: TenantContext,
@@ -2016,6 +2095,101 @@ class OvfService:
             f"freight={row.freight}",
         )
         return row
+
+    def request_scm_charge_change(
+        self,
+        ctx: TenantContext,
+        ovf_id: UUID,
+        *,
+        freight: Decimal | float | str,
+        finance_cost_pct: Decimal | float | str,
+    ) -> CrmOvf:
+        """Queue freight and finance. Live values stay until a Freight approver accepts."""
+        ovf = self.get(ctx, ovf_id)
+        if not ovf.shared_to_scm:
+            raise ConflictException("OVF has not been shared to SCM")
+        if bool(getattr(ovf, "scm_on_hold", False)):
+            raise ConflictException(
+                "Freight and finance cannot be changed while the OVF is on SCM hold. Unhold first."
+            )
+        next_freight = Decimal(str(freight))
+        next_finance = Decimal(str(finance_cost_pct))
+        if next_freight < 0:
+            raise ConflictException("Freight cannot be negative")
+        if next_finance < 0:
+            raise ConflictException("Finance cost % cannot be negative")
+        next_freight = next_freight.quantize(Decimal("0.0001"))
+        next_finance = next_finance.quantize(Decimal("0.001"))
+        current_freight = Decimal(str(ovf.freight or 0)).quantize(Decimal("0.0001"))
+        current_finance = Decimal(str(ovf.finance_cost_pct or 0)).quantize(Decimal("0.001"))
+        if next_freight == current_freight and next_finance == current_finance:
+            raise ConflictException("Freight and finance are already these values")
+        now = datetime.now(timezone.utc)
+        row = self._repo.update(
+            ctx,
+            ovf_id,
+            scm_charge_request_status="pending",
+            scm_charge_request_freight=next_freight,
+            scm_charge_request_finance_pct=next_finance,
+            scm_charge_requested_at=now,
+            scm_charge_requested_by=ctx.user_id,
+        )
+        self._log(
+            ctx,
+            ovf,
+            ovf.blueprint_state,
+            ovf.blueprint_state,
+            "scm_charge_change_requested",
+            f"freight={next_freight}; finance_cost_pct={next_finance}",
+        )
+        return row
+
+    def decide_scm_charge_change(self, ctx: TenantContext, ovf_id: UUID, *, accept: bool) -> CrmOvf:
+        """Accept applies the queued freight and finance. Reject leaves the live values."""
+        ovf = self.get(ctx, ovf_id)
+        if (getattr(ovf, "scm_charge_request_status", None) or "") != "pending":
+            raise ConflictException("This OVF has no pending freight and finance request")
+        if not accept:
+            row = self._repo.update(ctx, ovf_id, scm_charge_request_status="rejected")
+            self._log(
+                ctx,
+                ovf,
+                ovf.blueprint_state,
+                ovf.blueprint_state,
+                "scm_charge_change_rejected",
+                None,
+            )
+            return row
+        freight = getattr(ovf, "scm_charge_request_freight", None)
+        finance = getattr(ovf, "scm_charge_request_finance_pct", None)
+        if freight is None or finance is None:
+            raise ConflictException("The freight and finance request is incomplete")
+        self.update_scm_charges(
+            ctx,
+            ovf_id,
+            freight=freight,
+            additional_charges=ovf.additional_charges,
+            finance_cost_pct=finance,
+        )
+        row = self._repo.update(ctx, ovf_id, scm_charge_request_status="accepted")
+        self._log(
+            ctx,
+            ovf,
+            ovf.blueprint_state,
+            ovf.blueprint_state,
+            "scm_charge_change_accepted",
+            f"freight={freight}; finance_cost_pct={finance}",
+        )
+        return row
+
+    def list_scm_charge_requests(self, ctx: TenantContext) -> list[CrmOvf]:
+        rows = self._repo.list_shared_to_scm(ctx, None)
+        return [
+            row
+            for row in rows
+            if (getattr(row, "scm_charge_request_status", None) or "")
+            in {"pending", "accepted", "rejected"}
+        ]
 
     def update_scm_charges(
         self,

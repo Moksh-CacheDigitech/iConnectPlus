@@ -236,6 +236,8 @@ class ProcOrderLine(Base, *ProcTransactionMixin):
     )
     product_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Item description entered on Create PO (kept separate from the product name).
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     quantity: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
     uom_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),

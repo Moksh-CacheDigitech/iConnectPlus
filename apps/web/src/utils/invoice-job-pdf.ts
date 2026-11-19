@@ -58,7 +58,14 @@ export async function downloadInvoiceJobPoPdf(
   const watermark = options?.watermark ?? inApproval;
   await downloadOrderPdf(
     order,
-    { name: vendor.name, address: vendor.address },
+    {
+      name: vendor.name,
+      address: vendor.address,
+      gstin:
+        vendor.option?.addressEntries?.[0]?.gstNumber?.trim() ||
+        vendor.option?.taxNumber?.trim() ||
+        "",
+    },
     undefined,
     { watermark },
   );

@@ -9,13 +9,17 @@ function resolveVendor(
   vendors: VendorOption[],
   vendorId: string | null | undefined,
   fallbackName?: string | null,
-): { name: string; address: string } {
+): { name: string; address: string; gstin: string } {
   const option = vendorId
     ? vendors.find((v) => String(v.id) === String(vendorId))
     : undefined;
   return {
     name: option?.label || fallbackName?.trim() || "Vendor",
     address: option?.address || "",
+    gstin:
+      option?.addressEntries?.[0]?.gstNumber?.trim() ||
+      option?.taxNumber?.trim() ||
+      "",
   };
 }
 

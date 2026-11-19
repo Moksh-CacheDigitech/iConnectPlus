@@ -288,7 +288,9 @@ export function DeliveryStatusEditPanel({ challanId }: DeliveryStatusEditPanelPr
         variant: result.emailWarning ? "warning" : "success",
         message: result.emailWarning
           ? `Dispatch saved. Out-for-delivery email failed: ${result.emailWarning}`
-          : form.shipmentStatus === "Failed delivery"
+          : result.emailSkipped
+            ? "Dispatch saved."
+            : form.shipmentStatus === "Failed delivery"
             ? "Marked as failed delivery."
             : form.shipmentStatus === "Delivered" && form.requiresInstallation
               ? "Marked delivered. Open Procurement → Installation to fill site details."

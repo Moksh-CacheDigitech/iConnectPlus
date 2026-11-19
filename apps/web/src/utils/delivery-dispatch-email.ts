@@ -2,6 +2,22 @@ import { formatChallanGrnSummary, type DeliveryChallanRecord } from "@/utils/del
 import type { DeliveryStatusFormValue } from "@/components/procurement/delivery-status-form";
 import { getScmDeliveryContact } from "@/services/procurement-service";
 
+/** Domains that cannot receive mail (RFC 2606 / 6761). */
+function isReservedDocumentationEmail(address: string): boolean {
+  const domain = address.trim().toLowerCase().split("@")[1] || "";
+  if (!domain) return false;
+  if (domain === "example.com" || domain === "example.net" || domain === "example.org") {
+    return true;
+  }
+  return (
+    domain.endsWith(".example") ||
+    domain.endsWith(".test") ||
+    domain.endsWith(".invalid") ||
+    domain.endsWith(".localhost") ||
+    domain === "localhost"
+  );
+}
+
 async function resolveCustomerEmail(
   challan: DeliveryChallanRecord,
   status: DeliveryStatusFormValue,
@@ -22,10 +38,13 @@ export async function sendDeliveryDispatchNotification(
   challan: DeliveryChallanRecord,
   status: DeliveryStatusFormValue,
   options?: { timeoutMs?: number },
-): Promise<{ ok: boolean; message?: string; to?: string }> {
+): Promise<{ ok: boolean; message?: string; to?: string; skipped?: boolean }> {
   const to = await resolveCustomerEmail(challan, status);
   if (!to) {
     return { ok: false, message: "Customer email is missing." };
+  }
+  if (isReservedDocumentationEmail(to)) {
+    return { ok: true, skipped: true, to };
   }
 
   const timeoutMs = options?.timeoutMs ?? 20_000;
@@ -93,10 +112,13 @@ export async function sendDeliveryOutcomeNotification(
   status: DeliveryStatusFormValue,
   outcome: "Delivered" | "Failed delivery" | "Delayed",
   options?: { timeoutMs?: number },
-): Promise<{ ok: boolean; message?: string; to?: string }> {
+): Promise<{ ok: boolean; message?: string; to?: string; skipped?: boolean }> {
   const to = await resolveCustomerEmail(challan, status);
   if (!to) {
     return { ok: false, message: "Customer email is missing." };
+  }
+  if (isReservedDocumentationEmail(to)) {
+    return { ok: true, skipped: true, to };
   }
 
   const timeoutMs = options?.timeoutMs ?? 20_000;

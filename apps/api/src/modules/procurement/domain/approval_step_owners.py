@@ -7,6 +7,8 @@ APPROVAL_STEP_CATALOG: dict[str, tuple[str, str]] = {
     "accept_po": ("Accept PO", "scm"),
     "management_po": ("Management PO approval", "management"),
     "invoice_generation": ("Invoice generation", "accounts"),
+    "hold_decision": ("Hold approve / reject", "scm"),
+    "freight_finance": ("Freight & finance", "scm"),
 }
 
 APPROVAL_STEP_KEYS = frozenset(APPROVAL_STEP_CATALOG.keys())

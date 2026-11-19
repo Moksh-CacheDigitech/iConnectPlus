@@ -450,6 +450,10 @@ class ScmHandoffService:
             total += float(ln.get("qty") or 0)
         return round(total, 4)
 
+    @staticmethod
+    def _vendor_rejected_order(order) -> bool:
+        return (getattr(order, "fulfillment_stage", None) or "") == "vendor_rejected"
+
     def _serialize_linked_pos(self, ctx: TenantContext, orders: list) -> list[dict]:
         out: list[dict] = []
         for order in orders:
@@ -461,6 +465,7 @@ class ScmHandoffService:
                     "document_number": order.document_number,
                     "company_po_number": order.company_po_number,
                     "status": order.status,
+                    "fulfillment_stage": getattr(order, "fulfillment_stage", None),
                     "total_qty": self._order_total_qty(order),
                 }
             )
@@ -516,6 +521,8 @@ class ScmHandoffService:
             # Attach every matching vendor PO (supports multiple partial POs).
             still_unused: list = []
             for order in unused:
+                if self._vendor_rejected_order(order):
+                    continue
                 name = " ".join(
                     str(self._vendor_display_name(ctx, order.vendor_id) or "").strip().lower().split()
                 )
@@ -532,6 +539,10 @@ class ScmHandoffService:
         # Leftover POs (name mismatch) still count toward unmatched groups' ordered qty.
         for group in grouped.values():
             if group.get("has_po") or not unused:
+                continue
+            while unused and self._vendor_rejected_order(unused[0]):
+                unused.pop(0)
+            if not unused:
                 continue
             order = unused.pop(0)
             _attach_order(group, order)
@@ -562,6 +573,7 @@ class ScmHandoffService:
                     .upper()
                     or "INR",
                     "tax_rate": float(ln.get("tax_rate") or 0),
+                    "description": str(ln.get("description") or "").strip() or None,
                 }
                 for ln in lines
                 if str(ln.get("product_name") or "").strip()
@@ -803,7 +815,11 @@ class ScmHandoffService:
                 for ln in (item_plan.get("lines") or [])
             )
             ordered_po_qty = round(
-                sum(self._order_total_qty(order) for order in existing_orders),
+                sum(
+                    self._order_total_qty(order)
+                    for order in existing_orders
+                    if not self._vendor_rejected_order(order)
+                ),
                 4,
             )
             # Keep Create PO available while ordered qty is still short of demand.
@@ -891,9 +907,85 @@ class ScmHandoffService:
         return items
 
     def hold_ovf(self, ctx: TenantContext, ovf_id: UUID, *, remark: str) -> dict:
-        """Put OVF on Hold without creating a vendor PO (vendor not required)."""
-        self._crm.set_scm_on_hold(ctx, ovf_id, on_hold=True, remark=remark)
+        """Request a hold. The OVF stays open until a Hold approver accepts it."""
+        self._crm.request_scm_hold(ctx, ovf_id, remark=remark)
         return self.get_ovf_preview(ctx, ovf_id)
+
+    def _ensure_can_decide_step(self, ctx: TenantContext, step_key: str, message: str) -> None:
+        if self._approvers.can_decide_step(ctx, step_key):
+            return
+        raise ForbiddenException(message)
+
+    def accept_ovf_hold(self, ctx: TenantContext, ovf_id: UUID) -> dict:
+        self._ensure_can_decide_step(
+            ctx,
+            "hold_decision",
+            "You are not assigned to approve or reject OVF holds",
+        )
+        self._crm.decide_scm_hold(ctx, ovf_id, accept=True)
+        return self.get_ovf_preview(ctx, ovf_id)
+
+    def reject_ovf_hold(self, ctx: TenantContext, ovf_id: UUID) -> dict:
+        self._ensure_can_decide_step(
+            ctx,
+            "hold_decision",
+            "You are not assigned to approve or reject OVF holds",
+        )
+        self._crm.decide_scm_hold(ctx, ovf_id, accept=False)
+        return self.get_ovf_preview(ctx, ovf_id)
+
+    def list_hold_requests(self, ctx: TenantContext) -> list[dict]:
+        rows = self._crm.list_scm_hold_requests(ctx)
+        names = self._resolve_user_names(
+            ctx.tenant_id,
+            {row.scm_hold_requested_by for row in rows if row.scm_hold_requested_by},
+        )
+        payload = []
+        for row in rows:
+            payload.append(
+                {
+                    "id": row.id,
+                    "ovf_id": row.id,
+                    "ovf_no": row.ovf_no,
+                    "customer_name": row.customer_name or row.account_name,
+                    "owner_name": row.owner_name,
+                    "status": row.scm_hold_request_status,
+                    "remark": row.scm_hold_request_remark,
+                    "requested_at": row.scm_hold_requested_at,
+                    "requested_by_name": names.get(row.scm_hold_requested_by)
+                    if row.scm_hold_requested_by
+                    else None,
+                }
+            )
+        payload.sort(key=lambda item: str(item.get("requested_at") or ""), reverse=True)
+        return payload
+
+    def list_charge_requests(self, ctx: TenantContext) -> list[dict]:
+        rows = self._crm.list_scm_charge_requests(ctx)
+        names = self._resolve_user_names(
+            ctx.tenant_id,
+            {row.scm_charge_requested_by for row in rows if row.scm_charge_requested_by},
+        )
+        payload = []
+        for row in rows:
+            payload.append(
+                {
+                    "id": row.id,
+                    "ovf_id": row.id,
+                    "ovf_no": row.ovf_no,
+                    "customer_name": row.customer_name or row.account_name,
+                    "owner_name": row.owner_name,
+                    "status": row.scm_charge_request_status,
+                    "freight": float(row.scm_charge_request_freight or 0),
+                    "finance_cost_pct": float(row.scm_charge_request_finance_pct or 0),
+                    "requested_at": row.scm_charge_requested_at,
+                    "requested_by_name": names.get(row.scm_charge_requested_by)
+                    if row.scm_charge_requested_by
+                    else None,
+                }
+            )
+        payload.sort(key=lambda item: str(item.get("requested_at") or ""), reverse=True)
+        return payload
 
     def release_ovf_hold(self, ctx: TenantContext, ovf_id: UUID) -> dict:
         """Remove SCM hold without creating a PO (one-time hold cycle)."""
@@ -909,7 +1001,7 @@ class ScmHandoffService:
         additional_charges: float = 0,
         finance_cost_pct: float = 0,
     ) -> dict:
-        """SCM edits freight / finance on the shared OVF; Sales sees the same CRM fields."""
+        """Queue freight / finance. Live CRM values change only after an approver accepts."""
         existing = self._orders.find_by_source(
             ctx,
             source_module=self.SOURCE_MODULE,
@@ -920,13 +1012,30 @@ class ScmHandoffService:
             raise ConflictException(
                 "Freight and finance cannot be changed after a vendor purchase order is created"
             )
-        self._crm.update_scm_charges(
+        self._crm.request_scm_charge_change(
             ctx,
             ovf_id,
             freight=freight,
-            additional_charges=additional_charges,
             finance_cost_pct=finance_cost_pct,
         )
+        return self.get_ovf_preview(ctx, ovf_id)
+
+    def accept_ovf_charges(self, ctx: TenantContext, ovf_id: UUID) -> dict:
+        self._ensure_can_decide_step(
+            ctx,
+            "freight_finance",
+            "You are not assigned to approve freight and finance changes",
+        )
+        self._crm.decide_scm_charge_change(ctx, ovf_id, accept=True)
+        return self.get_ovf_preview(ctx, ovf_id)
+
+    def reject_ovf_charges(self, ctx: TenantContext, ovf_id: UUID) -> dict:
+        self._ensure_can_decide_step(
+            ctx,
+            "freight_finance",
+            "You are not assigned to approve freight and finance changes",
+        )
+        self._crm.decide_scm_charge_change(ctx, ovf_id, accept=False)
         return self.get_ovf_preview(ctx, ovf_id)
 
     def update_item_plan_vendor(
@@ -967,7 +1076,11 @@ class ScmHandoffService:
         po_groups = self._ovf_po_groups(ctx, vendor_lines, existing_orders)
         open_distributors = self._open_distributor_names(po_groups)
         ordered_po_qty = round(
-            sum(self._order_total_qty(order) for order in existing_orders),
+            sum(
+                self._order_total_qty(order)
+                for order in existing_orders
+                if not self._vendor_rejected_order(order)
+            ),
             4,
         )
         handoff["purchase_order_id"] = existing.id if existing else None
@@ -1415,12 +1528,14 @@ class ScmHandoffService:
                 raise ConflictException(
                     f"Vendor line '{product_name}' needs qty and unit cost > 0"
                 )
+            description = str(line.get("description") or "").strip() or None
             payloads.append(
                 {
                     "line_number": idx,
                     "product_id": product.id,
                     "product_code": scm_line_product_code(product),
                     "product_name": product_name[:255],
+                    "description": description[:4000] if description else None,
                     "quantity": qty,
                     "uom_id": getattr(product, "uom_id", None) or uom_id,
                     "unit_cost": unit_cost,
@@ -3131,8 +3246,8 @@ class ScmHandoffService:
             existing = self.list_po_attachments(ctx, order_id)
             if len(existing) >= PO_MAX_ATTACHMENTS:
                 raise ValidationException(
-                    f"Purchase Order allows at most {PO_MAX_ATTACHMENTS} attachments "
-                    "(Customer PO and Vendor Quote). Replace an existing slot instead of adding more."
+                    f"Purchase Order allows at most {PO_MAX_ATTACHMENTS} attachments. "
+                    "Remove a file before adding another."
                 )
         return AttachmentService(self._db).create(
             ctx,
