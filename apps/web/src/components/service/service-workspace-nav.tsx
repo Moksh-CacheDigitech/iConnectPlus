@@ -10,14 +10,11 @@ import {
   Inbox,
   LayoutDashboard,
   Ticket,
-  UserCog,
   Wrench,
 } from "lucide-react";
 
 import { ModuleSidebar } from "@/components/layout/module-sidebar";
-import { useAuthUser } from "@/hooks/use-auth-user";
 import { useUserPermissions } from "@/hooks/use-user-permissions";
-import { canManageModuleUsers } from "@/lib/module-access";
 import {
   hasServiceFieldEngineerRole,
   isServiceFieldEngineerOnly,
@@ -31,9 +28,9 @@ export type ServiceNavItem = {
   fieldEngineerOnly?: boolean;
 };
 
-/** SOP service request ticket workflow - CRM-style workspace panes. */
+/** Service ITSM workspace panes (aligned with Service-management). */
 export const SERVICE_NAV: readonly ServiceNavItem[] = [
-  { title: "Dashboard", href: "/service", icon: LayoutDashboard },
+  { title: "Overview", href: "/service", icon: LayoutDashboard },
   { title: "Request Tickets", href: "/service/service-request-tickets", icon: Ticket },
   { title: "Mailbox", href: "/service/mailbox", icon: Inbox, mailboxAccess: true },
   {
@@ -79,34 +76,20 @@ function isServiceNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-/** Left sidebar for the Service workspace. */
+/** Left sidebar for the Service workspace (main shell). */
 export function ServiceSidebar() {
   const pathname = usePathname();
-  const { user, adminModuleKeys } = useAuthUser();
   const { profile, loading } = useUserPermissions();
 
-  const navItems = useMemo(() => {
-    const items = filterServiceNav(SERVICE_NAV, {
-      permissions: profile?.permissions,
-      roleCodes: profile?.roleCodes,
-      roleNames: profile?.roleNames,
-    });
-    const feOnly = isServiceFieldEngineerOnly(
-      profile?.roleCodes,
-      profile?.permissions,
-      profile?.roleNames,
-    );
-    if (!feOnly && canManageModuleUsers("service", adminModuleKeys, user?.userType)) {
-      items.push({ title: "Users", href: "/service/users", icon: UserCog });
-    }
-    return items;
-  }, [
-    adminModuleKeys,
-    profile?.permissions,
-    profile?.roleCodes,
-    profile?.roleNames,
-    user?.userType,
-  ]);
+  const navItems = useMemo(
+    () =>
+      filterServiceNav(SERVICE_NAV, {
+        permissions: profile?.permissions,
+        roleCodes: profile?.roleCodes,
+        roleNames: profile?.roleNames,
+      }),
+    [profile?.permissions, profile?.roleCodes, profile?.roleNames],
+  );
 
   return (
     <ModuleSidebar
