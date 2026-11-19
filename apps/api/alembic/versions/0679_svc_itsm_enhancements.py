@@ -12,8 +12,8 @@ from alembic import op
 from sqlalchemy import inspect
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0678_svc_itsm_enhancements"
-down_revision: str | Sequence[str] | None = "0677_prj_site_cloud_po_lines"
+revision: str = "0679_svc_itsm_enhancements"
+down_revision: str | Sequence[str] | None = "0678_sales_targets_and_permissions"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

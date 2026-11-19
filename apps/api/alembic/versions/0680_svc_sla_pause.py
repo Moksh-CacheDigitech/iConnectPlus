@@ -12,8 +12,8 @@ from alembic import op
 from sqlalchemy import inspect
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0679_svc_sla_pause"
-down_revision: str | Sequence[str] | None = "0678_svc_itsm_enhancements"
+revision: str = "0680_svc_sla_pause"
+down_revision: str | Sequence[str] | None = "0679_svc_itsm_enhancements"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

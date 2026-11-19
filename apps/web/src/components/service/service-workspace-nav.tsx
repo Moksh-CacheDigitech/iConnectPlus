@@ -1,19 +1,50 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useMemo } from "react";
+import type { LucideIcon } from "lucide-react";
+import {
+  CheckCircle2,
+  Clock3,
+  Headphones,
+  Inbox,
+  LayoutDashboard,
+  Ticket,
+  UserCog,
+  Wrench,
+} from "lucide-react";
 
+import { ModuleSidebar } from "@/components/layout/module-sidebar";
+import { useAuthUser } from "@/hooks/use-auth-user";
 import { useUserPermissions } from "@/hooks/use-user-permissions";
-import { cn } from "@/lib/utils";
+import { canManageModuleUsers } from "@/lib/module-access";
+import {
+  hasServiceFieldEngineerRole,
+  isServiceFieldEngineerOnly,
+} from "@/lib/service-field-engineer-access";
 
-/** SOP service request ticket workflow only */
-const SERVICE_NAV = [
-  { title: "Overview", href: "/service" },
-  { title: "Request Tickets", href: "/service/service-request-tickets" },
-  { title: "Mailbox", href: "/service/mailbox", mailboxAccess: true },
-  { title: "SLAs", href: "/service/service-slas" },
-  { title: "Resolved", href: "/service/resolved-tickets" },
-] as const;
+export type ServiceNavItem = {
+  title: string;
+  href: string;
+  icon: LucideIcon;
+  mailboxAccess?: boolean;
+  fieldEngineerOnly?: boolean;
+};
+
+/** SOP service request ticket workflow - CRM-style workspace panes. */
+export const SERVICE_NAV: readonly ServiceNavItem[] = [
+  { title: "Dashboard", href: "/service", icon: LayoutDashboard },
+  { title: "Request Tickets", href: "/service/service-request-tickets", icon: Ticket },
+  { title: "Mailbox", href: "/service/mailbox", icon: Inbox, mailboxAccess: true },
+  {
+    title: "Field Engineer",
+    href: "/service/field-engineer",
+    icon: Wrench,
+    fieldEngineerOnly: true,
+  },
+  { title: "SLAs", href: "/service/service-slas", icon: Clock3 },
+  { title: "Resolved", href: "/service/resolved-tickets", icon: CheckCircle2 },
+];
 
 function canViewServiceMailbox(permissions: string[] | undefined | null): boolean {
   const perms = permissions ?? [];
@@ -24,52 +55,69 @@ function canViewServiceMailbox(permissions: string[] | undefined | null): boolea
   );
 }
 
-export function ServiceWorkspaceNav() {
-  const pathname = usePathname();
-  const { profile, loading } = useUserPermissions();
+function filterServiceNav(
+  items: readonly ServiceNavItem[],
+  opts: {
+    permissions?: string[] | null;
+    roleCodes?: string[] | null;
+    roleNames?: string[] | null;
+  },
+): ServiceNavItem[] {
+  const isFe = hasServiceFieldEngineerRole(opts.roleCodes, opts.roleNames);
+  const feOnly = isServiceFieldEngineerOnly(opts.roleCodes, opts.permissions, opts.roleNames);
 
-  const visibleNav = SERVICE_NAV.filter((item) => {
-    if ("mailboxAccess" in item && item.mailboxAccess) {
-      return canViewServiceMailbox(profile?.permissions);
-    }
+  return items.filter((item) => {
+    if (item.fieldEngineerOnly) return isFe;
+    if (item.mailboxAccess) return canViewServiceMailbox(opts.permissions) && !feOnly;
+    if (feOnly) return false;
     return true;
   });
+}
 
-  if (loading) {
-    return (
-      <nav aria-label="Service workspace" className="erp-scroll -mx-1 overflow-x-auto px-1">
-        <ul className="flex min-w-max items-center gap-0.5 border-b border-border/70 pb-px">
-          <li className="inline-flex h-8 items-center px-2.5 text-xs text-muted-foreground">Loading…</li>
-        </ul>
-      </nav>
+function isServiceNavActive(pathname: string, href: string): boolean {
+  if (href === "/service") return pathname === "/service";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/** Left sidebar for the Service workspace. */
+export function ServiceSidebar() {
+  const pathname = usePathname();
+  const { user, adminModuleKeys } = useAuthUser();
+  const { profile, loading } = useUserPermissions();
+
+  const navItems = useMemo(() => {
+    const items = filterServiceNav(SERVICE_NAV, {
+      permissions: profile?.permissions,
+      roleCodes: profile?.roleCodes,
+      roleNames: profile?.roleNames,
+    });
+    const feOnly = isServiceFieldEngineerOnly(
+      profile?.roleCodes,
+      profile?.permissions,
+      profile?.roleNames,
     );
-  }
+    if (!feOnly && canManageModuleUsers("service", adminModuleKeys, user?.userType)) {
+      items.push({ title: "Users", href: "/service/users", icon: UserCog });
+    }
+    return items;
+  }, [
+    adminModuleKeys,
+    profile?.permissions,
+    profile?.roleCodes,
+    profile?.roleNames,
+    user?.userType,
+  ]);
 
   return (
-    <nav aria-label="Service workspace" className="erp-scroll -mx-1 overflow-x-auto px-1">
-      <ul className="flex min-w-max items-center gap-0.5 border-b border-border/70 pb-px">
-        {visibleNav.map((item) => {
-          const active =
-            item.href === "/service"
-              ? pathname === "/service"
-              : pathname === item.href || pathname.startsWith(`${item.href}/`);
-          return (
-            <li key={item.href}>
-              <Link
-                href={item.href}
-                className={cn(
-                  "inline-flex h-8 cursor-pointer items-center rounded-t-md px-2.5 text-xs font-medium transition-colors duration-200",
-                  active
-                    ? "border-b-2 border-primary text-foreground"
-                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-                )}
-              >
-                {item.title}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-    </nav>
+    <ModuleSidebar
+      moduleKey="service"
+      title="Service"
+      subtitle={loading ? "…" : `${navItems.length} workspace panes`}
+      icon={Headphones}
+      aria-label="Service workspace"
+      groups={[{ label: "Workspace", items: navItems }]}
+      isActive={(item) => isServiceNavActive(pathname, item.href)}
+      loading={loading}
+    />
   );
 }
