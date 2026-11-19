@@ -514,12 +514,17 @@ type OvfPoLinkCandidate = {
   company_po_number?: string | null;
   document_number?: string | null;
   status?: string | null;
+  fulfillment_stage?: string | null;
   total_qty?: number | null;
 };
 
 function isCancelledPoStatus(status?: string | null): boolean {
   const value = (status || "").trim().toLowerCase();
   return value === "cancelled" || value === "canceled";
+}
+
+function isRejectedVendorPo(row: OvfPoLinkCandidate | null | undefined): boolean {
+  return (row?.fulfillment_stage || "").trim().toLowerCase() === "vendor_rejected";
 }
 
 function newItemPlanRowId(): string {
@@ -535,13 +540,35 @@ function newItemPlanRowId(): string {
  * Create PO is replaced by a clickable PO number. Partial cover splits a
  * remainder row that still offers Create PO.
  */
+/** True when the item-plan Action column would still show Create PO for this row. */
+export function itemPlanRowOffersCreatePo(
+  row: OvfItemPlanSplitRow,
+  onHold: boolean,
+): boolean {
+  const vendorName = (row.distributor_name || "").trim();
+  const poEligible =
+    row.qty > 0 &&
+    !onHold &&
+    (row.source === "purchase_order" ||
+      (row.source === "inventory" &&
+        (row.action === "stock_short" || (Number(row.po_qty) || 0) > 0)));
+  const needsPo = poEligible && !isInStockDistributor(vendorName) && Boolean(vendorName);
+  const hasCreatedPo = Boolean((row.linked_po_id || "").trim());
+  return needsPo && !hasCreatedPo && (Number(row.create_qty) || 0) > 0;
+}
+
 export function assignUniquePosToItemPlanRows(
   rows: OvfItemPlanSplitRow[],
   purchaseOrders: OvfPoLinkCandidate[] | null | undefined,
   poGroups?: ScmPoGroup[] | null,
 ): OvfItemPlanSplitRow[] {
+  const rejectedIds = new Set(
+    (purchaseOrders || [])
+      .filter((row) => isRejectedVendorPo(row) || isCancelledPoStatus(row.status))
+      .map((row) => String(row.id)),
+  );
   const unused = [...(purchaseOrders || [])].filter(
-    (row) => Boolean(row?.id) && !isCancelledPoStatus(row.status),
+    (row) => Boolean(row?.id) && !rejectedIds.has(String(row.id)),
   );
   const claimed = new Set<string>();
   const poByDistributor = new Map<string, { id: string; label: string }>();
@@ -565,6 +592,7 @@ export function assignUniquePosToItemPlanRows(
   for (const row of rows) {
     if (!row.linked_po_id) continue;
     const id = String(row.linked_po_id);
+    if (rejectedIds.has(id)) continue;
     claimed.add(id);
     const still = unused.findIndex((po) => String(po.id) === id);
     if (still >= 0) unused.splice(still, 1);
@@ -624,6 +652,15 @@ export function assignUniquePosToItemPlanRows(
 
   const out: OvfItemPlanSplitRow[] = [];
   for (const row of rows) {
+    if (row.linked_po_id && rejectedIds.has(String(row.linked_po_id))) {
+      out.push({
+        ...row,
+        po_started: false,
+        linked_po_id: null,
+        linked_po_label: null,
+      });
+      continue;
+    }
     if (row.linked_po_id) {
       out.push({ ...row, po_started: true });
       continue;

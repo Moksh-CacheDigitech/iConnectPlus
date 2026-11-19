@@ -12,13 +12,21 @@ import {
 } from "@/lib/procurement-approvals";
 import { pushPoApprovalDecisionNotification } from "@/lib/procurement-approval-notifications";
 import {
+  acceptScmOvfCharges,
+  acceptScmOvfHold,
   acceptScmPoApproval,
   collectPoApprovalDocuments,
   finalizeScmOrder,
+  listScmChargeApprovals,
   listScmFinalizeApprovals,
+  listScmHoldApprovals,
   rejectScmFinalizeApproval,
+  rejectScmOvfCharges,
+  rejectScmOvfHold,
   requestScmFinalizeApproval,
+  type ScmChargeApproval,
   type ScmFinalizeApproval,
+  type ScmHoldApproval,
 } from "@/services/procurement-service";
 import {
   ensureScmOvfPdfAttached,
@@ -127,6 +135,54 @@ async function withOvfCommercialDocuments(
   );
 }
 
+function mapHoldApproval(row: ScmHoldApproval): PoApprovalRequest {
+  return {
+    id: `hold:${row.ovf_id}`,
+    kind: "hold_ovf",
+    orderId: row.ovf_id,
+    documentNumber: row.ovf_no,
+    companyPoNumber: null,
+    customerName: row.customer_name,
+    vendorId: "-",
+    vendorName: row.owner_name,
+    ovfId: row.ovf_id,
+    ovfNo: row.ovf_no,
+    reason: null,
+    documents: [],
+    requestedByRole: "user",
+    requestedByName: row.requested_by_name,
+    status: row.status,
+    createdAt: row.requested_at || new Date().toISOString(),
+    decidedAt: null,
+    holdRemark: row.remark,
+  };
+}
+
+function mapChargeApproval(row: ScmChargeApproval): PoApprovalRequest {
+  const freight = Number(row.freight) || 0;
+  const finance = Number(row.finance_cost_pct) || 0;
+  return {
+    id: `charges:${row.ovf_id}`,
+    kind: "freight_finance",
+    orderId: row.ovf_id,
+    documentNumber: row.ovf_no,
+    companyPoNumber: null,
+    customerName: row.customer_name,
+    vendorId: "-",
+    vendorName: row.owner_name,
+    ovfId: row.ovf_id,
+    ovfNo: row.ovf_no,
+    reason: null,
+    documents: [],
+    requestedByRole: "user",
+    requestedByName: row.requested_by_name,
+    status: row.status,
+    createdAt: row.requested_at || new Date().toISOString(),
+    decidedAt: null,
+    chargeSummary: `Freight ₹${freight.toLocaleString("en-IN")} · Finance ${finance}%`,
+  };
+}
+
 function mergeApprovalRows(
   serverFinalize: PoApprovalRequest[],
   localCreatePo: PoApprovalRequest[],
@@ -147,9 +203,20 @@ export function useProcurementApprovals() {
   const refresh = useCallback(async () => {
     const localCreatePo = readPoApprovals().filter((row) => row.kind === "create_po_in_stock");
     try {
-      const server = await listScmFinalizeApprovals();
+      const [server, holds, charges] = await Promise.all([
+        listScmFinalizeApprovals(),
+        listScmHoldApprovals().catch(() => [] as ScmHoldApproval[]),
+        listScmChargeApprovals().catch(() => [] as ScmChargeApproval[]),
+      ]);
       setLoadError(null);
-      const merged = mergeApprovalRows(server.map(mapServerFinalize), localCreatePo);
+      const merged = mergeApprovalRows(
+        [
+          ...server.map(mapServerFinalize),
+          ...holds.map(mapHoldApproval),
+          ...charges.map(mapChargeApproval),
+        ],
+        localCreatePo,
+      );
       // Attach OVF commercial pack (BOQ / SOW / quotes / etc.) for approval review.
       setRows(await withOvfCommercialDocuments(merged));
     } catch (err) {
@@ -203,7 +270,15 @@ export function useProcurementApprovals() {
 
   const decide = useCallback(
     async (row: PoApprovalRequest, status: Exclude<PoApprovalStatus, "pending">) => {
-      if (row.kind === "finalize") {
+      if (row.kind === "hold_ovf") {
+        const ovfId = row.ovfId || row.orderId;
+        if (status === "accepted") await acceptScmOvfHold(ovfId);
+        else await rejectScmOvfHold(ovfId);
+      } else if (row.kind === "freight_finance") {
+        const ovfId = row.ovfId || row.orderId;
+        if (status === "accepted") await acceptScmOvfCharges(ovfId);
+        else await rejectScmOvfCharges(ovfId);
+      } else if (row.kind === "finalize") {
         if (status === "accepted") {
           const stage = row.scmApprovalStage || "accept_po";
           if (stage === "accept_po") {

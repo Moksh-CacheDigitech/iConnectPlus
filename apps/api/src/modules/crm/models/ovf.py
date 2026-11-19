@@ -45,6 +45,16 @@ class CrmOvf(Base, *CrmTransactionMixin):
             "freight_medium IS NULL OR freight_medium IN ('air','road','sea','courier')",
             name="ck_crm_ovf_freight_medium",
         ),
+        CheckConstraint(
+            "scm_hold_request_status IS NULL OR scm_hold_request_status IN "
+            "('pending','accepted','rejected')",
+            name="ck_crm_ovf_hold_request_status",
+        ),
+        CheckConstraint(
+            "scm_charge_request_status IS NULL OR scm_charge_request_status IN "
+            "('pending','accepted','rejected')",
+            name="ck_crm_ovf_charge_request_status",
+        ),
         {"schema": "crm"},
     )
 
@@ -102,6 +112,23 @@ class CrmOvf(Base, *CrmTransactionMixin):
     )
     scm_hold_history: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     scm_on_hold_remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Hold is applied only after a Hold approve / reject owner accepts this request.
+    scm_hold_request_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    scm_hold_request_remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scm_hold_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    scm_hold_requested_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    # Freight / finance edits wait here until a Freight & finance approver accepts them.
+    scm_charge_request_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    scm_charge_request_freight: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    scm_charge_request_finance_pct: Mapped[Decimal | None] = mapped_column(
+        Numeric(6, 3), nullable=True
+    )
+    scm_charge_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    scm_charge_requested_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     deal_won: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     deal_won_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
 

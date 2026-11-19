@@ -93,7 +93,6 @@ import {
 } from "@/utils/delivery-challan-storage";
 import { resolveChallanBillStatus } from "@/utils/delivery-challan-bill";
 import { patchPendingGrnChallan, upsertPendingGrnChallan } from "@/utils/grn-challan-pending";
-import { deliveryStatusUpdateHref } from "@/utils/delivery-status-routes";
 import { ensureDeliveryStatusForChallan, getDeliveryStatus } from "@/utils/delivery-status-storage";
 import { syncOvfTimelineForChallan, syncOvfTimelineForDeliveryStatus } from "@/utils/ovf-timeline-sync";
 import {
@@ -176,6 +175,7 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
   const grnKeyParam = searchParams.get("grnKey");
   const batchKeyParam = searchParams.get("batchKey");
   const kindParam = searchParams.get("kind") as GrnChallanKind | null;
+  const fromChallanParam = searchParams.get("fromChallan");
   const ovfIdParam = searchParams.get("ovfId");
   const ovfShipSource = searchParams.get("source");
   const isOvfShip =
@@ -240,6 +240,7 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
   const backLabel = challanBackLabel(backHref, grnKind || kindParam);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
+  const [sourceChallanId, setSourceChallanId] = useState<string | null>(null);
   const [invoiceDocument, setInvoiceDocument] = useState<{
     id: string;
     fileName: string;
@@ -565,6 +566,7 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
     setGrnKind(saved.grnKind ?? "");
     setInvoiceNumber(saved.invoiceNumber ?? "");
     setInvoiceDate(saved.invoiceDate ?? "");
+    setSourceChallanId(saved.sourceChallanId ?? null);
   }
 
   useEffect(() => {
@@ -640,6 +642,41 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
             }
           } catch {
             /* optional */
+          } finally {
+            setPrefillBusy(false);
+          }
+        })();
+      } else {
+        setPrefillBusy(false);
+      }
+      return;
+    }
+
+    if (!challanId && fromChallanParam && kindParam === "billing") {
+      const source = getDeliveryChallan(fromChallanParam);
+      if (!source || source.grnKind === "billing") {
+        setLoadError("Delivery challan not found.");
+        setPrefillBusy(false);
+        return;
+      }
+      hydrateFromSaved(source);
+      setGrnKind("billing");
+      setInvoiceNumber("");
+      setInvoiceDate("");
+      setChallanNumber("");
+      setSourceChallanId(source.id);
+      setHasSaved(false);
+      linesLockedFromSaveRef.current = true;
+      skipAutoApplyLinesRef.current = true;
+      if (source.orderId) {
+        void (async () => {
+          try {
+            const { order, batches, ovf } = await loadOrderContext(source.orderId!);
+            setLoadedOrder(order);
+            setOvfContext(ovf);
+            setGrnBatches(batches);
+          } catch {
+            /* header already copied from the delivery challan */
           } finally {
             setPrefillBusy(false);
           }
@@ -1013,6 +1050,7 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
     grnKeyParam,
     batchKeyParam,
     kindParam,
+    fromChallanParam,
     orderIdParam,
     isOvfShip,
     isPoGrnStock,
@@ -1103,6 +1141,7 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
       grnKind: resolvedKind,
       invoiceNumber: invoiceNumber.trim() || undefined,
       invoiceDate: invoiceDate.trim() || undefined,
+      sourceChallanId: sourceChallanId || undefined,
       lines,
       deliveryMode,
       transportDetails: transportDetails.trim(),
@@ -1228,7 +1267,11 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
     }
     setHasSaved(true);
     if (!embedded) {
-      router.push(deliveryStatusUpdateHref(recordId));
+      router.push(
+        resolvedKind === "billing"
+          ? "/procurement/delivery-challan?tab=billing"
+          : "/procurement/delivery-challan",
+      );
       return;
     }
     setBanner("Delivery challan saved. You can download the PDF now.");
@@ -1770,7 +1813,7 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
                     </td>
                     <td className="px-2 py-2">
                       <Input
-                        value={row.itemName}
+                        value={(row.itemName || "").replace(/^\[quote:[^\]]+\]\s*/i, "")}
                         onChange={
                           lockSourceFields
                             ? undefined
@@ -1782,7 +1825,9 @@ export function DeliveryChallanFormPage({ challanId, embedded }: DeliveryChallan
                           lockSourceFields ? READ_ONLY_INPUT : "h-8",
                         )}
                         placeholder="Description"
-                        title={row.itemName || undefined}
+                        title={
+                          (row.itemName || "").replace(/^\[quote:[^\]]+\]\s*/i, "") || undefined
+                        }
                       />
                     </td>
                     <td className="px-2 py-2">

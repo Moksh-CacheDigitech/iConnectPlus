@@ -37,6 +37,7 @@ import {
   formatUsd,
   getPurchaseOrder,
   getScmOrderFulfillment,
+  getScmOvfPreview,
   listOrderReceiptBatches,
   listVendorOptions,
   requestScmFinalizeApproval,
@@ -67,7 +68,9 @@ import {
 } from "@/utils/delivery-status-storage";
 import { receiptBatchKey } from "@/utils/delivery-challan-grn";
 import { addPendingGrnChallan } from "@/utils/grn-challan-pending";
+import { parseVendorQuoteNo } from "@/components/crm/sales/ovf-order-lines-section";
 import { splitPoProductFields } from "@/utils/po-fulfillment-metrics";
+import { ovfProductKey, ovfVendorDescriptionByProduct } from "@/utils/ovf-stock";
 import {
   quantitiesFromLineDisposition,
   resizeUnitKinds,
@@ -249,6 +252,24 @@ function normalizeCostInput(raw: string, maxAllowed: number): string {
   return next;
 }
 
+function poLineDisplayFields(
+  line: {
+    product_name?: string | null;
+    product_code?: string | null;
+    description?: string | null;
+  },
+  ovfDescriptions: Map<string, string>,
+) {
+  const stored = parseVendorQuoteNo(line.description).description.trim();
+  const fromOvf = parseVendorQuoteNo(
+    ovfDescriptions.get(ovfProductKey(line.product_name)) || "",
+  ).description.trim();
+  return splitPoProductFields({
+    ...line,
+    description: stored || fromOvf || null,
+  });
+}
+
 function emptyReceiptDrafts(lines: Array<{ id: string; unit_cost?: number }>) {
   return {
     qty: Object.fromEntries(lines.map((ln) => [ln.id, ""])),
@@ -296,6 +317,9 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
   const searchParams = useSearchParams();
   const { isAdmin } = useProcurementRole();
   const [order, setOrder] = useState<ProcOrder | null>(null);
+  const [ovfLineDescriptions, setOvfLineDescriptions] = useState<Map<string, string>>(
+    () => new Map(),
+  );
   const [vendorName, setVendorName] = useState<string>("");
   const [vendorAddress, setVendorAddress] = useState<string>("");
   const [vendorGst, setVendorGst] = useState<string>("");
@@ -327,6 +351,32 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
   useEffect(() => {
     setViewMode(searchParams.get("tab") === "grn" ? "grn" : "po");
   }, [searchParams]);
+
+  useEffect(() => {
+    const ovfId = (order?.source_document_id || "").trim();
+    if (!order || order.source_document_type !== "ovf" || !ovfId) {
+      setOvfLineDescriptions(new Map());
+      return;
+    }
+    let cancelled = false;
+    void getScmOvfPreview(ovfId)
+      .then((preview) => {
+        if (cancelled) return;
+        const raw = ovfVendorDescriptionByProduct(preview.vendor_lines || []);
+        const cleaned = new Map<string, string>();
+        for (const [key, value] of raw) {
+          const text = parseVendorQuoteNo(value).description.trim();
+          if (text) cleaned.set(key, text);
+        }
+        setOvfLineDescriptions(cleaned);
+      })
+      .catch(() => {
+        if (!cancelled) setOvfLineDescriptions(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [order]);
 
   const activeDispatchId = (searchParams.get("dispatch") || "").trim() || null;
   const [activeDispatch, setActiveDispatch] = useState<ScmVendorDispatch | null>(null);
@@ -463,7 +513,7 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
       const draft = (order.status || "").toLowerCase() === "draft";
       await downloadOrderPdf(
         order,
-        { name: vendorName, address: vendorAddress },
+        { name: vendorName, address: vendorAddress, gstin: vendorGst },
         undefined,
         { watermark: draft },
       );
@@ -1351,7 +1401,7 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
                     </thead>
                     <tbody>
                       {orderLines.map((ln) => {
-                        const fields = splitPoProductFields(ln);
+                        const fields = poLineDisplayFields(ln, ovfLineDescriptions);
                         const taxPct = Number(ln.tax_rate) || 0;
                         return (
                           <tr key={ln.id} className="border-b border-border/60">
@@ -1533,7 +1583,7 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
                           savedReceived + (Number.isFinite(additional) ? additional : 0),
                         );
                         const status = receiptStatusFromQty(orderedQty, projectedReceived);
-                        const fields = splitPoProductFields(ln);
+                        const fields = poLineDisplayFields(ln, ovfLineDescriptions);
 
                         return (
                           <tr key={ln.id} className="border-b border-border/70 align-top">

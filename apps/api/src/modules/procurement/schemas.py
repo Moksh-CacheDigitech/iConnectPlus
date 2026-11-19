@@ -277,6 +277,7 @@ class OrderLineResponse(BaseModel):
     product_id: UUID
     product_code: str | None = None
     product_name: str | None = None
+    description: str | None = None
     quantity: float
     quantity_received: float
     last_receipt_qty: float = 0
@@ -414,6 +415,7 @@ class ScmLinkedPurchaseOrder(BaseModel):
     document_number: str | None = None
     company_po_number: str | None = None
     status: str | None = None
+    fulfillment_stage: str | None = None
     # Sum of active PO line quantities (partial Create PO coverage).
     total_qty: float = 0
 
@@ -514,6 +516,31 @@ class ScmOvfHoldRequest(BaseModel):
     remark: str = Field(..., min_length=1, max_length=2000)
 
 
+class ScmHoldApprovalResponse(BaseModel):
+    id: UUID
+    ovf_id: UUID
+    ovf_no: str
+    customer_name: str | None = None
+    owner_name: str | None = None
+    status: str
+    remark: str | None = None
+    requested_at: datetime | None = None
+    requested_by_name: str | None = None
+
+
+class ScmChargeApprovalResponse(BaseModel):
+    id: UUID
+    ovf_id: UUID
+    ovf_no: str
+    customer_name: str | None = None
+    owner_name: str | None = None
+    status: str
+    freight: float = 0
+    finance_cost_pct: float = 0
+    requested_at: datetime | None = None
+    requested_by_name: str | None = None
+
+
 class ScmOvfStockAllocationRow(BaseModel):
     id: UUID
     stock_unit_id: UUID
@@ -575,6 +602,7 @@ class ScmOvfPreviewResponse(BaseModel):
     po_date: date | None = None
     delivery_period: str | None = None
     customer_name: str | None = None
+    customer_account_number: str | None = None
     quote_name: str | None = None
     account_name: str | None = None
     owner_name: str | None = None
@@ -625,6 +653,13 @@ class ScmOvfPreviewResponse(BaseModel):
     scm_last_hold_released_at: datetime | None = None
     scm_hold_history: list[ScmOvfHoldHistoryEntry] = Field(default_factory=list)
     scm_on_hold_remark: str | None = None
+    scm_hold_request_status: str | None = None
+    scm_hold_request_remark: str | None = None
+    scm_hold_requested_at: datetime | None = None
+    scm_charge_request_status: str | None = None
+    scm_charge_request_freight: float | None = None
+    scm_charge_request_finance_pct: float | None = None
+    scm_charge_requested_at: datetime | None = None
     purchase_order_status: str | None = None
     stock_fulfillment_status: str = "none"
     remaining_demand_qty: float = 0
@@ -641,6 +676,7 @@ class ScmCreatePoFromOvfLineRequest(BaseModel):
     unit_price: float = Field(gt=0)
     rate_currency: str = Field(default="INR", max_length=3)
     tax_rate: float = Field(default=0, ge=0)
+    description: str | None = Field(default=None, max_length=4000)
 
 
 class ScmCreatePoFromOvfRequest(BaseModel):

@@ -73,6 +73,44 @@ function displayDate(value: string | null | undefined): string {
   return raw || "—";
 }
 
+type VendorDecisionChoice = "accepted" | "rejected";
+
+function vendorDecisionKey(orderId: string): string {
+  return `erp.po-vendor-decision:${orderId}`;
+}
+
+/** Keeps the chosen Accept / Reject branch across page refreshes. */
+function readVendorDecisionChoice(orderId: string): VendorDecisionChoice | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(vendorDecisionKey(orderId));
+    return raw === "accepted" || raw === "rejected" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeVendorDecisionChoice(orderId: string, choice: VendorDecisionChoice | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (choice) window.localStorage.setItem(vendorDecisionKey(orderId), choice);
+    else window.localStorage.removeItem(vendorDecisionKey(orderId));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** Calendar add that stays on the local date. Avoids UTC shifting the day. */
+function addCalendarDays(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  if (!year || !month || !day) return isoDate;
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + days);
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${mm}-${dd}`;
+}
+
 type DispatchDocRef = { file_name?: string; content_base64?: string };
 
 function asDispatchDoc(raw: unknown): DispatchDocRef | null {
@@ -244,7 +282,7 @@ export function PoFulfillmentPanel({ order, isAdmin, onSaved }: Props) {
       setVendorEdd(dateOnly(row.expected_delivery_date));
       setVendorLabel((row.vendor_name || "").trim());
       if (row.fulfillment_stage === "awaiting_vendor_response") {
-        setVendorDecision(null);
+        setVendorDecision(readVendorDecisionChoice(order.id));
       }
       const meta = row.customer_delivery_meta || {};
       setDeliveryAddress(String(meta.delivery_address || ""));
@@ -827,43 +865,49 @@ export function PoFulfillmentPanel({ order, isAdmin, onSaved }: Props) {
               PO sent {displayDate(state?.po_sent_to_vendor_at)}. Choose accept or reject.
             </p>
             <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={vendorDecision === "accepted" ? "default" : "outline"}
-                disabled={busy}
-                className="h-9 cursor-pointer transition-colors duration-200"
-                onClick={() => {
-                  setVendorDecision("accepted");
-                  setError(null);
-                  setNotice(null);
-                }}
-              >
-                <Check className="mr-1.5 size-3.5" aria-hidden />
-                Accept
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={vendorDecision === "rejected" ? "default" : "outline"}
-                disabled={busy}
-                className="h-9 cursor-pointer transition-colors duration-200"
-                onClick={() => {
-                  setVendorDecision("rejected");
-                  setError(null);
-                  setNotice(null);
-                }}
-              >
-                <XCircle className="mr-1.5 size-3.5" aria-hidden />
-                Reject
-              </Button>
+              {vendorDecision !== "rejected" ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={vendorDecision === "accepted" ? "default" : "outline"}
+                  disabled={busy}
+                  className="h-9 cursor-pointer transition-colors duration-200"
+                  onClick={() => {
+                    setVendorDecision("accepted");
+                    writeVendorDecisionChoice(order.id, "accepted");
+                    setError(null);
+                    setNotice(null);
+                  }}
+                >
+                  <Check className="mr-1.5 size-3.5" aria-hidden />
+                  Accept
+                </Button>
+              ) : null}
+              {vendorDecision !== "accepted" ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={vendorDecision === "rejected" ? "default" : "outline"}
+                  disabled={busy}
+                  className="h-9 cursor-pointer transition-colors duration-200"
+                  onClick={() => {
+                    setVendorDecision("rejected");
+                    writeVendorDecisionChoice(order.id, "rejected");
+                    setError(null);
+                    setNotice(null);
+                  }}
+                >
+                  <XCircle className="mr-1.5 size-3.5" aria-hidden />
+                  Reject
+                </Button>
+              ) : null}
             </div>
 
             {vendorDecision === "accepted" ? (
               <div className="space-y-3 rounded-lg border border-border/60 bg-muted/10 p-3">
                 <p className="text-[11px] text-muted-foreground">
-                  Enter the vendor EDD, then send the customer order-processed mail. Customer EDD
-                  is vendor EDD + 4 days.
+                  Enter the vendor EDD. Customer EDD is that date plus 4 days, and that Customer
+                  EDD is the date in the customer mail. Sending the mail does not change it.
                 </p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5">
@@ -883,13 +927,7 @@ export function PoFulfillmentPanel({ order, isAdmin, onSaved }: Props) {
                       Customer EDD
                     </dt>
                     <dd className="mt-1 text-sm font-semibold tabular-nums text-foreground">
-                      {vendorEdd
-                        ? (() => {
-                          const d = new Date(`${vendorEdd}T00:00:00`);
-                          d.setDate(d.getDate() + 4);
-                          return d.toISOString().slice(0, 10);
-                        })()
-                        : "—"}
+                      {vendorEdd ? addCalendarDays(vendorEdd, 4) : "—"}
                     </dd>
                   </div>
                 </div>

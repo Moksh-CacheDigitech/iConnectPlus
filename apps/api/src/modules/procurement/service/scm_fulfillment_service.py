@@ -420,9 +420,9 @@ class ScmFulfillmentService:
                 "Send customer order-processed mail only after the vendor accepts"
             )
         if getattr(order, "customer_promised_delivery_date", None) is None:
-            if order.expected_delivery_date is None:
-                raise ValidationException("Vendor EDD is required before notifying the customer")
-            order.customer_promised_delivery_date = order.expected_delivery_date + timedelta(days=4)
+            raise ValidationException(
+                "Customer EDD is missing. Accept the vendor response with a vendor EDD first."
+            )
         if not settings.smtp_configured:
             raise ValidationException(
                 "SMTP is not configured. Set SMTP_HOST and SMTP_FROM_ADDRESS before sending."

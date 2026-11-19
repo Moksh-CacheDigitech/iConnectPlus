@@ -58,10 +58,9 @@ import {
   buildOvfBookedInventoryShipLines,
   buildOvfFulfillmentRows,
   ovfChallanHref,
-  ovfCreatePoHref,
   ovfDistributorKey,
-  ovfGrnStockChallanHref,
   ovfItemPlanHref,
+  ovfGrnStockChallanHref,
   poAllowsGrnRecording,
   resolvePoForDistributor,
   setOvfInventoryShipSelection,
@@ -737,7 +736,9 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
       });
       setPreview(row);
       syncChargesFromPreview(row);
-      setChargesBanner("Freight & finance saved. Sales will see these values on the OVF.");
+      setChargesBanner(
+        "Sent to the Freight & finance approvers. Current charges stay until they accept.",
+      );
     } catch (err) {
       setError(
         err instanceof ApiClientError ? err.message : "Failed to update freight and finance",
@@ -812,7 +813,8 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
   const chargesLockedByPo = Boolean(preview?.purchase_order_id);
   const chargesLockedByHold = Boolean(preview?.scm_on_hold || queueStatus === "hold");
   const chargesLocked = chargesLockedByPo || chargesLockedByHold;
-  const canHoldOvf = Boolean(preview?.can_create_po && !preview?.scm_on_hold);
+  const holdPending = preview?.scm_hold_request_status === "pending";
+  const canHoldOvf = Boolean(preview?.can_create_po && !preview?.scm_on_hold && !holdPending);
   const canUnholdOvf = Boolean(
     preview?.can_create_po && preview?.scm_on_hold && !chargesLockedByPo,
   );
@@ -931,23 +933,17 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
     );
   }, [preview]);
 
-  function openShipDialog() {
-    setShipKind("delivery_challan");
-    setInventorySelection({});
-    setPoInventoryRows([]);
-    setShipDialogOpen(true);
-  }
-
   function openCreatePo() {
     startCreatePoNav(() => {
       router.push(ovfItemPlanHref(ovfId));
     });
   }
 
-  function openVendorCreatePo(vendorName: string) {
-    startCreatePoNav(() => {
-      router.push(ovfCreatePoHref(ovfId, vendorName));
-    });
+  function openShipDialog() {
+    setShipKind("delivery_challan");
+    setInventorySelection({});
+    setPoInventoryRows([]);
+    setShipDialogOpen(true);
   }
 
   function confirmShipChallan() {
@@ -1081,18 +1077,10 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
                 Hold
               </Button>
             ) : null}
-            {preview ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="cursor-pointer transition-colors duration-200"
-                disabled={loading}
-                onClick={openShipDialog}
-              >
-                <Truck className="mr-1.5 size-3.5" />
-                Billing or DC
-              </Button>
+            {holdPending ? (
+              <span className="inline-flex h-7 items-center rounded-md border border-amber-300 bg-amber-50 px-2.5 text-xs font-medium text-amber-900">
+                Hold pending approval
+              </span>
             ) : null}
           </div>
         }
@@ -1132,6 +1120,7 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
                 <DetailItem label="Customer">
                   {textOrDash(preview.customer_name || preview.account_name)}
                 </DetailItem>
+                <DetailItem label="OVF owner">{textOrDash(preview.owner_name)}</DetailItem>
                 <DetailItem label="Customer pay terms">
                   {preview.customer_payment_days
                     ? `Net ${preview.customer_payment_days} days`
@@ -1240,6 +1229,9 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
                 <DetailItem label="Customer name">
                   {textOrDash(preview.customer_name || preview.account_name)}
                 </DetailItem>
+                <DetailItem label="Customer number">
+                  {textOrDash(preview.customer_account_number)}
+                </DetailItem>
                 <DetailItem label="Recipient / contact">
                   {textOrDash(preview.billing_contact_person || preview.shipping_contact_person)}
                 </DetailItem>
@@ -1308,6 +1300,13 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
                   before editing freight and finance.
                 </p>
               ) : null}
+              {preview.scm_charge_request_status === "pending" ? (
+                <p className="mb-3 text-xs font-medium text-sky-950">
+                  Waiting for approval: freight ₹{Number(preview.scm_charge_request_freight) || 0} and
+                  finance {Number(preview.scm_charge_request_finance_pct) || 0}%. The values below stay
+                  in use until an approver accepts.
+                </p>
+              ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
                 <FinanceField label="Freight charges (₹)">
                   <Input
@@ -1353,7 +1352,11 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
                     disabled={chargesBusy}
                     onClick={() => void saveCharges()}
                   >
-                    {chargesBusy ? "Saving…" : "Save charges"}
+                    {chargesBusy
+                      ? "Sending…"
+                      : preview.scm_charge_request_status === "pending"
+                        ? "Update approval request"
+                        : "Send for approval"}
                   </Button>
                 </div>
               ) : null}
@@ -1363,122 +1366,6 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
             </div>
           </SectionCard>
 
-          <SectionCard
-            title="Purchase orders by product"
-            icon={ShoppingCart}
-            subtitle="Each line shows the vendor PO for that product. Record GRN after the PO is issued."
-          >
-            <div className="overflow-x-auto rounded-md border border-border">
-              <table className="w-full min-w-[720px] text-sm">
-                <thead className="border-b border-border bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium">Product</th>
-                    <th className="px-3 py-2 text-right font-medium">Qty</th>
-                    <th className="px-3 py-2 text-left font-medium">Distributor</th>
-                    <th className="px-3 py-2 text-left font-medium">Company PO</th>
-                    <th className="px-3 py-2 text-left font-medium">GRN</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {itemPlanLines.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
-                        No vendor charge lines on this OVF.
-                      </td>
-                    </tr>
-                  ) : (
-                    itemPlanLines.map((line, index) => {
-                      const vendorName = (line.distributor_name || "").trim();
-                      const linkedPo =
-                        line.source === "purchase_order" && vendorName && preview
-                          ? resolvePoForDistributor(preview, vendorName)
-                          : null;
-                      const poOpen =
-                        line.source === "purchase_order" &&
-                        vendorName &&
-                        openDistributorKeys.has(ovfDistributorKey(vendorName));
-                      const grnEnabled = linkedPo ? poAllowsGrnRecording(linkedPo.status) : false;
-                      return (
-                        <tr
-                          key={`${line.product_name}-${index}`}
-                          className="border-b border-border/70 last:border-b-0"
-                        >
-                          <td className="px-3 py-2 font-medium">{line.product_name}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">
-                            {formatItemPlanQty(line.qty)}
-                          </td>
-                          <td className="px-3 py-2">
-                            {line.source === "inventory" ? "Inventory" : vendorName || "-"}
-                          </td>
-                          <td className="px-3 py-2">
-                            {line.source === "inventory" ? (
-                              <button
-                                type="button"
-                                disabled={createPoPending}
-                                onClick={openCreatePo}
-                                className="cursor-pointer text-xs font-medium text-[#0369A1] underline-offset-2 transition-colors duration-200 hover:text-[#0284C7] hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-                                title="Open item plan to book from inventory"
-                              >
-                                From stock
-                              </button>
-                            ) : linkedPo ? (
-                              <Link
-                                href={`/procurement/orders/${linkedPo.id}`}
-                                className="cursor-pointer text-sm font-medium text-[#0369A1] underline-offset-2 transition-colors duration-200 hover:text-[#0284C7] hover:underline"
-                              >
-                                {linkedPo.label}
-                              </Link>
-                            ) : poOpen && !ovfOnHold ? (
-                              <button
-                                type="button"
-                                disabled={createPoPending}
-                                onClick={() => openVendorCreatePo(vendorName)}
-                                className="cursor-pointer text-xs font-medium text-[#0369A1] underline-offset-2 transition-colors duration-200 hover:text-[#0284C7] hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                Create PO
-                              </button>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">-</span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2">
-                            {line.source === "inventory" ? (
-                              <span className="text-xs text-muted-foreground">-</span>
-                            ) : linkedPo && grnEnabled ? (
-                              <Link
-                                href={`/procurement/orders/${linkedPo.id}?tab=grn`}
-                                className={cn(
-                                  buttonVariants({ size: "sm", variant: "outline" }),
-                                  "h-7 cursor-pointer gap-1 px-2 text-xs transition-colors duration-200",
-                                )}
-                              >
-                                <PackageCheck className="size-3.5" aria-hidden />
-                                GRN
-                              </Link>
-                            ) : linkedPo ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="h-7 cursor-not-allowed px-2 text-xs opacity-60"
-                                disabled
-                                title="GRN is available after admin issues this PO"
-                              >
-                                <PackageCheck className="mr-1 size-3.5" aria-hidden />
-                                GRN
-                              </Button>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">-</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </SectionCard>
 
           <ScmCommercialDocumentsPanel
             ovfId={ovfId}
@@ -1567,9 +1454,9 @@ export function ScmOvfViewPage({ ovfId }: { ovfId: string }) {
 
       <ConfirmDialog
         open={holdDialogOpen}
-        title="Put this OVF on hold?"
-        description="Add a short remark so others know why this OVF is on hold."
-        confirmLabel="Yes, put on hold"
+        title="Request hold approval?"
+        description="This sends the hold to the Hold approve / reject approvers. The OVF is held only after one of them accepts it."
+        confirmLabel="Send for approval"
         busy={holdBusy}
         contentClassName="max-w-lg"
         onConfirm={() => void confirmHold()}

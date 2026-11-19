@@ -35,6 +35,8 @@ from modules.procurement.schemas import (
     ScmEtdUpdateResponse,
     ScmFinalizeApprovalRequest,
     ScmFinalizeApprovalResponse,
+    ScmChargeApprovalResponse,
+    ScmHoldApprovalResponse,
     ScmFinalizeRequest,
     ScmCustomerDeliveryUpsertRequest,
     ScmCustomerPodUploadRequest,
@@ -334,9 +336,52 @@ def hold_scm_ovf(
     row = ScmHandoffService(db).hold_ovf(ctx, ovf_id, remark=body.remark)
     db.commit()
     return APIResponse(
-        message="OVF placed on Hold",
+        message="Hold request sent to the Hold approvers",
         data=ScmOvfPreviewResponse.model_validate(row),
     )
+
+
+@scm_router.get(
+    "/hold-approvals",
+    response_model=APIResponse[list[ScmHoldApprovalResponse]],
+)
+def list_scm_hold_approvals(
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[list[ScmHoldApprovalResponse]]:
+    rows = ScmHandoffService(db).list_hold_requests(ctx)
+    return APIResponse(
+        message="SCM hold approvals retrieved",
+        data=[ScmHoldApprovalResponse.model_validate(row) for row in rows],
+    )
+
+
+@scm_router.post(
+    "/ovf/{ovf_id}/accept-hold",
+    response_model=APIResponse[ScmOvfPreviewResponse],
+)
+def accept_scm_ovf_hold(
+    ovf_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:approve"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmOvfPreviewResponse]:
+    row = ScmHandoffService(db).accept_ovf_hold(ctx, ovf_id)
+    db.commit()
+    return APIResponse(message="OVF hold approved", data=ScmOvfPreviewResponse.model_validate(row))
+
+
+@scm_router.post(
+    "/ovf/{ovf_id}/reject-hold",
+    response_model=APIResponse[ScmOvfPreviewResponse],
+)
+def reject_scm_ovf_hold(
+    ovf_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:approve"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmOvfPreviewResponse]:
+    row = ScmHandoffService(db).reject_ovf_hold(ctx, ovf_id)
+    db.commit()
+    return APIResponse(message="OVF hold rejected", data=ScmOvfPreviewResponse.model_validate(row))
 
 
 @scm_router.post("/ovf/{ovf_id}/release-hold", response_model=APIResponse[ScmOvfPreviewResponse])
@@ -369,7 +414,56 @@ def update_scm_ovf_charges(
     )
     db.commit()
     return APIResponse(
-        message="OVF freight and finance updated",
+        message="Freight and finance sent for approval",
+        data=ScmOvfPreviewResponse.model_validate(row),
+    )
+
+
+@scm_router.get(
+    "/charge-approvals",
+    response_model=APIResponse[list[ScmChargeApprovalResponse]],
+)
+def list_scm_charge_approvals(
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:read"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[list[ScmChargeApprovalResponse]]:
+    rows = ScmHandoffService(db).list_charge_requests(ctx)
+    return APIResponse(
+        message="Freight and finance approvals retrieved",
+        data=[ScmChargeApprovalResponse.model_validate(row) for row in rows],
+    )
+
+
+@scm_router.post(
+    "/ovf/{ovf_id}/accept-charges",
+    response_model=APIResponse[ScmOvfPreviewResponse],
+)
+def accept_scm_ovf_charges(
+    ovf_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:approve"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmOvfPreviewResponse]:
+    row = ScmHandoffService(db).accept_ovf_charges(ctx, ovf_id)
+    db.commit()
+    return APIResponse(
+        message="Freight and finance approved",
+        data=ScmOvfPreviewResponse.model_validate(row),
+    )
+
+
+@scm_router.post(
+    "/ovf/{ovf_id}/reject-charges",
+    response_model=APIResponse[ScmOvfPreviewResponse],
+)
+def reject_scm_ovf_charges(
+    ovf_id: UUID,
+    ctx: Annotated[TenantContext, Depends(require_permission("procurement.order:approve"))],
+    db: Annotated[Session, Depends(get_db)],
+) -> APIResponse[ScmOvfPreviewResponse]:
+    row = ScmHandoffService(db).reject_ovf_charges(ctx, ovf_id)
+    db.commit()
+    return APIResponse(
+        message="Freight and finance rejected",
         data=ScmOvfPreviewResponse.model_validate(row),
     )
 

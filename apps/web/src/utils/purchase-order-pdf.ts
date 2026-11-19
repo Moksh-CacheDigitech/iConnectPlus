@@ -261,7 +261,7 @@ export function purchaseOrderPdfInputFromOrder(
       tax_rate?: number | null;
     }>;
   },
-  vendor: { name: string; address?: string },
+  vendor: { name: string; address?: string; gstin?: string },
   options?: {
     taxPct?: number;
     billingAddress?: string;
@@ -311,6 +311,7 @@ export function purchaseOrderPdfInputFromOrder(
       name: (vendor.name || "").trim() || "-",
       address: (vendor.address || "").trim() || "-",
     },
+    customerGstin: (vendor.gstin || "").trim() || undefined,
     orderRef: (order.order_ref_cache || "").trim() || undefined,
     poNumber: companyPo || order.document_number || "PO",
     date: order.document_date || new Date().toISOString().slice(0, 10),
@@ -327,7 +328,7 @@ export function purchaseOrderPdfInputFromOrder(
 
 export async function downloadOrderPdf(
   order: Parameters<typeof purchaseOrderPdfInputFromOrder>[0],
-  vendor: { name: string; address?: string },
+  vendor: { name: string; address?: string; gstin?: string },
   fileName?: string,
   options?: { watermark?: boolean },
 ): Promise<void> {
@@ -345,7 +346,7 @@ export async function downloadOrderPdf(
 /** Open PO PDF in a new tab. Draft previews always include the DRAFT PO watermark. */
 export async function previewOrderPdf(
   order: Parameters<typeof purchaseOrderPdfInputFromOrder>[0],
-  vendor: { name: string; address?: string },
+  vendor: { name: string; address?: string; gstin?: string },
   options?: {
     taxPct?: number;
     watermark?: boolean;
@@ -500,16 +501,15 @@ export async function downloadPurchaseOrderPdf(
   }
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-  doc.text("Customer GSTIN:", L + 2.5, y + metaH - 4);
+  doc.text("GSTIN:", L + 2.5, y + metaH - 4);
   doc.setFont("helvetica", "normal");
-  doc.text(dash(payload.customerGstin), L + 34, y + metaH - 4);
+  doc.text(dash(payload.customerGstin), L + 18, y + metaH - 4);
 
   // Right meta: stacked "Label: value" (no row/column grid)
   const meta: Array<[string, string]> = [
     ["GST NO:", dash(payload.company.gstin)],
     ["PAN NO:", dash(payload.company.pan)],
     ["Service Tax No.:", dash(payload.company.serviceTaxNo)],
-    ["Order Ref. Cache:", dash(payload.orderRef)],
     ["CACHE Order No.:", dash(payload.poNumber)],
     ["Date:", formatPoDateSlash(payload.date)],
   ];
@@ -814,7 +814,7 @@ export async function downloadPurchaseOrderPdf(
 /** Build PO print PDF as base64 for approval email / API upload. */
 export async function buildOrderPdfBase64(
   order: Parameters<typeof purchaseOrderPdfInputFromOrder>[0],
-  vendor: { name: string; address?: string },
+  vendor: { name: string; address?: string; gstin?: string },
   options?: { watermark?: boolean },
 ): Promise<{ filename: string; base64: string }> {
   const input = purchaseOrderPdfInputFromOrder(order, vendor);

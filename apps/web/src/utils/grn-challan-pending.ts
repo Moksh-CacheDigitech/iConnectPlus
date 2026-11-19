@@ -33,6 +33,8 @@ export type PendingGrnChallan = {
   docDate?: string;
   /** localStorage record ID of the saved challan, for linking back. */
   savedRecordId?: string;
+  /** Delivery challan this billing row was created from. */
+  sourceChallanId?: string;
   /** GRN receipt vs OVF stock allocation (no GRN). */
   source?: PendingGrnChallanSource;
 };
@@ -108,6 +110,7 @@ function challanRecordToQueueRow(record: DeliveryChallanRecord): PendingGrnChall
       ? record.invoiceDate?.trim() || record.challanDate
       : record.challanDate,
     savedRecordId: record.id,
+    sourceChallanId: record.sourceChallanId,
     source,
   };
 }
@@ -242,6 +245,83 @@ export function patchPendingGrnChallan(
     return { ...row, ...patch };
   });
   writeAll(rows);
+}
+
+/** Point a billing queue row at the GRN receipt used for the My Jobs task. */
+export function rememberBillingReceiptBatch(
+  row: Pick<PendingGrnChallan, "id" | "orderId" | "batchKey" | "kind">,
+  receiptBatchId: string,
+): void {
+  const rows = readAll().map((current) => {
+    const same =
+      current.id === row.id ||
+      (current.orderId === row.orderId &&
+        current.batchKey === row.batchKey &&
+        current.kind === row.kind);
+    if (!same) return current;
+    return { ...current, batchKey: receiptBatchId };
+  });
+  writeAll(rows);
+}
+
+/** True when this delivery challan already has a billing / invoice row. */
+export function invoiceAlreadyCreatedForChallan(challan: DeliveryChallanRecord): boolean {
+  const key = `dc-invoice:${challan.id}`;
+  const summary = formatChallanItemsSummary(challan.lines)
+    .replace(/\[quote:[^\]]+\]\s*/gi, "")
+    .trim()
+    .toLowerCase();
+  const queued = listAllGrnChallansByKind("billing").some((row) => {
+    if (row.batchKey === key || row.sourceChallanId === challan.id) return true;
+    if (!summary || row.orderId !== (challan.orderId || challan.id)) return false;
+    const items = (row.itemsSummary || "")
+      .replace(/\[quote:[^\]]+\]\s*/gi, "")
+      .trim()
+      .toLowerCase();
+    return Boolean(items) && (items === summary || items.includes(summary) || summary.includes(items));
+  });
+  if (queued) return true;
+  return listDeliveryChallans().some(
+    (row) =>
+      (row.grnKind || "delivery_challan") === "billing" && row.sourceChallanId === challan.id,
+  );
+}
+
+function isDeliveryChallanNumber(value: string): boolean {
+  return /^DC\//i.test(value.trim());
+}
+
+/** Invoice number for a DC or a direct billing document. Challan numbers are not invoices. */
+export function invoiceNumberForDeliveryChallan(challan: DeliveryChallanRecord): string {
+  const own = (challan.invoiceNumber || "").trim();
+  if ((challan.grnKind || "delivery_challan") === "billing") {
+    if (own && !isDeliveryChallanNumber(own)) return own;
+    const doc = (challan.challanNumber || "").trim();
+    return doc && !isDeliveryChallanNumber(doc) ? doc : "";
+  }
+  const linked = listDeliveryChallans().find(
+    (row) =>
+      (row.grnKind || "delivery_challan") === "billing" && row.sourceChallanId === challan.id,
+  );
+  const fromLinked = (linked?.invoiceNumber || linked?.challanNumber || "").trim();
+  if (fromLinked && !isDeliveryChallanNumber(fromLinked)) return fromLinked;
+  const key = `dc-invoice:${challan.id}`;
+  const summary = formatChallanItemsSummary(challan.lines)
+    .replace(/\[quote:[^\]]+\]\s*/gi, "")
+    .trim()
+    .toLowerCase();
+  const queued = listAllGrnChallansByKind("billing").find((row) => {
+    if (row.batchKey === key || row.sourceChallanId === challan.id) return true;
+    if (!summary || row.orderId !== (challan.orderId || challan.id)) return false;
+    const items = (row.itemsSummary || "")
+      .replace(/\[quote:[^\]]+\]\s*/gi, "")
+      .trim()
+      .toLowerCase();
+    return Boolean(items) && (items === summary || items.includes(summary) || summary.includes(items));
+  });
+  const fromQueue = (queued?.docNumber || "").trim();
+  if (fromQueue && !isDeliveryChallanNumber(fromQueue)) return fromQueue;
+  return "";
 }
 
 function parseOvfIdFromBatchKey(batchKey: string): string | null {

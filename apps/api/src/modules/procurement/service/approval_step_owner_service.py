@@ -79,17 +79,33 @@ class ProcApprovalStepOwnerService:
                 if key in APPROVAL_STEP_KEYS
             ]
         if is_module_admin:
-            # Admins can decide every stage.
-            steps = list(APPROVAL_STEP_KEYS)
+            # Admins decide the PO stages. Hold and freight follow the saved owners
+            # when someone is assigned; otherwise the module admin can still decide.
+            named = {"hold_decision", "freight_finance"}
+            steps = [key for key in APPROVAL_STEP_KEYS if key not in named]
+            for key in named:
+                owners = self._repo.list_user_ids_for_step(ctx, key)
+                if not owners or ctx.user_id in set(owners):
+                    steps.append(key)
         po_decision_steps = {
             step_key for step_key in STAGE_TO_STEP_KEY.values() if step_key in APPROVAL_STEP_KEYS
         }
-        can_decide = is_module_admin or any(step in po_decision_steps for step in steps)
+        inbox_steps = po_decision_steps | {"hold_decision", "freight_finance"}
+        can_decide = is_module_admin or any(step in inbox_steps for step in steps)
         return {
             "is_module_admin": is_module_admin,
             "steps": steps,
             "can_decide_approvals": can_decide,
         }
+
+    def can_decide_step(self, ctx: TenantContext, step_key: str) -> bool:
+        """Hold and freight: assigned owners decide. With nobody assigned, a module admin does."""
+        if step_key not in APPROVAL_STEP_KEYS or ctx.user_id is None:
+            return False
+        owners = set(self._repo.list_user_ids_for_step(ctx, step_key))
+        if owners:
+            return ctx.user_id in owners
+        return self._admin.is_admin(ctx)
 
     def can_decide_stage(self, ctx: TenantContext, stage: str | None) -> bool:
         if self._admin.is_admin(ctx):

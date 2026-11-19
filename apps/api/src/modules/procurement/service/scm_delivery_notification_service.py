@@ -636,7 +636,9 @@ class ScmDeliveryNotificationService:
                 "vendor_name": "",
                 "reference": reference,
                 "document_date": order.document_date or "",
-                "etd": self._format_etd(order),
+                # Customer mail uses the stored Customer EDD exactly. Do not
+                # substitute the vendor EDD or shift the date again here.
+                "etd": promised_label,
                 "promised_edd": promised_label,
                 "company_po_number": order.company_po_number or order.document_number,
             },

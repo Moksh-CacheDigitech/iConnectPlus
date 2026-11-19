@@ -29,9 +29,13 @@ import {
   type PlatformMyJobRow,
 } from "@/services/platform-my-jobs-service";
 import {
+  acceptScmOvfCharges,
+  acceptScmOvfHold,
   acceptScmPoApproval,
   finalizeScmOrder,
   rejectScmFinalizeApproval,
+  rejectScmOvfCharges,
+  rejectScmOvfHold,
 } from "@/services/procurement-service";
 import { decideMyJob, getQuote, listQuoteLines } from "@/services/sales-crm-service";
 import {
@@ -194,6 +198,12 @@ export function PlatformMyJobsPage() {
             po_pdf_filename: poPdf?.filename ?? null,
           });
         }
+      } else if (kind === "proc_hold" && job.ovfId) {
+        if (outcome === "rejected") await rejectScmOvfHold(job.ovfId);
+        else await acceptScmOvfHold(job.ovfId);
+      } else if (kind === "proc_freight" && job.ovfId) {
+        if (outcome === "rejected") await rejectScmOvfCharges(job.ovfId);
+        else await acceptScmOvfCharges(job.ovfId);
       } else {
         throw new Error("This job cannot be decided here");
       }
@@ -234,6 +244,12 @@ export function PlatformMyJobsPage() {
     }
     if (job.actionKind === "proc_issue_po") {
       return `Issue PO “${ref}”. It stays in Procurement for GRN / delivery.`;
+    }
+    if (job.actionKind === "proc_hold") {
+      return `Approve the hold on “${ref}”. The OVF is held only after this accept.`;
+    }
+    if (job.actionKind === "proc_freight") {
+      return `Approve the freight and finance change on “${ref}”. Current charges stay until you accept.`;
     }
     return `Approve “${ref}”.`;
   }
@@ -285,7 +301,12 @@ export function PlatformMyJobsPage() {
       );
     }
 
-    if (kind === "proc_accept_po" || kind === "proc_issue_po") {
+    if (
+      kind === "proc_accept_po" ||
+      kind === "proc_issue_po" ||
+      kind === "proc_hold" ||
+      kind === "proc_freight"
+    ) {
       return (
         <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
           <Button

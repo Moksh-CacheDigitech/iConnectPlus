@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Package, RefreshCw, ShoppingCart, Truck } from "lucide-react";
+import { FileText, Package, RefreshCw, ShoppingCart, Truck } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { ScmOvfBookFromStockDialog } from "@/components/procurement/scm-ovf-book-from-stock-dialog";
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { formatApiError } from "@/services/api-client";
 import {
+  getPurchaseOrder,
   getScmOvfPreview,
   listVendorOptions,
   updateScmItemPlanVendor,
@@ -23,6 +24,7 @@ import {
 import {
   assignUniquePosToItemPlanRows,
   clearOvfItemPlanSplits,
+  itemPlanRowOffersCreatePo,
   IN_STOCK_DISTRIBUTOR_LABEL,
   isInStockDistributor,
   loadOvfItemPlanSplits,
@@ -42,6 +44,7 @@ import {
   matchVendorByDistributor,
   vendorSupplyStates,
 } from "@/utils/vendor-oem-match";
+import { downloadOrderPdf } from "@/utils/purchase-order-pdf";
 
 function formatPlanQty(value: number | null | undefined): string {
   const n = Number(value) || 0;
@@ -174,6 +177,7 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
   const [bookOpen, setBookOpen] = useState(false);
   const [vendors, setVendors] = useState<VendorOption[]>([]);
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
+  const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
   /** Raw qty text while editing so empty / partial values are not forced back to 1. */
   const [qtyDraftByRowId, setQtyDraftByRowId] = useState<Record<string, string>>({});
   const saveSeqRef = useRef(0);
@@ -357,18 +361,30 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
     if (!vendor || isInStockDistributor(vendor)) return;
     if (rowHasCreatedPo(row)) return;
 
-    const createQty = clampCreateQty(row.create_qty, row.qty);
-    if (createQty <= 0) return;
+    const groupKey = (current: OvfItemPlanSplitRow) =>
+      `${ovfDistributorKey(current.distributor_name)}|${(current.distributor_state || "").trim().toLowerCase()}`;
+    const group = planRows.filter(
+      (current) =>
+        groupKey(current) === groupKey(row) &&
+        !isInStockDistributor(current.distributor_name) &&
+        !rowHasCreatedPo(current),
+    );
+    if (group.length === 0) return;
 
-    // Only this row — never pull leftover qty rows (same distributor) into the same PO.
-    // Remaining qty stays on a new row for a later Create PO with a new PO number.
-    const remainderQty = Math.max(0, Number((row.qty - createQty).toFixed(4)));
+    const groupIds = new Set(group.map((current) => current.id));
     const nextRows: OvfItemPlanSplitRow[] = [];
+    const qtyByProduct: Record<string, number> = {};
+    const productNames: string[] = [];
+    const pendingIds: string[] = [];
+
     for (const current of planRows) {
-      if (current.id !== row.id) {
+      if (!groupIds.has(current.id)) {
         nextRows.push(current);
         continue;
       }
+      const createQty = clampCreateQty(current.create_qty, current.qty);
+      if (createQty <= 0) continue;
+      const remainderQty = Math.max(0, Number((current.qty - createQty).toFixed(4)));
       nextRows.push({
         ...current,
         qty: createQty,
@@ -377,6 +393,12 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
         linked_po_id: current.linked_po_id ?? null,
         linked_po_label: current.linked_po_label ?? null,
       });
+      pendingIds.push(current.id);
+      productNames.push(current.product_name);
+      const productKey = ovfProductKey(current.product_name) || current.product_name;
+      qtyByProduct[productKey] = Number(
+        ((qtyByProduct[productKey] || 0) + createQty).toFixed(4),
+      );
       if (remainderQty > 0) {
         nextRows.push({
           ...current,
@@ -390,10 +412,12 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
       }
     }
 
+    if (pendingIds.length === 0) return;
+
     persistRows(nextRows);
-    setOvfPendingItemPlanPoRows(ovfId, [row.id]);
-    setOvfPoRemainderProducts(ovfId, [row.product_name]);
-    setOvfPoLineQtyOverrides(ovfId, { [row.product_name]: createQty });
+    setOvfPendingItemPlanPoRows(ovfId, pendingIds);
+    setOvfPoRemainderProducts(ovfId, productNames);
+    setOvfPoLineQtyOverrides(ovfId, qtyByProduct);
     const distributorState = (row.distributor_state || "").trim() || null;
     startCreatePoNav(() => {
       router.push(ovfCreatePoRemainderHref(ovfId, vendor, distributorState));
@@ -465,6 +489,75 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
                 can create another PO later.
               </p>
             </div>
+            {(preview.purchase_orders || []).some(
+              (po) => (po.fulfillment_stage || "").toLowerCase() === "vendor_rejected",
+            ) ? (
+              <div className="space-y-2">
+                {(preview.purchase_orders || [])
+                  .filter((po) => (po.fulfillment_stage || "").toLowerCase() === "vendor_rejected")
+                  .map((po) => {
+                    const label =
+                      (po.company_po_number || po.document_number || "PO").trim() || "PO";
+                    return (
+                      <div
+                        key={po.id}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2"
+                      >
+                        <p className="text-xs text-red-950">
+                          <span className="font-semibold">{label} was rejected.</span> That purchase
+                          order is stopped. Create a new PO for the open quantity. The old PO PDF is
+                          still available.
+                        </p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={pdfBusyId === po.id}
+                          className="h-8 cursor-pointer border-red-200 bg-white text-red-900 transition-colors duration-200 hover:bg-red-50"
+                          onClick={() => {
+                            void (async () => {
+                              setPdfBusyId(po.id);
+                              setError(null);
+                              try {
+                                const order = await getPurchaseOrder(po.id);
+                                await downloadOrderPdf(
+                                  order,
+                                  {
+                                    name: (po.vendor_name || "").trim() || "Vendor",
+                                    gstin: (() => {
+                                      const match = vendors.find(
+                                        (v) => String(v.id) === String(po.vendor_id || ""),
+                                      );
+                                      return (
+                                        match?.addressEntries?.[0]?.gstNumber?.trim() ||
+                                        match?.taxNumber?.trim() ||
+                                        ""
+                                      );
+                                    })(),
+                                  },
+                                  undefined,
+                                  { watermark: false },
+                                );
+                              } catch (err) {
+                                setError(
+                                  err instanceof Error && err.message.trim()
+                                    ? err.message
+                                    : "Failed to open the rejected PO PDF",
+                                );
+                              } finally {
+                                setPdfBusyId(null);
+                              }
+                            })();
+                          }}
+                        >
+                          <FileText className="mr-1.5 size-3.5" aria-hidden />
+                          {pdfBusyId === po.id ? "Opening…" : "Old PO PDF"}
+                        </Button>
+                      </div>
+                    );
+                  })}
+              </div>
+            ) : null}
             <div className="overflow-x-auto">
               <table className="w-full min-w-[820px] text-sm">
                 <thead className="border-b border-border bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
@@ -505,10 +598,6 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
                         (row.source === "purchase_order" ||
                           (row.source === "inventory" &&
                             (row.action === "stock_short" || row.po_qty > 0)));
-                      const needsPo =
-                        poEligible &&
-                        !isInStockDistributor(vendorName) &&
-                        Boolean(vendorName);
                       const hasCreatedPo = rowHasCreatedPo(row);
                       const linkedPo = hasCreatedPo
                         ? {
@@ -520,8 +609,7 @@ export function ScmOvfItemPlanPage({ ovfId }: { ovfId: string }) {
                         }
                         : null;
                       // Linked rows never offer Create PO again; remainder rows stay eligible.
-                      const canCreatePo =
-                        needsPo && !hasCreatedPo && row.create_qty > 0;
+                      const canCreatePo = itemPlanRowOffersCreatePo(row, onHold);
                       const qtyEditable =
                         poEligible &&
                         !hasCreatedPo &&

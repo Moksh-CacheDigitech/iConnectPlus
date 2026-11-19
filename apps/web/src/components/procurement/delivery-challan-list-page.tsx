@@ -5,35 +5,48 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FileDown, FilePlus2, FileText, RefreshCw, Truck } from "lucide-react";
+import { FileDown, FileText, Receipt, RefreshCw, Truck } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { procurementUi } from "@/components/procurement/procurement-ui";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
+  createInvoiceGenerationTasks,
   getInvoiceGenerationTaskForBatch,
   listInvoiceGenerationTasksForOrder,
+  listOrderReceiptBatches,
   listProcurementInventory,
   type ProcInvoiceGenerationTask,
   type ProcurementInventoryRow,
 } from "@/services/procurement-service";
+import { ApiClientError } from "@/services/api-client";
 import {
   buildDeliveryChallanPdfInputFromRecordResolved,
   downloadDeliveryChallanPdf,
 } from "@/utils/delivery-challan-pdf";
 import {
+  formatChallanItemsSummary,
   getDeliveryChallan,
   upsertDeliveryChallan,
   type DeliveryChallanRecord,
   type GrnChallanKind,
 } from "@/utils/delivery-challan-storage";
 import {
+  addPendingGrnChallan,
+  listAllGrnChallansByKind,
   listDeliveryChallanQueueByKind,
   patchPendingGrnChallan,
   pendingGrnChallanHref,
+  rememberBillingReceiptBatch,
+  invoiceAlreadyCreatedForChallan,
   type PendingGrnChallan,
 } from "@/utils/grn-challan-pending";
+import { deliveryStatusUpdateHref } from "@/utils/delivery-status-routes";
+import {
+  deliveryStatusUiMode,
+  getDeliveryStatus,
+} from "@/utils/delivery-status-storage";
 import {
   formatGeneratedGrnNumbers,
   isGeneratedGrnNumber,
@@ -41,8 +54,6 @@ import {
   uniqueGeneratedGrnNumbers,
 } from "@/utils/grn-number-display";
 import { formatUniquePoLabels } from "@/utils/format-po-labels";
-
-const LIST_RETURN_TO = encodeURIComponent("/procurement/delivery-challan");
 
 type QueueTab = GrnChallanKind;
 
@@ -60,6 +71,35 @@ type BillingInvoiceReadyMap = Record<
     status?: string;
   }
 >;
+
+function dcInvoiceBatchKey(challanId: string): string {
+  return `dc-invoice:${challanId}`;
+}
+
+function challanWasDispatched(challanId: string): boolean {
+  const status = getDeliveryStatus(challanId);
+  if (!status) return false;
+  return deliveryStatusUiMode(status) === "tracking";
+}
+
+function stripQuoteTag(value: string | null | undefined): string {
+  return (value || "").replace(/\[quote:[^\]]+\]\s*/gi, "").trim();
+}
+
+async function resolveReceiptBatchId(row: PendingGrnChallan): Promise<string | null> {
+  const key = (row.batchKey || "").trim();
+  if (looksLikeUuid(key)) return key;
+  const orderId = (row.orderId || "").trim();
+  if (!looksLikeUuid(orderId)) return null;
+  try {
+    const batches = await listOrderReceiptBatches(orderId);
+    const withId = batches.filter((batch) => looksLikeUuid(String(batch.id || "")));
+    const latest = withId[withId.length - 1];
+    return latest ? String(latest.id) : null;
+  } catch {
+    return null;
+  }
+}
 
 function looksLikeUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -173,6 +213,7 @@ export function DeliveryChallanListPage() {
   const [pendingDc, setPendingDc] = useState<PendingGrnChallan[]>([]);
   const [billingInvoiceReady, setBillingInvoiceReady] = useState<BillingInvoiceReadyMap>({});
   const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
+  const [invoiceBusyId, setInvoiceBusyId] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [accountsNotice, setAccountsNotice] = useState<string | null>(null);
 
@@ -258,9 +299,46 @@ export function DeliveryChallanListPage() {
             task = null;
           }
         }
+        if (!task && (!row.status || row.status === "pending") && looksLikeUuid(orderId)) {
+          const receiptBatchId = await resolveReceiptBatchId(row);
+          if (receiptBatchId) {
+            try {
+              const created = await createInvoiceGenerationTasks({
+                order_id: orderId,
+                receipt_batch_id: receiptBatchId,
+                items_summary: stripQuoteTag(row.itemsSummary),
+                vendor_name: row.vendorName,
+                customer_name: row.customerName || "",
+                grn_number:
+                  row.grnNumber && row.grnNumber !== "-" ? row.grnNumber : undefined,
+              });
+              task = created[0] || null;
+              if (!looksLikeUuid(batchId)) {
+                rememberBillingReceiptBatch(row, receiptBatchId);
+              }
+              setAccountsNotice(
+                "Invoice generation was sent to the Invoice generation user. It appears in their My Jobs.",
+              );
+            } catch (err) {
+              const detail =
+                err instanceof ApiClientError
+                  ? [err.message, ...err.errors].filter(Boolean).join(" - ")
+                  : err instanceof Error && err.message.trim()
+                    ? err.message
+                    : "Could not send invoice generation";
+              setPdfError(
+                `Pending billing for ${row.purchaseOrderNumber || "this PO"} was not sent to My Jobs: ${detail}`,
+              );
+            }
+          } else {
+            setPdfError(
+              `Pending billing for ${row.purchaseOrderNumber || "this PO"} has no GRN receipt, so it was not sent to My Jobs.`,
+            );
+          }
+        }
         const meta = taskBillingMeta(task);
         if (!meta.itemsSummary && row.itemsSummary?.trim()) {
-          meta.itemsSummary = row.itemsSummary.trim();
+          meta.itemsSummary = stripQuoteTag(row.itemsSummary);
         }
         if (!meta.grnNumber && row.grnNumber?.trim() && row.grnNumber !== "-") {
           meta.grnNumber = row.grnNumber.trim();
@@ -291,16 +369,108 @@ export function DeliveryChallanListPage() {
   }, []);
 
   useEffect(() => {
+    const tabParam = new URLSearchParams(window.location.search).get("tab");
+    if (tabParam === "billing" || tabParam === "delivery_challan") {
+      setTab(tabParam);
+    }
+  }, []);
+
+  async function createInvoiceFromChallan(challan: DeliveryChallanRecord) {
+    if (invoiceBusyId) return;
+    setInvoiceBusyId(challan.id);
+    setPdfError(null);
+    try {
+      const batchKey = dcInvoiceBatchKey(challan.id);
+      const already = invoiceAlreadyCreatedForChallan(challan);
+      if (!already) {
+        addPendingGrnChallan({
+          orderId: challan.orderId || challan.id,
+          batchKey,
+          grnNumber: challan.selectedGrnNumbers.join(", ") || "-",
+          purchaseOrderNumber: challan.purchaseOrderNumber,
+          vendorName: challan.vendorName,
+          customerName: challan.customerName,
+          itemsSummary: formatChallanItemsSummary(challan.lines),
+          kind: "billing",
+          sourceChallanId: challan.id,
+          source: challan.selectedGrnKeys[0]?.startsWith("ovf-stock:")
+            ? "ovf_stock"
+            : "grn",
+        });
+      }
+      const receiptBatchId = await resolveReceiptBatchId({
+        id: batchKey,
+        orderId: challan.orderId || challan.id,
+        batchKey: challan.selectedGrnKeys.find((key) => looksLikeUuid(key)) || "",
+        grnNumber: "",
+        purchaseOrderNumber: "",
+        vendorName: "",
+        kind: "billing",
+        createdAt: "",
+      });
+      if (!challan.orderId || !receiptBatchId) {
+        setPdfError(
+          "This delivery challan has no GRN receipt, so invoice generation was not sent to My Jobs.",
+        );
+        setTab("billing");
+        await load();
+        return;
+      }
+      const summary = stripQuoteTag(formatChallanItemsSummary(challan.lines));
+      await createInvoiceGenerationTasks({
+        order_id: challan.orderId,
+        receipt_batch_id: receiptBatchId,
+        items_summary: summary,
+        vendor_name: challan.vendorName,
+        customer_name: challan.customerName,
+        grn_number: challan.selectedGrnNumbers.join(", ") || undefined,
+      });
+      rememberBillingReceiptBatch(
+        {
+          id: batchKey,
+          orderId: challan.orderId,
+          batchKey,
+          kind: "billing",
+        },
+        receiptBatchId,
+      );
+      try {
+        sessionStorage.setItem(
+          "erp.procurement.accounts-invoice-notified",
+          "Invoice generation was sent to the Invoice generation user. It appears in their My Jobs.",
+        );
+      } catch {
+        /* ignore */
+      }
+      setAccountsNotice(
+        "Invoice generation was sent to the Invoice generation user. It appears in their My Jobs.",
+      );
+      setTab("billing");
+      await load();
+    } catch (err) {
+      const detail =
+        err instanceof ApiClientError
+          ? [err.message, ...err.errors].filter(Boolean).join(" - ")
+          : err instanceof Error && err.message.trim()
+            ? err.message
+            : "Could not create the invoice";
+      setPdfError(detail);
+    } finally {
+      setInvoiceBusyId(null);
+    }
+  }
+
+  useEffect(() => {
     void load();
   }, [load]);
 
   const pendingForTab = tab === "billing" ? pendingBilling : pendingDc;
-  const openRows = pendingForTab
-    .filter((r) => !r.status || r.status === "pending")
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const historyRows = pendingForTab
-    .filter((r) => r.status === "saved")
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const tableRows = [...pendingForTab].sort((a, b) => {
+    const aPending = !a.status || a.status === "pending";
+    const bPending = !b.status || b.status === "pending";
+    if (aPending !== bPending) return aPending ? -1 : 1;
+    return b.createdAt.localeCompare(a.createdAt);
+  });
   const pendingDcCount = pendingDc.filter((r) => !r.status || r.status === "pending").length;
   const pendingBillingCount = pendingBilling.filter((r) => !r.status || r.status === "pending").length;
 
@@ -320,16 +490,6 @@ export function DeliveryChallanListPage() {
               <RefreshCw className="mr-1.5 size-3.5" />
               Refresh
             </Button>
-            <Link
-              href={`/procurement/delivery-challan/new?kind=${tab}&returnTo=${LIST_RETURN_TO}`}
-              className={cn(
-                buttonVariants({ size: "sm" }),
-                "cursor-pointer transition-colors duration-200",
-              )}
-            >
-              <FilePlus2 className="mr-1.5 size-3.5" />
-              Create
-            </Link>
           </div>
         }
       />
@@ -402,34 +562,16 @@ export function DeliveryChallanListPage() {
       ) : null}
 
       <PendingGrnQueueCard
-        label={tab === "billing" ? "Pending billing" : "Pending delivery challans"}
-        rows={openRows}
+        label={tab === "billing" ? "Billing" : "Delivery challans"}
+        rows={tableRows}
         isBilling={tab === "billing"}
-        actionLabel="Open"
         billingInvoiceReady={billingInvoiceReady}
-        requireInvoiceReady={tab === "billing"}
         pdfBusyId={pdfBusyId}
+        invoiceBusyId={invoiceBusyId}
         onDownloadPdf={onDownloadPdf}
+        onCreateInvoice={createInvoiceFromChallan}
         emptyLabel={
-          tab === "billing"
-            ? "No pending billing documents."
-            : "No pending delivery challans."
-        }
-      />
-
-      <PendingGrnQueueCard
-        label={tab === "billing" ? "Billing history" : "Delivery challan history"}
-        rows={historyRows}
-        isBilling={tab === "billing"}
-        actionLabel="View"
-        billingInvoiceReady={billingInvoiceReady}
-        requireInvoiceReady={false}
-        pdfBusyId={pdfBusyId}
-        onDownloadPdf={onDownloadPdf}
-        emptyLabel={
-          tab === "billing"
-            ? "No saved billing documents yet. Create or complete a billing document to see it here."
-            : "No saved delivery challans yet. Create or complete a DC to see it here."
+          tab === "billing" ? "No billing documents." : "No delivery challans."
         }
       />
     </div>
@@ -440,22 +582,22 @@ function PendingGrnQueueCard({
   label,
   rows,
   isBilling,
-  actionLabel,
   emptyLabel,
   billingInvoiceReady,
-  requireInvoiceReady,
   pdfBusyId,
+  invoiceBusyId,
   onDownloadPdf,
+  onCreateInvoice,
 }: {
   label: string;
   rows: PendingGrnChallan[];
   isBilling: boolean;
-  actionLabel: string;
   emptyLabel: string;
   billingInvoiceReady: BillingInvoiceReadyMap;
-  requireInvoiceReady: boolean;
   pdfBusyId: string | null;
+  invoiceBusyId: string | null;
   onDownloadPdf: (challan: DeliveryChallanRecord) => void | Promise<void>;
+  onCreateInvoice: (challan: DeliveryChallanRecord) => void | Promise<void>;
 }) {
   const router = useRouter();
 
@@ -495,13 +637,15 @@ function PendingGrnQueueCard({
                 rows.map((row) => {
                   const isSaved = row.status === "saved";
                   const invoiceMeta = billingInvoiceReady[row.id];
-                  const canOpen =
-                    !requireInvoiceReady || isSaved || Boolean(invoiceMeta?.ready);
-                  const href = isSaved && row.savedRecordId
-                    ? `/procurement/delivery-challan/${row.savedRecordId}`
-                    : pendingGrnChallanHref(row);
+                  const canOpen = isSaved || !isBilling || Boolean(invoiceMeta?.ready);
                   const savedChallan =
                     isSaved && row.savedRecordId ? getDeliveryChallan(row.savedRecordId) : null;
+                  const openDispatch = Boolean(savedChallan) && !isBilling;
+                  const href = openDispatch && savedChallan
+                    ? deliveryStatusUpdateHref(savedChallan.id)
+                    : isSaved && row.savedRecordId
+                      ? `/procurement/delivery-challan/${row.savedRecordId}`
+                      : pendingGrnChallanHref(row);
                   const displayInvoiceNumber =
                     row.docNumber ||
                     invoiceMeta?.invoiceNumber ||
@@ -517,7 +661,7 @@ function PendingGrnQueueCard({
                   const displayItems =
                     rawItems === "-"
                       ? "-"
-                      : rawItems.replace(/\s*\(\d+(?:\.\d+)?\)/g, "").trim() || rawItems;
+                      : stripQuoteTag(rawItems.replace(/\s*\(\d+(?:\.\d+)?\)/g, "")) || rawItems;
                   const pdfBusy = Boolean(savedChallan && pdfBusyId === savedChallan.id);
                   return (
                     <tr
@@ -570,7 +714,7 @@ function PendingGrnQueueCard({
                       <td className={procurementUi.td}>{row.customerName?.trim() || "-"}</td>
                       <td className={procurementUi.td} onClick={(e) => e.stopPropagation()}>
                         <div className={procurementUi.rowActions}>
-                          {canOpen ? (
+                          {canOpen && !(isBilling && isSaved) ? (
                             <Link
                               href={href}
                               className={cn(
@@ -579,9 +723,13 @@ function PendingGrnQueueCard({
                                 "text-[#0369A1] hover:text-[#0369A1]",
                               )}
                             >
-                              {actionLabel}
+                              {openDispatch
+                                ? savedChallan && challanWasDispatched(savedChallan.id)
+                                  ? "Update status"
+                                  : "Set dispatch"
+                                : "Open"}
                             </Link>
-                          ) : (
+                          ) : canOpen ? null : (
                             <span
                               className="inline-flex h-8 items-center px-2 text-xs font-medium text-muted-foreground"
                               title="Waiting for Accounts to submit invoice details in My Jobs"
@@ -589,6 +737,26 @@ function PendingGrnQueueCard({
                               Pending
                             </span>
                           )}
+                          {savedChallan &&
+                          !isBilling &&
+                          challanWasDispatched(savedChallan.id) &&
+                          !invoiceAlreadyCreatedForChallan(savedChallan) ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              disabled={invoiceBusyId === savedChallan.id}
+                              className={cn(
+                                procurementUi.actionBtn,
+                                "cursor-pointer text-[#0369A1] hover:text-[#0369A1]",
+                              )}
+                              title="Create an invoice for this dispatched delivery challan"
+                              onClick={() => void onCreateInvoice(savedChallan)}
+                            >
+                              <Receipt className="mr-1 size-3.5" />
+                              {invoiceBusyId === savedChallan.id ? "Creating…" : "Create invoice"}
+                            </Button>
+                          ) : null}
                           {savedChallan ? (
                             <Button
                               type="button"
@@ -599,16 +767,16 @@ function PendingGrnQueueCard({
                                 procurementUi.actionBtn,
                                 "cursor-pointer text-[#0369A1] hover:text-[#0369A1]",
                               )}
-                              title={isBilling ? "Download billing PDF" : "Download challan PDF"}
+                              title={isBilling ? "Download billing PDF" : "Download DC PDF"}
                               aria-label={
                                 isBilling
                                   ? `Download billing PDF for ${displayInvoiceNumber}`
-                                  : `Download challan PDF for ${row.docNumber || savedChallan.challanNumber}`
+                                  : `Download DC PDF for ${row.docNumber || savedChallan.challanNumber}`
                               }
                               onClick={() => void onDownloadPdf(savedChallan)}
                             >
                               <FileDown className="mr-1 size-3.5" />
-                              {pdfBusy ? "PDF…" : "PDF"}
+                              {pdfBusy ? "…" : isBilling ? "Billing PDF" : "DC PDF"}
                             </Button>
                           ) : null}
                         </div>

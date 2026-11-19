@@ -57,6 +57,8 @@ function statusTone(status: PoApprovalRequest["status"]): string {
 }
 
 function approvalKindLabel(row: PoApprovalRequest): string {
+  if (row.kind === "hold_ovf") return "OVF hold";
+  if (row.kind === "freight_finance") return "Freight & finance";
   if (row.kind === "create_po_in_stock") return "Create PO (IN STOCK)";
   if (row.stageLabel) return row.stageLabel;
   if (row.scmApprovalStage === "management") return "Management PO approval";
@@ -70,16 +72,25 @@ function canDecideRow(
     isAdmin: boolean;
     canDecideAcceptPo: boolean;
     canDecideManagement: boolean;
+    canDecideHold: boolean;
+    canDecideFreight: boolean;
     canDecideStage: (stage: "accept_po" | "management" | null | undefined) => boolean;
   },
 ): boolean {
   if (row.status !== "pending") return false;
+  if (row.kind === "hold_ovf") return access.canDecideHold;
+  if (row.kind === "freight_finance") return access.canDecideFreight;
   if (row.kind === "create_po_in_stock") return access.isAdmin;
   return access.canDecideStage(row.scmApprovalStage || "accept_po");
 }
 
 function approvalPrimaryHref(row: PoApprovalRequest): string {
-  if (row.kind === "create_po_in_stock" && row.ovfId) {
+  if (
+    (row.kind === "create_po_in_stock" ||
+      row.kind === "hold_ovf" ||
+      row.kind === "freight_finance") &&
+    row.ovfId
+  ) {
     return `/procurement/scm/ovf/${row.ovfId}`;
   }
   if (isOvfCreatePoApprovalOrderKey(row.orderId)) {
@@ -334,7 +345,11 @@ export function ProcurementApprovalsPage() {
     setSuccess(null);
     try {
       await decide(row, "accepted");
-      if (row.kind === "create_po_in_stock") {
+      if (row.kind === "hold_ovf") {
+        setSuccess("Hold approved. The OVF is now on hold.");
+      } else if (row.kind === "freight_finance") {
+        setSuccess("Freight and finance approved. The OVF now uses the new values.");
+      } else if (row.kind === "create_po_in_stock") {
         setSuccess(
           "Create PO approved. Requester can create the PO in SCM - nothing is sent to Projects.",
         );
@@ -493,6 +508,12 @@ export function ProcurementApprovalsPage() {
                       >
                         {approvalPrimaryLabel(row)}
                       </Link>
+                      {row.kind === "hold_ovf" && row.holdRemark ? (
+                        <p className="text-[11px] text-muted-foreground">Remark: {row.holdRemark}</p>
+                      ) : null}
+                      {row.kind === "freight_finance" && row.chargeSummary ? (
+                        <p className="text-[11px] text-muted-foreground">{row.chargeSummary}</p>
+                      ) : null}
                       {row.kind === "create_po_in_stock" && row.reason ? (
                         <p className="mt-1 text-[11px] text-muted-foreground">
                           {row.reason === "stock_short"
@@ -536,7 +557,11 @@ export function ProcurementApprovalsPage() {
                           href={approvalPrimaryHref(row)}
                           className="cursor-pointer rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors duration-200 hover:bg-muted/50 hover:text-foreground"
                         >
-                          {row.kind === "create_po_in_stock" ? "Open OVF" : "Open PO"}
+                          {row.kind === "create_po_in_stock" ||
+                          row.kind === "hold_ovf" ||
+                          row.kind === "freight_finance"
+                            ? "Open OVF"
+                            : "Open PO"}
                         </Link>
                         {row.kind === "finalize" &&
                           !isOvfCreatePoApprovalOrderKey(row.orderId) ? (
@@ -577,11 +602,15 @@ export function ProcurementApprovalsPage() {
                               ) : (
                                 <Check className="size-3" aria-hidden />
                               )}
-                              {row.kind === "create_po_in_stock"
-                                ? "Approve Create PO"
-                                : (row.scmApprovalStage || "accept_po") === "management"
-                                  ? "Issue PO"
-                                  : "Accept PO"}
+                              {row.kind === "hold_ovf"
+                                ? "Approve hold"
+                                : row.kind === "freight_finance"
+                                  ? "Approve charges"
+                                  : row.kind === "create_po_in_stock"
+                                    ? "Approve Create PO"
+                                    : (row.scmApprovalStage || "accept_po") === "management"
+                                      ? "Issue PO"
+                                      : "Accept PO"}
                             </button>
                             <button
                               type="button"

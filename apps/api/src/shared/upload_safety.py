@@ -102,8 +102,8 @@ _MULTI_DOT_RE = re.compile(r"\.{2,}")
 
 DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 DEFAULT_MAX_ATTACHMENTS_PER_ENTITY = 50
-# Procurement PO commercial pack: Customer PO + Vendor Quote (VAPT two-slot policy).
-PO_MAX_ATTACHMENTS = 2
+# Procurement PO commercial pack (Customer PO, Vendor Quote, and other SCM files).
+PO_MAX_ATTACHMENTS = 20
 
 
 class UnsafeUploadError(ValueError):

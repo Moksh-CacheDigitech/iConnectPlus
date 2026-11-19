@@ -429,6 +429,7 @@ export function ScmQueuePage() {
               <tr>
                 <th className="px-3 py-2 font-bold">PO number</th>
                 <th className="px-3 py-2 font-bold">Customer name</th>
+                <th className="px-3 py-2 font-bold">OVF owner</th>
                 <th className="px-3 py-2 font-bold">Customer pay terms</th>
                 <th className="px-3 py-2 font-bold">Vendor pay terms</th>
                 <th className="px-3 py-2 font-bold">OVF date</th>
@@ -441,14 +442,14 @@ export function ScmQueuePage() {
             <tbody>
               {loading && filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
+                  <td colSpan={10} className="px-3 py-8 text-center text-muted-foreground">
                     Loading SCM queue…
                   </td>
                 </tr>
               ) : null}
               {!loading && filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
+                  <td colSpan={10} className="px-3 py-8 text-center text-muted-foreground">
                     {query.trim()
                       ? "No queue rows match your search."
                       : filter === "open"
@@ -507,6 +508,7 @@ export function ScmQueuePage() {
                       </span>
                     </td>
                     <td className="px-3 py-2">{row.customer_name || "-"}</td>
+                    <td className="px-3 py-2">{row.owner_name || "-"}</td>
                     <td className="px-3 py-2 text-muted-foreground">
                       {payTermsLabel(row.customer_payment_days)}
                     </td>

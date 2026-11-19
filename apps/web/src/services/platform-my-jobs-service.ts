@@ -9,9 +9,13 @@ import {
 import {
   getProcApprovalCapabilities,
   listMyInvoiceGenerationTasks,
+  listScmChargeApprovals,
   listScmFinalizeApprovals,
+  listScmHoldApprovals,
   type ProcInvoiceGenerationTask,
+  type ScmChargeApproval,
   type ScmFinalizeApproval,
+  type ScmHoldApproval,
 } from "@/services/procurement-service";
 import {
   listMyJobs,
@@ -27,6 +31,8 @@ export type PlatformMyJobActionKind =
   | "crm_complex"
   | "proc_accept_po"
   | "proc_issue_po"
+  | "proc_hold"
+  | "proc_freight"
   | "proc_invoice"
   | "link";
 
@@ -41,6 +47,7 @@ export type PlatformMyJobRow = {
   openMode?: PlatformMyJobOpenMode;
   invoiceTaskId?: string;
   orderId?: string;
+  ovfId?: string;
   receiptBatchId?: string;
   /** Show Download PO for finalize / invoice jobs. */
   showPoDownload?: boolean;
@@ -203,18 +210,72 @@ function finalizeApprovalRows(
     });
 }
 
+function holdApprovalRows(
+  rows: ScmHoldApproval[],
+  steps: Set<string>,
+): PlatformMyJobRow[] {
+  if (!steps.has("hold_decision")) return [];
+  return rows
+    .filter((row) => (row.status || "").toLowerCase() === "pending")
+    .map((row) => ({
+      id: `proc-hold-${row.ovf_id}`,
+      title: "Hold approve / reject",
+      reference: row.ovf_no,
+      detail:
+        [row.customer_name, row.requested_by_name, row.remark].filter(Boolean).join(" · ") ||
+        "OVF hold request",
+      status: row.status,
+      href: `/procurement/scm/ovf/${row.ovf_id}`,
+      ovfId: row.ovf_id,
+      actionKind: "proc_hold" as const,
+      approveLabel: "Approve hold",
+    }));
+}
+
+function freightApprovalRows(
+  rows: ScmChargeApproval[],
+  steps: Set<string>,
+): PlatformMyJobRow[] {
+  if (!steps.has("freight_finance")) return [];
+  return rows
+    .filter((row) => (row.status || "").toLowerCase() === "pending")
+    .map((row) => ({
+      id: `proc-freight-${row.ovf_id}`,
+      title: "Freight & finance",
+      reference: row.ovf_no,
+      detail:
+        [
+          row.customer_name,
+          `Freight ₹${Number(row.freight) || 0}`,
+          `Finance ${Number(row.finance_cost_pct) || 0}%`,
+        ]
+          .filter(Boolean)
+          .join(" · ") || "Freight and finance request",
+      status: row.status,
+      href: `/procurement/scm/ovf/${row.ovf_id}`,
+      ovfId: row.ovf_id,
+      actionKind: "proc_freight" as const,
+      approveLabel: "Approve charges",
+    }));
+}
+
 async function procurementRows(): Promise<PlatformMyJobRow[]> {
-  const [invoiceTasks, finalizeRows, caps] = await Promise.all([
+  const [invoiceTasks, finalizeRows, holdRows, chargeRows, caps] = await Promise.all([
     listMyInvoiceGenerationTasks("pending").catch(() => [] as ProcInvoiceGenerationTask[]),
     listScmFinalizeApprovals().catch(() => [] as ScmFinalizeApproval[]),
+    listScmHoldApprovals().catch(() => [] as ScmHoldApproval[]),
+    listScmChargeApprovals().catch(() => [] as ScmChargeApproval[]),
     getProcApprovalCapabilities().catch(() => ({
       is_module_admin: false,
       steps: [] as string[],
       can_decide_approvals: false,
     })),
   ]);
+  const steps = new Set(caps.steps || []);
   return [
     ...finalizeApprovalRows(finalizeRows, caps),
+    ...holdApprovalRows(holdRows, steps),
+    ...freightApprovalRows(chargeRows, steps),
     ...invoiceGenerationRows(invoiceTasks),
   ];
 }

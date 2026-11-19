@@ -2,8 +2,8 @@
 
 export type PoApprovalStatus = "pending" | "accepted" | "rejected";
 
-/** finalize = issue an existing draft PO; create_po_in_stock = allow Create PO on IN STOCK OVF. */
-export type PoApprovalKind = "finalize" | "create_po_in_stock";
+/** finalize = issue an existing draft PO; create_po_in_stock = allow Create PO on IN STOCK OVF; hold_ovf = park an OVF; freight_finance = change freight and finance. */
+export type PoApprovalKind = "finalize" | "create_po_in_stock" | "hold_ovf" | "freight_finance";
 
 export type PoApprovalDocument = {
   id: string;
@@ -41,6 +41,10 @@ export type PoApprovalRequest = {
   /** Finalize chain: Accept PO → Management. */
   scmApprovalStage?: PoApprovalStage | null;
   stageLabel?: string | null;
+  /** Remark submitted with an OVF hold request. */
+  holdRemark?: string | null;
+  /** Proposed freight and finance waiting for approval. */
+  chargeSummary?: string | null;
 };
 
 const STORAGE_KEY = "erp.procurement.po-approvals";

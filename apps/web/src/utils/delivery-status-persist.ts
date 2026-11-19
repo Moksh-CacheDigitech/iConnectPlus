@@ -19,7 +19,7 @@ import {
 import { syncOvfTimelineForDeliveryStatus } from "@/utils/ovf-timeline-sync";
 
 export type PersistDeliveryStatusResult =
-  | { ok: true; trackingOnly: boolean; emailWarning?: string; deliveredEmailTo?: string }
+  | { ok: true; trackingOnly: boolean; emailWarning?: string; emailSkipped?: boolean; deliveredEmailTo?: string }
   | { ok: false; message: string; fieldErrors?: DeliveryStatusFormErrors };
 
 export async function persistDeliveryStatusFromForm(
@@ -138,6 +138,9 @@ export async function persistDeliveryStatusFromForm(
         deliveredEmailTo: email.to,
       };
     }
+    if (email.skipped) {
+      return { ok: true, trackingOnly: false, emailSkipped: true };
+    }
     upsertDeliveryStatus({
       challanId: challan.id,
       ...normalized,
@@ -167,6 +170,9 @@ export async function persistDeliveryStatusFromForm(
         trackingOnly: false,
         emailWarning: email.message ?? "Unknown error",
       };
+    }
+    if (email.skipped) {
+      return { ok: true, trackingOnly: false, emailSkipped: true };
     }
     upsertDeliveryStatus({
       challanId: challan.id,
