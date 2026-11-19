@@ -61,6 +61,7 @@ def upgrade() -> None:
             sa.Column("resume_reason", sa.Text(), nullable=True),
             sa.Column("paused_by", postgresql.UUID(as_uuid=True), nullable=True),
             sa.Column("resumed_by", postgresql.UUID(as_uuid=True), nullable=True),
+            sa.Column("duration_minutes", sa.Integer(), nullable=True),
             sa.Column(
                 "created_at",
                 sa.DateTime(timezone=True),
@@ -76,6 +77,12 @@ def upgrade() -> None:
             "ix_svc_ticket_sla_pause_request",
             "svc_ticket_sla_pause",
             ["request_id", "paused_at"],
+            schema="service",
+        )
+    elif not _has_column("svc_ticket_sla_pause", "duration_minutes", schema="service"):
+        op.add_column(
+            "svc_ticket_sla_pause",
+            sa.Column("duration_minutes", sa.Integer(), nullable=True),
             schema="service",
         )
 

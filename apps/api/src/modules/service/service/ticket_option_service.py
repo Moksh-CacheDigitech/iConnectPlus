@@ -126,15 +126,24 @@ class TicketOptionService:
         ]
         added = False
         for otype, code, label, sort in defaults:
-            exists = self._db.scalar(
-                select(SvcTicketOption.id).where(
+            # Unique key is (company_id, option_type, option_code) including soft-deleted rows.
+            existing = self._db.scalar(
+                select(SvcTicketOption).where(
                     SvcTicketOption.company_id == company_id,
                     SvcTicketOption.option_type == otype,
                     SvcTicketOption.option_code == code,
-                    SvcTicketOption.is_deleted.is_(False),
                 )
             )
-            if exists:
+            if existing is not None:
+                if existing.is_deleted:
+                    existing.is_deleted = False
+                    existing.deleted_at = None
+                    existing.deleted_by = None
+                    existing.status = "active"
+                    existing.option_label = label
+                    existing.sort_order = sort
+                    existing.updated_by = ctx.user_id
+                    added = True
                 continue
             self._db.add(
                 SvcTicketOption(
