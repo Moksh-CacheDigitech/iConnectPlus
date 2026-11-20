@@ -190,6 +190,32 @@ class AssetService:
         if not fields.get("asset_type"):
             fields["asset_type"] = "fixed"
 
+    def _ensure_import_asset_type(
+        self, ctx: TenantContext, company_id: UUID, fields: dict
+    ) -> None:
+        """Map Excel type id/name onto the row company before create_for_import.
+
+        Preview often resolves types from a session-scoped list; ASSIGNED rows
+        use the employee company. Remap by asset_name when the id is missing or
+        belongs to another company so import does not fail with
+        ``Asset type not found``.
+        """
+        from modules.asset.service.asset_type_service import AssetTypeService
+
+        AssetTypeService(self._db).ensure_defaults(ctx, company_id)
+        type_id = fields.get("asset_type_id")
+        if type_id is not None:
+            row = self._types.get(ctx, type_id)
+            if row is not None and row.company_id == company_id and row.active:
+                return
+        name = str(fields.get("asset_name") or "").strip()
+        if name:
+            by_name = self._types.get_by_name(ctx, company_id, name)
+            if by_name is not None and by_name.active:
+                fields["asset_type_id"] = by_name.id
+                return
+        raise RegistrationValidationError("Asset type not found")
+
     def _persist_registration_location(
         self,
         ctx: TenantContext,
@@ -201,19 +227,30 @@ class AssetService:
         location_id: UUID | None = None,
         building_id: UUID | None = None,
     ) -> str | None:
-        """Create current ast_asset_location via LocationService. No-op when blank."""
+        """Create current ast_asset_location via LocationService. No-op when blank.
+
+        Excel import and some edits may supply ``location_id`` without a building.
+        Resolve the site location alone in that case (label + org link); require the
+        building pair when both ids are present.
+        """
         org_location_id = None
-        if location_id is not None and building_id is not None:
+        if location_id is not None:
             from modules.asset.service.site_location_service import SiteLocationService
 
-            _loc, _bldg, location_label, org_location_id = SiteLocationService(
-                self._db
-            ).resolve_pair(
-                ctx,
-                company_id=company_id,
-                location_id=location_id,
-                building_id=building_id,
-            )
+            site = SiteLocationService(self._db)
+            if building_id is not None:
+                _loc, _bldg, location_label, org_location_id = site.resolve_pair(
+                    ctx,
+                    company_id=company_id,
+                    location_id=location_id,
+                    building_id=building_id,
+                )
+            else:
+                _loc, location_label, org_location_id = site.resolve_location(
+                    ctx,
+                    company_id=company_id,
+                    location_id=location_id,
+                )
         if not location_label:
             return None
         from modules.asset.service.location_service import LocationService
@@ -348,6 +385,7 @@ class AssetService:
         location_id = fields.pop("location_id", None)
         building_id = fields.pop("building_id", None)
         code = (asset_code or "").strip()
+        self._ensure_import_asset_type(ctx, cid, fields)
         self._apply_type_master_defaults(ctx, cid, fields)
         self._validator.validate_create_for_import_fields(
             ctx,
@@ -397,11 +435,23 @@ class AssetService:
         location_label = fields.pop("location_label", None)
         location_id = fields.pop("location_id", None)
         building_id = fields.pop("building_id", None)
+        # Soft-deleted custodians still hang on older rows; clear on edit so PATCH
+        # of unrelated fields does not fail with "Employee not found".
+        if (
+            row.custodian_employee_id is not None
+            and "custodian_employee_id" not in fields
+        ):
+            from core.exceptions import NotFoundException
+
+            try:
+                self._master.get_employee(ctx, row.custodian_employee_id)
+            except NotFoundException:
+                fields["custodian_employee_id"] = None
         self._validator.validate_update_fields(ctx, row, fields)
         updated = self._repo.update(ctx, row_id, **fields) if fields else row
         if updated is None:
             raise NotFoundException("Asset not found")
-        if location_label or (location_id is not None and building_id is not None):
+        if location_label or location_id is not None:
             persisted = self._persist_registration_location(
                 ctx,
                 asset_id=updated.id,

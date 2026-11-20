@@ -29,7 +29,10 @@ import {
   listSiteLocations,
   type SiteLocation,
 } from "@/services/asset-site-location-service";
-import type { ItAssetType } from "@/services/asset-type-service";
+import {
+  listItAssetTypes,
+  type ItAssetType,
+} from "@/services/asset-type-service";
 import { assetOperationsService } from "@/services/assets-service";
 
 const LOCATION_MISSING_HINT =
@@ -179,8 +182,7 @@ function findLocationForCompany(
   const matches = locations.filter((l) => normalizeName(l.name) === key);
   if (matches.length === 0) return undefined;
   if (companyId) {
-    const scoped = matches.find((l) => l.company_id === companyId);
-    if (scoped) return scoped;
+    return matches.find((l) => l.company_id === companyId);
   }
   return matches[0];
 }
@@ -193,9 +195,10 @@ function findAssetTypeForCompany(
   const key = normalizeName(name);
   const matches = assetTypes.filter((t) => t.active && normalizeName(t.name) === key);
   if (matches.length === 0) return undefined;
+  // Never fall back to another company's type — that yields "Asset type not found"
+  // (or company mismatch) on the API when the row company differs from the type.
   if (companyId) {
-    const scoped = matches.find((t) => t.company_id === companyId);
-    if (scoped) return scoped;
+    return matches.find((t) => t.company_id === companyId);
   }
   return matches[0];
 }
@@ -310,25 +313,35 @@ function validateRows(
   employees: EmployeeDirectoryEntry[],
   locations: SiteLocation[],
   assetTypes: ItAssetType[],
-  options: { skipEmployeeLookup?: boolean } = {},
+  options: {
+    skipEmployeeLookup?: boolean;
+    /** Session / dialog company — used when row cannot resolve employee/location company. */
+    fallbackCompanyId?: string | null;
+  } = {},
 ): ParsedImportRow[] {
   const empByCode = indexEmployeesByCode(employees);
-  const locByName = new Map(locations.map((l) => [normalizeName(l.name), l]));
-  const typeByName = new Map(
-    assetTypes
-      .filter((t) => t.active)
-      .map((t) => [normalizeName(t.name), t]),
-  );
 
   return rows.map((row) => {
     const errors: string[] = [];
+    const emp =
+      row.employee_code && !options.skipEmployeeLookup
+        ? findEmployeeByCode(empByCode, row.employee_code)
+        : undefined;
+    const provisionalCompany =
+      emp?.companyId ||
+      findLocationForCompany(locations, row.location, null)?.company_id ||
+      options.fallbackCompanyId ||
+      null;
+
     if (!row.asset_type.trim()) {
       errors.push("Asset Name is required and must match an Asset Type");
     } else {
-      const type = typeByName.get(normalizeName(row.asset_type));
+      const type = findAssetTypeForCompany(assetTypes, row.asset_type, provisionalCompany);
       if (!type) {
         errors.push(
-          `Asset Name '${row.asset_name}' must match a type under Configuration → Asset Types`,
+          provisionalCompany
+            ? `Asset type '${row.asset_name}' not found for this company. Create it under Configuration → Asset Types for the assignee/location company.`
+            : `Asset Name '${row.asset_name}' must match a type under Configuration → Asset Types`,
         );
       }
     }
@@ -336,7 +349,6 @@ function validateRows(
       errors.push("Assigned status requires Employee ID");
     }
     if (row.employee_code && !options.skipEmployeeLookup) {
-      const emp = findEmployeeByCode(empByCode, row.employee_code);
       if (!emp) {
         errors.push(`Employee ID '${row.employee_code}' not found`);
       } else if (row.assignee_name && !namesMatch(row.assignee_name, emp)) {
@@ -346,7 +358,7 @@ function validateRows(
       }
     }
     if (row.location) {
-      const loc = locByName.get(normalizeName(row.location));
+      const loc = findLocationForCompany(locations, row.location, provisionalCompany);
       if (!loc) {
         errors.push(
           `Location '${row.location}' not found. ${LOCATION_MISSING_HINT}`,
@@ -458,6 +470,7 @@ export function ItAssetImportDialog({
   const [employees, setEmployees] = useState<EmployeeDirectoryEntry[]>([]);
   const [employeesLoadFailed, setEmployeesLoadFailed] = useState(false);
   const [locations, setLocations] = useState<SiteLocation[]>(siteLocations);
+  const [types, setTypes] = useState<ItAssetType[]>(assetTypes);
   const [fileName, setFileName] = useState<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -468,17 +481,21 @@ export function ItAssetImportDialog({
     if (!open) return;
     let cancelled = false;
     void (async () => {
-      try {
-        const fresh = await listSiteLocations();
-        if (!cancelled) setLocations(fresh);
-      } catch {
-        if (!cancelled) setLocations(siteLocations);
+      // Load tenant-wide types/locations so rows for assignee companies other than
+      // the session company still validate and map to the correct type id.
+      const [freshLocs, freshTypes] = await Promise.all([
+        listSiteLocations().catch(() => siteLocations),
+        listItAssetTypes({ active: true }).catch(() => assetTypes),
+      ]);
+      if (!cancelled) {
+        setLocations(freshLocs);
+        setTypes(freshTypes);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, siteLocations]);
+  }, [open, siteLocations, assetTypes]);
 
   if (!open) return null;
 
@@ -490,8 +507,9 @@ export function ItAssetImportDialog({
     undefined;
 
   const needsEmployeeDirectory = preview.some((r) => Boolean(r.employee_code));
-  const validated = validateRows(preview, employees, locations, assetTypes, {
+  const validated = validateRows(preview, employees, locations, types, {
     skipEmployeeLookup: employeesLoadFailed,
+    fallbackCompanyId: resolvedCompanyId,
   });
   const invalidCount = validated.filter((r) => r.errors.length > 0).length;
   const canImport =
@@ -522,12 +540,14 @@ export function ItAssetImportDialog({
     }
   }
 
-  async function refreshLocations() {
-    try {
-      setLocations(await listSiteLocations());
-    } catch {
-      /* keep last known list */
-    }
+  async function refreshMasters() {
+    const [freshLocs, freshTypes] = await Promise.all([
+      listSiteLocations().catch(() => locations),
+      listItAssetTypes({ active: true }).catch(() => types),
+    ]);
+    setLocations(freshLocs);
+    setTypes(freshTypes);
+    return { locations: freshLocs, types: freshTypes };
   }
 
   async function onFile(file: File) {
@@ -537,7 +557,7 @@ export function ItAssetImportDialog({
     setParsing(true);
     setEmployeesLoadFailed(false);
     try {
-      await Promise.all([loadEmployees(), refreshLocations()]);
+      await Promise.all([loadEmployees(), refreshMasters()]);
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: "array" });
       const sheet = wb.Sheets[wb.SheetNames[0]!];
@@ -586,11 +606,19 @@ export function ItAssetImportDialog({
         return;
       }
 
+      const masters = await refreshMasters();
       const empByCode = indexEmployeesByCode(employees);
 
-      const revalidated = validateRows(preview, employees, locations, assetTypes, {
-        skipEmployeeLookup: employeesLoadFailed,
-      });
+      const revalidated = validateRows(
+        preview,
+        employees,
+        masters.locations,
+        masters.types,
+        {
+          skipEmployeeLookup: employeesLoadFailed,
+          fallbackCompanyId: sessionCompanyId,
+        },
+      );
       const stillInvalid = revalidated.filter((r) => r.errors.length > 0);
       if (stillInvalid.length > 0) {
         setError(
@@ -610,7 +638,7 @@ export function ItAssetImportDialog({
         // Avoids "Asset type does not belong to this company" when header company ≠ row data.
         const provisionalCompany =
           matchedEmployee?.companyId ||
-          findLocationForCompany(locations, row.location, null)?.company_id ||
+          findLocationForCompany(masters.locations, row.location, null)?.company_id ||
           sessionCompanyId ||
           sessionScope?.company_id ||
           undefined;
@@ -622,9 +650,13 @@ export function ItAssetImportDialog({
           return;
         }
 
-        const loc = findLocationForCompany(locations, row.location, provisionalCompany);
+        const loc = findLocationForCompany(
+          masters.locations,
+          row.location,
+          provisionalCompany,
+        );
         const assetType = findAssetTypeForCompany(
-          assetTypes,
+          masters.types,
           row.asset_type,
           provisionalCompany,
         );
@@ -668,9 +700,9 @@ export function ItAssetImportDialog({
           issue_date: row.issue_date,
           ...(row.operational_status === "IN_MAINTENANCE"
             ? {
-                expected_duration_days: 7,
-                maintenance_reason: row.maintenance_reason || "excel_import",
-              }
+              expected_duration_days: 7,
+              maintenance_reason: row.maintenance_reason || "excel_import",
+            }
             : {}),
         });
       }
@@ -763,7 +795,7 @@ export function ItAssetImportDialog({
               variant="outline"
               size="sm"
               className="cursor-pointer"
-              onClick={() => downloadItAssetImportTemplate(assetTypes)}
+              onClick={() => downloadItAssetImportTemplate(types)}
             >
               <Download className="mr-2 size-4" />
               Download Template

@@ -14,9 +14,12 @@ from sqlalchemy.orm import Session
 from core.exceptions import AppException, ConflictException, NotFoundException
 from modules.foundation.domain.entities import UserEntity
 from modules.foundation.domain.erp_modules import (
+    ASSET_MODULE_KEY,
+    ASSET_SUBMODULE_KEYS,
     ERP_MODULE_KEY_SET,
     MODULE_ROLE_ADMIN,
     MODULE_ROLE_MEMBER,
+    asset_domain_for_module_key,
 )
 from modules.foundation.domain.value_objects import TenantContext
 from modules.foundation.repository.user_module_repository import UserModuleRepository
@@ -89,6 +92,7 @@ class ModuleAccessService:
                 if current == MODULE_ROLE_ADMIN:
                     continue
                 self._set_admin(ctx, user, key, grant=True)
+                self._sync_asset_domain(ctx, user_id, key, MODULE_ROLE_ADMIN)
                 granted.append(key)
             elif role == MODULE_ROLE_MEMBER:
                 if current is not None and current != MODULE_ROLE_ADMIN:
@@ -101,6 +105,7 @@ class ModuleAccessService:
                     user_id,
                     service_job_role if key == "service" else None,
                 )
+                self._sync_asset_domain(ctx, user_id, key, MODULE_ROLE_MEMBER)
                 granted.append(key)
             else:
                 raise AppException("role must be admin or member")
@@ -179,4 +184,52 @@ class ModuleAccessService:
             self._set_admin(ctx, user, key, grant=False)
         else:
             self._members.remove_member(ctx, key, user_id)
+        self._revoke_asset_domain(ctx, user_id, key)
         return self._users.get_user(ctx.tenant_id, user_id)
+
+    def _sync_asset_domain(
+        self, ctx: TenantContext, user_id: UUID, module_key: str, role: str
+    ) -> None:
+        if module_key == ASSET_MODULE_KEY:
+            # Legacy parent grant → both IT and Non-IT domains.
+            from modules.asset.service.domain_membership_service import DomainMembershipService
+
+            domains = DomainMembershipService(self._db)
+            for sub in sorted(ASSET_SUBMODULE_KEYS):
+                domains.upsert_from_module_grant(
+                    ctx,
+                    user_id=user_id,
+                    module_key=sub,
+                    role=role,
+                    actor_id=ctx.user_id,
+                )
+            return
+        if asset_domain_for_module_key(module_key) is None:
+            return
+        from modules.asset.service.domain_membership_service import DomainMembershipService
+
+        DomainMembershipService(self._db).upsert_from_module_grant(
+            ctx,
+            user_id=user_id,
+            module_key=module_key,
+            role=role,
+            actor_id=ctx.user_id,
+        )
+
+    def _revoke_asset_domain(self, ctx: TenantContext, user_id: UUID, module_key: str) -> None:
+        from modules.asset.service.domain_membership_service import DomainMembershipService
+
+        domains = DomainMembershipService(self._db)
+        if module_key == ASSET_MODULE_KEY:
+            domains.deactivate_all_for_user(
+                ctx.tenant_id, user_id, actor_id=ctx.user_id
+            )
+            return
+        if asset_domain_for_module_key(module_key) is None:
+            return
+        domains.revoke_from_module_grant(
+            ctx,
+            user_id=user_id,
+            module_key=module_key,
+            actor_id=ctx.user_id,
+        )

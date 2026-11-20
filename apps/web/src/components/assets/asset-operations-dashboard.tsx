@@ -108,38 +108,28 @@ const QUICK_ACTIONS: {
   description: string;
   icon: LucideIcon;
 }[] = [
-  {
-    id: "register",
-    title: "Register Asset",
-    description: "Add a new asset to inventory",
-    icon: PackagePlus,
-  },
-  {
-    id: "assign",
-    title: "Assign Asset",
-    description: "Issue asset to an employee",
-    icon: UserPlus,
-  },
-];
+    {
+      id: "register",
+      title: "Register Asset",
+      description: "Add a new asset to inventory",
+      icon: PackagePlus,
+    },
+    {
+      id: "assign",
+      title: "Assign Asset",
+      description: "Issue asset to an employee",
+      icon: UserPlus,
+    },
+  ];
 
 function formatKpiValue(value: number | undefined): string {
   if (value === undefined) return "—";
   return String(value);
 }
 
-function parseSharePct(hint?: string): number | null {
-  if (!hint) return null;
-  const match = hint.match(/(\d+(?:\.\d+)?)\s*%/);
-  if (!match) return null;
-  const pct = Number(match[1]);
-  if (!Number.isFinite(pct)) return null;
-  return Math.max(0, Math.min(100, pct));
-}
-
 function OpsKpiTile({
   label,
   value,
-  hint,
   icon: Icon,
   tone,
   loading,
@@ -149,7 +139,6 @@ function OpsKpiTile({
 }: {
   label: string;
   value: string;
-  hint?: string;
   icon: LucideIcon;
   tone: KpiTone;
   loading?: boolean;
@@ -157,8 +146,6 @@ function OpsKpiTile({
   ariaLabel: string;
   onClick: () => void;
 }) {
-  const sharePct = !empty ? parseSharePct(hint) : null;
-
   if (loading) {
     return (
       <div
@@ -168,9 +155,6 @@ function OpsKpiTile({
       >
         <div className="h-3 w-20 animate-pulse rounded bg-white/20 motion-reduce:animate-none" />
         <div className="mt-3 h-8 w-14 animate-pulse rounded bg-white/20 motion-reduce:animate-none" />
-        <div className="mt-auto pt-3">
-          <div className="h-1 w-full animate-pulse rounded-full bg-white/15 motion-reduce:animate-none" />
-        </div>
       </div>
     );
   }
@@ -205,24 +189,9 @@ function OpsKpiTile({
           <Icon className="size-3.5" aria-hidden />
         </span>
       </div>
-      <p className="relative mt-2 text-[1.75rem] leading-none font-semibold tracking-tight tabular-nums text-white">
+      <p className="relative mt-auto pt-3 text-[1.75rem] leading-none font-semibold tracking-tight tabular-nums text-white">
         {empty ? "—" : value}
       </p>
-      {hint && !empty ? (
-        <p className="relative mt-2 text-[11px] leading-snug text-white/70">{hint}</p>
-      ) : null}
-      <div className="relative mt-auto pt-3">
-        <div className="h-1 overflow-hidden rounded-full bg-white/15" aria-hidden>
-          <div
-            className="h-full rounded-full bg-white/70 transition-[width] duration-300 motion-reduce:transition-none"
-            style={{
-              width: `${
-                sharePct == null ? (empty || !hint ? 0 : 100) : sharePct
-              }%`,
-            }}
-          />
-        </div>
-      </div>
     </button>
   );
 }
@@ -230,11 +199,12 @@ function OpsKpiTile({
 export function AssetOperationsDashboard({
   kpisLoading = false,
   kpis = null,
-  kpiTrends = null,
+  kpiTrends: _kpiTrends = null,
   errorMessage,
   onRetry,
   className,
 }: AssetOperationsDashboardProps) {
+  void _kpiTrends;
   const router = useRouter();
   const kpiEmpty = !kpisLoading && !kpis;
   const push = (href: string) => {
@@ -314,7 +284,6 @@ export function AssetOperationsDashboard({
               loading={kpisLoading}
               empty={kpiEmpty}
               value={kpis ? formatKpiValue(kpis[def.valueKey]) : "—"}
-              hint={def.trendKey ? kpiTrends?.[def.trendKey]?.label : undefined}
               ariaLabel={def.ariaLabel}
               onClick={() => openKpi(def.id)}
             />
@@ -323,7 +292,19 @@ export function AssetOperationsDashboard({
       </section>
 
       <section aria-label="Reports" className="min-w-0">
-        <AssetReportsWorkspace embedded />
+        <AssetReportsWorkspace
+          embedded
+          fleetKpis={
+            kpis
+              ? {
+                totalAssets: kpis.totalAssets,
+                inStock: kpis.readyToMove,
+                assigned: kpis.assigned,
+              }
+              : null
+          }
+          fleetKpisLoading={kpisLoading}
+        />
       </section>
 
       <section

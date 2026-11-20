@@ -18,7 +18,6 @@ import {
   YAxis,
 } from "recharts";
 import {
-  Activity,
   Boxes,
   FileStack,
   Layers3,
@@ -32,7 +31,6 @@ import {
   ASSETS_SURFACE_CARD,
   StatCard,
 } from "@/components/assets/shared";
-import { dashboardNavigationPaths } from "@/components/assets/navigation/dashboard-navigation";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -44,7 +42,6 @@ import { type ReportDashboard, reportService } from "@/services/assets-service";
 const REPORT_LINKS = {
   documents: "/assets/asset-documents",
   components: "/assets/asset-components",
-  assignments: dashboardNavigationPaths.assignments,
 } as const;
 
 /** Cool progressive report palette — no purple; matches assets design override. */
@@ -165,15 +162,26 @@ function SectionHeading({
   );
 }
 
+export type FleetKpiSlice = {
+  totalAssets: number;
+  inStock: number;
+  assigned: number;
+};
+
 export type AssetReportsWorkspaceProps = {
   /** Compact panel for embedding under the operations dashboard. */
   embedded?: boolean;
   className?: string;
+  /** When embedded, drive the operational pie from the same KPI totals as the hero tiles. */
+  fleetKpis?: FleetKpiSlice | null;
+  fleetKpisLoading?: boolean;
 };
 
 export function AssetReportsWorkspace({
   embedded = false,
   className,
+  fleetKpis = null,
+  fleetKpisLoading = false,
 }: AssetReportsWorkspaceProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -210,10 +218,24 @@ export function AssetReportsWorkspace({
     () => asCountRows(dashboard?.by_status, "status"),
     [dashboard?.by_status],
   );
-  const operationalChart = useMemo(
-    () => asCountRows(dashboard?.by_operational_status, "status"),
-    [dashboard?.by_operational_status],
-  );
+  const operationalChart = useMemo(() => {
+    // Prefer the same three fleet KPIs as the hero tiles (Total / In Stock / Assigned).
+    if (fleetKpis) {
+      const inStock = Math.max(0, Number(fleetKpis.inStock) || 0);
+      const assigned = Math.max(0, Number(fleetKpis.assigned) || 0);
+      const total = Math.max(0, Number(fleetKpis.totalAssets) || 0);
+      const other = Math.max(0, total - inStock - assigned);
+      const rows = [
+        { name: "In Stock", count: inStock, fill: CHART.amber, raw: "in_stock" },
+        { name: "Assigned", count: assigned, fill: CHART.emerald, raw: "assigned" },
+      ];
+      if (other > 0) {
+        rows.push({ name: "Other", count: other, fill: CHART.slate, raw: "other" });
+      }
+      return rows.filter((r) => r.count > 0);
+    }
+    return asCountRows(dashboard?.by_operational_status, "status");
+  }, [dashboard?.by_operational_status, fleetKpis]);
   const docTypeChart = useMemo(() => {
     const rows = asCountRows(documents?.by_type, "document_type");
     return rows.map((row) => ({
@@ -289,16 +311,12 @@ export function AssetReportsWorkspace({
   );
 
   const summaryCards = (
-    <div className="grid gap-2.5 sm:grid-cols-3">
+    <div className={cn("grid gap-2.5", embedded ? "sm:grid-cols-2" : "sm:grid-cols-2")}>
       <StatCard
         title="Documents"
         value={loading ? "—" : String(analytics.document_count ?? documents?.total ?? 0)}
         icon={FileStack}
         tone="sky"
-        trend={{
-          label: `${analytics.document_coverage_pct ?? documents?.coverage_pct ?? 0}% coverage`,
-          direction: "neutral",
-        }}
         loading={loading}
         onClick={() => router.push(REPORT_LINKS.documents)}
         aria-label="Open Documents"
@@ -308,45 +326,32 @@ export function AssetReportsWorkspace({
         value={loading ? "—" : String(analytics.component_count ?? components?.total ?? 0)}
         icon={Boxes}
         tone="slate"
-        trend={{
-          label: `${analytics.active_components ?? 0} active`,
-          direction: "neutral",
-        }}
         loading={loading}
         onClick={() => router.push(REPORT_LINKS.components)}
         aria-label="Open Components"
       />
-      <StatCard
-        title="Assignment usage"
-        value={
-          loading
-            ? "—"
-            : `${analytics.assignment_utilization_pct ?? usage?.utilization_pct ?? 0}%`
-        }
-        icon={Activity}
-        tone="emerald"
-        trend={{
-          label: `${analytics.assets_currently_assigned ?? usage?.assets_currently_assigned ?? 0} assigned`,
-          direction: "neutral",
-        }}
-        loading={loading}
-        onClick={() => router.push(REPORT_LINKS.assignments)}
-        aria-label="Open Assignments"
-      />
     </div>
   );
 
+  const fleetTotal = fleetKpis?.totalAssets;
   const embeddedCharts = (
     <Card className={cn(ASSETS_SURFACE_CARD, "rounded-xl")}>
       <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-border/50 pb-3">
-        <SectionHeading title="Operational Status" />
+        <SectionHeading
+          title="Fleet mix"
+          description={
+            fleetTotal != null ? `Total assets ${fleetTotal}` : "In Stock vs Assigned"
+          }
+        />
         <span className={ASSETS_ICON_CHIP}>
           <ShieldCheck className="size-3.5" aria-hidden />
         </span>
       </CardHeader>
       <CardContent className="pt-3">
-        {operationalChart.length === 0 ? (
-          <EmptyChart message="No operational status recorded." />
+        {fleetKpisLoading || (loading && !fleetKpis) ? (
+          <EmptyChart message="Loading fleet mix…" />
+        ) : operationalChart.length === 0 ? (
+          <EmptyChart message="No fleet status recorded." />
         ) : (
           <div className="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_140px]">
             <div className="h-48 min-w-0">
@@ -370,6 +375,14 @@ export function AssetReportsWorkspace({
               </ResponsiveContainer>
             </div>
             <ul className="space-y-2">
+              {fleetTotal != null ? (
+                <li className="flex items-center justify-between gap-2 text-xs">
+                  <span className="truncate font-semibold text-foreground">Total Assets</span>
+                  <span className="shrink-0 font-mono tabular-nums text-foreground">
+                    {fleetTotal}
+                  </span>
+                </li>
+              ) : null}
               {operationalChart.map((entry) => (
                 <li key={entry.name} className="flex items-center justify-between gap-2 text-xs">
                   <span className="flex min-w-0 items-center gap-2">
@@ -634,7 +647,7 @@ export function AssetReportsWorkspace({
                             key={entry.name}
                             fill={
                               [CHART.sky, CHART.teal, CHART.amber, CHART.emerald, CHART.slate][
-                                index % 5
+                              index % 5
                               ]
                             }
                           />

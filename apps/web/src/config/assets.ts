@@ -115,15 +115,15 @@ export const assetDomainSwitcherNav: AssetManagementNavGroup[] = [
 export const assetDomainSwitcherItems: (AssetManagementNavItem & {
   domain: AssetDomainKey;
 })[] = [
-  { title: "IT Assets", href: "/assets", icon: Package, match: "exact", domain: "IT" },
-  {
-    title: "Non-IT Assets",
-    href: "/assets/non-it",
-    icon: Monitor,
-    match: "prefix",
-    domain: "NON_IT",
-  },
-];
+    { title: "IT Assets", href: "/assets", icon: Package, match: "exact", domain: "IT" },
+    {
+      title: "Non-IT Assets",
+      href: "/assets/non-it",
+      icon: Monitor,
+      match: "prefix",
+      domain: "NON_IT",
+    },
+  ];
 
 /** IT workspace tabs (existing scope). */
 export const itAssetWorkspaceNav: AssetManagementNavGroup[] = [
@@ -252,14 +252,19 @@ export function buildAssetSidebarNav(access: AssetNavAccess): AssetManagementNav
     return [];
   }
 
-  const groups: AssetManagementNavGroup[] = [
-    {
+  const groups: AssetManagementNavGroup[] = [];
+  // Only show the Domains switcher when the user can access more than one domain.
+  if (switcherItems.length > 1) {
+    groups.push({
       title: "Domains",
       items: switcherItems.map(({ domain: _d, ...item }) => item),
-    },
-  ];
+    });
+  }
 
-  const active = access.activeDomain;
+  const active =
+    access.activeDomain && canSee(access.activeDomain)
+      ? access.activeDomain
+      : switcherItems[0]?.domain ?? null;
   if (!active || !canSee(active)) {
     return groups;
   }
@@ -365,11 +370,11 @@ export type AssetsPipelineStage = {
   title: string;
   href: string;
   resource:
-    | "assets"
-    | "asset-assignments"
-    | "asset-maintenances"
-    | "asset-depreciations"
-    | "asset-disposals";
+  | "assets"
+  | "asset-assignments"
+  | "asset-maintenances"
+  | "asset-depreciations"
+  | "asset-disposals";
 };
 
 /** Asset lifecycle funnel on the dashboard (counts from overview API). */

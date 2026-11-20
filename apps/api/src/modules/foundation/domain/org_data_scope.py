@@ -22,7 +22,11 @@ from uuid import UUID
 from sqlalchemy import false
 
 from core.exceptions import ForbiddenException
-from modules.foundation.domain.erp_modules import ADMIN_USER_TYPES
+from modules.foundation.domain.erp_modules import (
+    ADMIN_USER_TYPES,
+    ASSET_MODULE_KEY,
+    ASSET_SUBMODULE_KEYS,
+)
 from modules.foundation.domain.value_objects import TenantContext
 
 # Topbar entity switcher is HR-path only; session company_id must not hide
@@ -49,7 +53,13 @@ def has_module_wide_data_access(ctx: TenantContext, module_key: str) -> bool:
     if is_platform_admin(ctx):
         return True
     key = (module_key or "").strip().lower()
-    if key and key in ctx.admin_module_keys:
+    admin_keys = set(ctx.admin_module_keys or ())
+    if key and key in admin_keys:
+        return True
+    # IT / Non-IT submodule admins get wide access within Assets APIs.
+    if key == ASSET_MODULE_KEY and (admin_keys & ASSET_SUBMODULE_KEYS):
+        return True
+    if key in ASSET_SUBMODULE_KEYS and ASSET_MODULE_KEY in admin_keys:
         return True
     # Legacy flags (migration / older tests).
     if key == "procurement" and ctx.procurement_tenant_wide:

@@ -154,14 +154,25 @@ describe("AssetReportsWorkspace", () => {
     expect(push).toHaveBeenCalledWith("/assets/asset-documents");
     await user.click(screen.getByRole("button", { name: "Open Components" }));
     expect(push).toHaveBeenCalledWith("/assets/asset-components");
-    await user.click(screen.getByRole("button", { name: "Open Assignments" }));
-    expect(push).toHaveBeenCalledWith("/assets/asset-assignments");
+    expect(screen.queryByRole("button", { name: "Open Assignments" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/coverage/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/active$/i)).not.toBeInTheDocument();
   });
 
-  it("renders a compact operational status chart when embedded", async () => {
-    render(<AssetReportsWorkspace embedded />);
+  it("renders a compact fleet mix chart when embedded with KPI props", async () => {
+    render(
+      <AssetReportsWorkspace
+        embedded
+        fleetKpis={{ totalAssets: 12, inStock: 8, assigned: 4 }}
+      />,
+    );
     await waitFor(() => expect(dashboard).toHaveBeenCalled());
-    expect(screen.getByText("Operational Status")).toBeInTheDocument();
+    expect(screen.getByText("Fleet mix")).toBeInTheDocument();
+    expect(screen.getByText("In Stock")).toBeInTheDocument();
+    expect(screen.getByText("Assigned")).toBeInTheDocument();
+    expect(screen.getByText("Total Assets")).toBeInTheDocument();
+    expect(screen.queryByText("Assignment usage")).not.toBeInTheDocument();
+    expect(screen.queryByText("Operational Status")).not.toBeInTheDocument();
     expect(screen.queryByText("Documents & Components")).not.toBeInTheDocument();
     expect(screen.queryByText("Asset status mix")).not.toBeInTheDocument();
     expect(screen.queryByText("Documents by type")).not.toBeInTheDocument();

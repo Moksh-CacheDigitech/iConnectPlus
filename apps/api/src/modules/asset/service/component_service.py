@@ -65,6 +65,12 @@ class AssetComponentService:
         include_availability: bool = False,
     ) -> tuple[list[AstAssetComponent] | list[dict], int]:
         cid = self._scope.resolve_list_company_id(ctx, company_id)
+        # When listing by parent asset, do not pin the session company — the asset may
+        # belong to another company than the header context (Edit Asset / import).
+        if asset_id is not None and company_id is None:
+            cid = None
+        if asset_ids and company_id is None:
+            cid = None
         if sort not in {"created_at", "component_code", "component_name"}:
             sort = "created_at"
         if asset_ids:

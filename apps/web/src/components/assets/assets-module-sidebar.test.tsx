@@ -119,10 +119,26 @@ describe("AssetsModuleSidebar", () => {
       activeDomain: "NON_IT",
     });
     const allTitles = nav.flatMap((g) => g.items.map((i) => i.title));
+    expect(nav.map((g) => g.title)).not.toContain("Domains");
+    expect(allTitles).not.toContain("IT Assets");
     expect(allTitles).not.toContain("Users");
     expect(allTitles).not.toContain("Types");
     expect(allTitles).not.toContain("Locations");
     expect(allTitles).toContain("Inventory");
+  });
+
+  it("hides IT domain switcher when only Non-IT is assigned", () => {
+    const nav = buildAssetSidebarNav({
+      isModuleAdmin: false,
+      domains: ["NON_IT"],
+      adminDomains: ["NON_IT"],
+      activeDomain: "NON_IT",
+    });
+    const allTitles = nav.flatMap((g) => g.items.map((i) => i.title));
+    expect(nav.map((g) => g.title)).not.toContain("Domains");
+    expect(allTitles).not.toContain("IT Assets");
+    expect(allTitles).toContain("Dashboard");
+    expect(allTitles).toContain("Types");
   });
 
   it("hides future modules from the rail", async () => {

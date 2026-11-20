@@ -161,15 +161,16 @@ describe("AssetOperationsDashboard layout", () => {
     expect(grid.className).toMatch(/sm:grid-cols-4/);
   });
 
-  it("renders KPI share trends when provided", () => {
+  it("does not render KPI share percentages or progress bars", () => {
     renderDashboard({
       kpiTrends: {
         readyToMove: { label: "17% of total", direction: "neutral" },
         assigned: { label: "67% of total", direction: "neutral" },
       },
     });
-    expect(screen.getByText("17% of total")).toBeInTheDocument();
-    expect(screen.getByText("67% of total")).toBeInTheDocument();
+    expect(screen.queryByText("17% of total")).not.toBeInTheDocument();
+    expect(screen.queryByText("67% of total")).not.toBeInTheDocument();
+    expect(screen.queryByText(/of total/i)).not.toBeInTheDocument();
   });
 
   it("does not render transfers section", () => {

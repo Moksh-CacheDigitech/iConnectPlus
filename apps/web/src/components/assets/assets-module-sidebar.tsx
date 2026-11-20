@@ -62,11 +62,13 @@ export function AssetsModuleSidebar() {
 
   const gatedNav = useMemo(() => {
     if (!accessLoaded) {
+      // Prefer path domain while access loads — never assume IT for Non-IT routes.
+      const pendingDomain = activeDomain ?? "NON_IT";
       return buildAssetSidebarNav({
         isModuleAdmin: false,
-        domains: ["IT"],
+        domains: [pendingDomain],
         adminDomains: [],
-        activeDomain: activeDomain ?? "IT",
+        activeDomain: pendingDomain,
       });
     }
     return buildAssetSidebarNav({
@@ -101,11 +103,21 @@ export function AssetsModuleSidebar() {
     );
   };
 
+  const subtitle = useMemo(() => {
+    if (!accessLoaded) return "Assets";
+    if (isModuleAdmin || (domains.includes("IT") && domains.includes("NON_IT"))) {
+      return "IT · Non-IT";
+    }
+    if (domains.includes("NON_IT")) return "Non-IT";
+    if (domains.includes("IT")) return "IT";
+    return "Assets";
+  }, [accessLoaded, isModuleAdmin, domains]);
+
   return (
     <ModuleSidebar
       moduleKey="assets"
       title="Asset Management"
-      subtitle="IT · Non-IT"
+      subtitle={subtitle}
       icon={Package}
       aria-label="Asset Management"
       testId="assets-module-sidebar"

@@ -19,6 +19,8 @@ export const NON_ASSIGNABLE_MODULE_KEYS = new Set([
   "voice-agent",
   "organization",
   "master-data",
+  // Parent Assets — assign IT Assets / Non-IT Assets submodules instead.
+  "assets",
 ]);
 
 type ModuleOption = {

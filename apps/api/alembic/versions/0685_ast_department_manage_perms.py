@@ -17,8 +17,8 @@ from modules.asset.permissions import (
     ASSET_MANAGER_PERMISSIONS,
 )
 
-revision: str = "0646_ast_department_manage_perms"
-down_revision: str | None = "0645_org_company_payslip_identity"
+revision: str = "0685_ast_department_manage_perms"
+down_revision: str | None = "0684_crm_ovf_charge_request"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

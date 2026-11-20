@@ -146,14 +146,18 @@ class AssignmentService:
             )
 
     def create(self, ctx: TenantContext, *, branch_id: UUID, company_id: UUID | None = None, **fields):
-        cid = self._scope.resolve_company_id(ctx, company_id)
-        self._scope.validate_branch_access(ctx, branch_id)
         component_ids = fields.pop("component_ids", None)
         fields.pop("expected_return_at", None)
 
         asset = self._assets.get(ctx, fields["asset_id"])
         if asset is None:
             raise NotFoundException("Asset not found")
+        # Multi-entity sessions park on one company; assignments must still write under
+        # the asset's company (otherwise Issue fails with "does not belong to this company").
+        cid = self._scope.resolve_company_id(ctx, company_id or asset.company_id)
+        if asset.company_id != cid:
+            raise AssignmentValidationError("Asset does not belong to this company")
+        self._scope.validate_branch_access(ctx, branch_id)
         # Abandoned Issue drafts stay ``draft`` and block the next issue/return cycle.
         self._cancel_orphan_drafts_for_asset(ctx, asset.id)
 

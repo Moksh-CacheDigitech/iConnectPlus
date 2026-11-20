@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -75,6 +76,39 @@ import {
   AssetsPremiumPage,
 } from "@/components/assets/shared/premium-surface";
 import { cn } from "@/lib/utils";
+
+function normalizeLocName(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Labels are often "Dubai · WFH" — compare on the city segment only. */
+function cityFromLocationLabel(label: string): string {
+  const raw = label.trim();
+  if (!raw) return "";
+  const match = raw.split(/\s*[·|–—-]\s*/)[0]?.trim();
+  return match || raw;
+}
+
+/**
+ * Map a saved (possibly soft-deleted) location onto an active catalog row.
+ * Prefer the asset company when the same city exists in multiple companies.
+ */
+function resolveActiveLocationId(
+  locs: SiteLocation[],
+  locationId: string,
+  labelHint: string,
+  preferCompanyId: string | null,
+): string {
+  if (locationId && locs.some((l) => l.id === locationId)) return locationId;
+  const city = normalizeLocName(cityFromLocationLabel(labelHint));
+  if (!city) return "";
+  const matches = locs.filter((l) => normalizeLocName(l.name) === city);
+  if (preferCompanyId) {
+    const scoped = matches.find((l) => l.company_id === preferCompanyId);
+    if (scoped) return scoped.id;
+  }
+  return matches[0]?.id ?? "";
+}
 
 function FormSection({
   id,
@@ -155,6 +189,8 @@ export function AssetAddForm({
   const isEdit = Boolean(assetId);
   const [siteLocations, setSiteLocations] = useState<SiteLocation[]>([]);
   const [siteBuildings, setSiteBuildings] = useState<SiteBuilding[]>([]);
+  /** Location id that `siteBuildings` was fetched for (avoids stale Address options). */
+  const [buildingsForLocationId, setBuildingsForLocationId] = useState("");
   const [assetTypes, setAssetTypes] = useState<ItAssetType[]>([]);
   const [importOpen, setImportOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -163,6 +199,12 @@ export function AssetAddForm({
   const [activationWarning, setActivationWarning] = useState<string | null>(null);
   const [createdAssetId, setCreatedAssetId] = useState<string | null>(null);
   const [editVersion, setEditVersion] = useState<number | null>(null);
+  /** Asset company when editing — used to prefer matching asset types. */
+  const [editCompanyId, setEditCompanyId] = useState<string | null>(null);
+  const [initialLocationId, setInitialLocationId] = useState<string>("");
+  const [initialBuildingId, setInitialBuildingId] = useState<string>("");
+  /** Ignore stale site-building responses when the user changes Location quickly. */
+  const buildingsReqSeq = useRef(0);
   const [incomingPrefill, setIncomingPrefill] = useState<IncomingRegistrationPrefill | null>(
     null,
   );
@@ -187,15 +229,92 @@ export function AssetAddForm({
   });
 
   const fromIncoming = Boolean(incomingUnitId);
+  const typeOptions = useMemo(() => {
+    // Prefer this asset/session company's catalog (API seeds missing defaults).
+    // Fall back to unique names from the full list so the dropdown never shows
+    // only a single imported type like "laptop".
+    const scoped = editCompanyId
+      ? assetTypes.filter((t) => t.company_id === editCompanyId)
+      : [];
+    let base = scoped.length > 0 ? scoped : assetTypes;
+    if (base.length < 2 && assetTypes.length > base.length) {
+      const seen = new Set(base.map((t) => t.name.trim().toLowerCase()));
+      const extras: ItAssetType[] = [];
+      for (const t of assetTypes) {
+        const key = t.name.trim().toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        extras.push(t);
+      }
+      base = [...base, ...extras];
+    }
+    if (
+      form.asset_type_id &&
+      !base.some((t) => t.id === form.asset_type_id)
+    ) {
+      const orphan =
+        assetTypes.find((t) => t.id === form.asset_type_id) ??
+        ({
+          id: form.asset_type_id,
+          name: form.asset_name || "Current type",
+          active: true,
+          requires_hardware_config: false,
+          eligible_as_component: false,
+          description: null,
+          company_id: editCompanyId || "",
+          version: 1,
+        } satisfies ItAssetType);
+      return [orphan, ...base];
+    }
+    return base;
+  }, [assetTypes, editCompanyId, form.asset_type_id, form.asset_name]);
   const selectedType = useMemo(
-    () => assetTypes.find((t) => t.id === form.asset_type_id) ?? null,
-    [assetTypes, form.asset_type_id],
+    () => typeOptions.find((t) => t.id === form.asset_type_id) ?? null,
+    [typeOptions, form.asset_type_id],
   );
   const requiresHardware = selectedType?.requires_hardware_config === true;
   const showGeneration = requiresHardware && isIntelProcessor(form.processor);
-  const buildingOptions = useMemo(
-    () => siteBuildings.filter((b) => b.location_id === form.location_id),
-    [siteBuildings, form.location_id],
+  // Show every location returned by the API (org-scoped). Do not hide other
+  // companies' sites — users reported empty/partial Location dropdowns.
+  const locationOptions = siteLocations;
+  const buildingOptions = useMemo(() => {
+    const locId = String(form.location_id || "");
+    if (!locId || buildingsForLocationId !== locId) return [] as SiteBuilding[];
+    // API already filters by location_id; keep a string-safe client guard.
+    return siteBuildings.filter((b) => String(b.location_id) === locId);
+  }, [siteBuildings, form.location_id, buildingsForLocationId]);
+
+  const loadBuildingsForLocation = useCallback(
+    async (locationId: string, opts?: { autoSelectSingle?: boolean }) => {
+      const seq = ++buildingsReqSeq.current;
+      if (!locationId) {
+        if (seq === buildingsReqSeq.current) {
+          setSiteBuildings([]);
+          setBuildingsForLocationId("");
+        }
+        return [] as SiteBuilding[];
+      }
+      try {
+        const rows = await listSiteBuildings(locationId);
+        if (seq !== buildingsReqSeq.current) return rows;
+        setSiteBuildings(rows);
+        setBuildingsForLocationId(locationId);
+        if (opts?.autoSelectSingle && rows.length === 1) {
+          const onlyId = rows[0]!.id;
+          setForm((f) =>
+            f.location_id === locationId ? { ...f, building_id: onlyId } : f,
+          );
+        }
+        return rows;
+      } catch {
+        if (seq === buildingsReqSeq.current) {
+          setSiteBuildings([]);
+          setBuildingsForLocationId(locationId);
+        }
+        return [] as SiteBuilding[];
+      }
+    },
+    [],
   );
 
   useEffect(() => {
@@ -203,36 +322,36 @@ export function AssetAddForm({
       if (!isAuthenticated()) return;
       try {
         const sessionCompanyId = getStoredOrgContext()?.companyId || undefined;
-        const [categoryPayload, locs, types, buildings] = await Promise.all([
-          assetCategoryService.search({
-            page: 1,
-            page_size: 200,
-            status: "active",
-            company_id: sessionCompanyId,
-          }),
-          listSiteLocations(undefined, { company_id: sessionCompanyId }).catch(
-            () => [] as SiteLocation[],
-          ),
-          listItAssetTypes({ active: true, company_id: sessionCompanyId }).catch(
-            () => [] as ItAssetType[],
-          ),
-          listSiteBuildings().catch(() => [] as SiteBuilding[]),
-        ]);
+        const categoryPayload = await assetCategoryService.search({
+          page: 1,
+          page_size: 200,
+          status: "active",
+          company_id: sessionCompanyId,
+        });
         const active = filterActiveCategories(categoryPayload.items);
-        setSiteLocations(locs);
-        setSiteBuildings(buildings);
-        setAssetTypes(types);
 
         if (assetId) {
-          const [row, comps, locationRows] = await Promise.all([
-            assetRegisterService.get(assetId),
-            componentService.search({
-              asset_id: assetId,
-              component_type: "CHARGER",
-              status: "active",
-              page: 1,
-              page_size: 20,
-            }),
+          const row = await assetRegisterService.get(assetId);
+          const assetCompanyId = String(row.company_id ?? "") || null;
+          setEditCompanyId(assetCompanyId);
+          // Seed/load types for the asset company so Asset Name shows the full catalog
+          // (not only a single imported "laptop" row). Also load org-wide as fallback.
+          const [companyTypes, allTypes, locs, comps, locationRows] = await Promise.all([
+            listItAssetTypes({
+              active: true,
+              company_id: assetCompanyId || undefined,
+            }).catch(() => [] as ItAssetType[]),
+            listItAssetTypes({ active: true }).catch(() => [] as ItAssetType[]),
+            listSiteLocations().catch(() => [] as SiteLocation[]),
+            componentService
+              .search({
+                asset_id: assetId,
+                component_type: "CHARGER",
+                status: "active",
+                page: 1,
+                page_size: 20,
+              })
+              .catch(() => ({ items: [] as Array<Record<string, unknown>> })),
             assetLocationService
               .search({
                 asset_id: assetId,
@@ -243,35 +362,126 @@ export function AssetAddForm({
               })
               .catch(() => ({ items: [] as Array<{ location_id?: string | null; building_id?: string | null }> })),
           ]);
+          const typeById = new Map<string, ItAssetType>();
+          for (const t of [...companyTypes, ...allTypes]) {
+            typeById.set(t.id, t);
+          }
+          const types = [...typeById.values()];
+          setAssetTypes(types);
+          setSiteLocations(locs);
           const charger = comps.items.find(
             (c) => String(c.component_type ?? "").toUpperCase() === "CHARGER",
           );
           const currentLoc = locationRows.items[0];
-          const locationId = String(
-            row.location_id ?? currentLoc?.location_id ?? "",
+          const labelHint = String(
+            currentLoc?.location_label ?? row.current_location_label ?? "",
           );
-          const buildingId = String(
+          let locationId = resolveActiveLocationId(
+            locs,
+            String(row.location_id ?? currentLoc?.location_id ?? ""),
+            labelHint,
+            assetCompanyId,
+          );
+          // Prefer the site location that belongs to the asset company (duplicate city names).
+          if (locationId && assetCompanyId) {
+            const scoped = locs.find(
+              (l) => l.id === locationId && l.company_id === assetCompanyId,
+            );
+            if (!scoped) {
+              const byName = locs.find(
+                (l) =>
+                  l.company_id === assetCompanyId &&
+                  normalizeLocName(l.name) ===
+                  normalizeLocName(cityFromLocationLabel(labelHint) || labelHint),
+              );
+              if (byName) locationId = byName.id;
+            }
+          }
+          let buildingId = String(
             row.building_id ?? currentLoc?.building_id ?? "",
           );
           if (locationId) {
-            const buildingsForLoc = await listSiteBuildings(locationId).catch(
-              () => [] as SiteBuilding[],
-            );
-            setSiteBuildings(buildingsForLoc);
+            let buildingsForLoc = await loadBuildingsForLocation(locationId);
+            // Soft-deleted masters leave empty Address — try same city under asset company / others.
+            if (buildingsForLoc.length === 0 && labelHint) {
+              const city = normalizeLocName(cityFromLocationLabel(labelHint));
+              const alternates = locs.filter(
+                (l) =>
+                  l.id !== locationId &&
+                  normalizeLocName(l.name) === city &&
+                  (!assetCompanyId || l.company_id === assetCompanyId),
+              );
+              const broader =
+                alternates.length > 0
+                  ? alternates
+                  : locs.filter(
+                    (l) =>
+                      l.id !== locationId && normalizeLocName(l.name) === city,
+                  );
+              for (const alt of broader) {
+                const rows = await loadBuildingsForLocation(alt.id);
+                if (rows.length > 0) {
+                  locationId = alt.id;
+                  buildingsForLoc = rows;
+                  buildingId = "";
+                  break;
+                }
+              }
+            }
+            // Excel import often stores location without building — default the only address.
+            if (
+              buildingId &&
+              !buildingsForLoc.some((b) => String(b.id) === buildingId)
+            ) {
+              buildingId = "";
+            }
+            if (!buildingId) {
+              const forLoc = buildingsForLoc.filter(
+                (b) => String(b.location_id) === locationId,
+              );
+              if (forLoc.length === 1) {
+                buildingId = forLoc[0]!.id;
+              }
+            }
+          } else {
+            buildingsReqSeq.current += 1;
+            setSiteBuildings([]);
+            setBuildingsForLocationId("");
           }
+          setInitialLocationId(locationId);
+          setInitialBuildingId(buildingId);
           const hardware = parseConfigurationString(
             typeof row.configuration === "string" ? row.configuration : null,
           );
           setEditVersion(typeof row.version === "number" ? row.version : null);
+          const companyCatalog = types.filter(
+            (t) => !assetCompanyId || t.company_id === assetCompanyId,
+          );
           const editTypeId = String(row.asset_type_id ?? "");
-          const editTypeName =
+          let editTypeName =
             types.find((t) => t.id === editTypeId)?.name ?? String(row.asset_name ?? "");
+          // Resolve type by name within asset company when id missing / wrong company catalog.
+          let resolvedTypeId = editTypeId;
+          if (
+            !resolvedTypeId ||
+            !companyCatalog.some((t) => t.id === resolvedTypeId)
+          ) {
+            const byName = companyCatalog.find(
+              (t) =>
+                normalizeLocName(t.name) ===
+                normalizeLocName(String(row.asset_name ?? editTypeName)),
+            );
+            if (byName) {
+              resolvedTypeId = byName.id;
+              editTypeName = byName.name;
+            }
+          }
           setForm((f) => ({
             ...f,
             asset_name: editTypeName,
             serial_number: String(row.serial_number ?? ""),
             asset_category_id: String(row.asset_category_id ?? f.asset_category_id),
-            asset_type_id: editTypeId || f.asset_type_id,
+            asset_type_id: resolvedTypeId || f.asset_type_id,
             purchase_date: String(row.purchase_date ?? f.purchase_date).slice(0, 10),
             purchase_cost:
               row.purchase_cost != null ? String(row.purchase_cost) : f.purchase_cost,
@@ -285,12 +495,34 @@ export function AssetAddForm({
             location_id: locationId,
             building_id: buildingId,
             charger_available: charger ? "yes" : "no",
+            // Prefer serial (unique charger id). component_code is often auto
+            // CHARGER-0001 per asset and must not be written back as serial.
             charger_code: charger
-              ? String(charger.component_code || charger.serial_number || "")
+              ? String(charger.serial_number || charger.component_code || "")
               : "",
           }));
           return;
         }
+
+        setEditCompanyId(sessionCompanyId || null);
+        const [sessionTypes, allTypes, locs] = await Promise.all([
+          listItAssetTypes({
+            active: true,
+            company_id: sessionCompanyId,
+          }).catch(() => [] as ItAssetType[]),
+          listItAssetTypes({ active: true }).catch(() => [] as ItAssetType[]),
+          listSiteLocations().catch(() => [] as SiteLocation[]),
+        ]);
+        const typeById = new Map<string, ItAssetType>();
+        for (const t of [...sessionTypes, ...allTypes]) {
+          typeById.set(t.id, t);
+        }
+        const resolvedTypes = [...typeById.values()];
+        setAssetTypes(resolvedTypes);
+        setSiteLocations(locs);
+        buildingsReqSeq.current += 1;
+        setSiteBuildings([]);
+        setBuildingsForLocationId("");
 
         let prefill: IncomingRegistrationPrefill | null = null;
         if (incomingUnitId) {
@@ -318,7 +550,7 @@ export function AssetAddForm({
             if (prefill.asset_type_id) {
               next = { ...next, asset_type_id: prefill.asset_type_id };
             } else if (prefill.asset_type) {
-              const match = types.find(
+              const match = resolvedTypes.find(
                 (t) => t.name.toLowerCase() === String(prefill.asset_type).toLowerCase(),
               );
               if (match) next = { ...next, asset_type_id: match.id };
@@ -327,14 +559,14 @@ export function AssetAddForm({
           if (!next.asset_category_id && active.length > 0) {
             next = { ...next, asset_category_id: active[0]!.id };
           }
-          if (!next.asset_type_id && types.length > 0) {
+          if (!next.asset_type_id && resolvedTypes.length > 0) {
             next = {
               ...next,
-              asset_type_id: types[0]!.id,
-              asset_name: types[0]!.name,
+              asset_type_id: resolvedTypes[0]!.id,
+              asset_name: resolvedTypes[0]!.name,
             };
           } else if (next.asset_type_id) {
-            const typeName = types.find((t) => t.id === next.asset_type_id)?.name;
+            const typeName = resolvedTypes.find((t) => t.id === next.asset_type_id)?.name;
             if (typeName) next = { ...next, asset_name: typeName };
           }
           return next;
@@ -349,7 +581,7 @@ export function AssetAddForm({
         );
       }
     })();
-  }, [incomingUnitId, incomingLineId, assetId, isEdit]);
+  }, [incomingUnitId, incomingLineId, assetId, isEdit, loadBuildingsForLocation]);
 
   const onAssetType = useCallback(
     (assetTypeId: string) => {
@@ -370,12 +602,20 @@ export function AssetAddForm({
 
   function validate(): boolean {
     const next: FieldErrors = {};
-    if (!form.asset_type_id) next.asset_type_id = "Asset name is required.";
+    if (!form.asset_type_id) {
+      next.asset_type_id = "Asset name is required.";
+    }
     if (!form.asset_category_id) {
       next.asset_category_id = "No active asset category is available. Contact an administrator.";
     }
     if (!form.location_id) next.location_id = "Location is required.";
-    if (!form.building_id) next.building_id = "Address is required.";
+    // Imported assets often have location without building. On edit, require Address
+    // only when the location changes or there was never a saved location.
+    const locationChanged = isEdit && form.location_id !== initialLocationId;
+    const hadSavedLocation = Boolean(initialLocationId);
+    if (!form.building_id && (!isEdit || locationChanged || !hadSavedLocation)) {
+      next.building_id = "Address is required.";
+    }
 
     if (!form.charger_available) {
       next.charger_available = "Select Yes or No for Charger Available.";
@@ -422,16 +662,29 @@ export function AssetAddForm({
           : undefined;
         const updateBody: Record<string, unknown> = {
           asset_name: resolvedAssetName,
-          asset_type_id: form.asset_type_id || undefined,
           serial_number: form.serial_number.trim() || null,
           make: form.make.trim() || null,
           model: form.model.trim() || null,
-          location_id: form.location_id,
-          building_id: form.building_id,
           charger_available: form.charger_available === "yes",
           charger_code:
             form.charger_available === "yes" ? form.charger_code.trim() : null,
         };
+        if (form.asset_type_id) {
+          updateBody.asset_type_id = form.asset_type_id;
+        }
+        // Only re-persist site location when both ids are set, or when location
+        // alone changed (import rows may have location without building).
+        const locationUnchanged =
+          form.location_id === initialLocationId &&
+          form.building_id === initialBuildingId;
+        if (!locationUnchanged) {
+          if (form.location_id && form.building_id) {
+            updateBody.location_id = form.location_id;
+            updateBody.building_id = form.building_id;
+          } else if (form.location_id && form.location_id !== initialLocationId) {
+            updateBody.location_id = form.location_id;
+          }
+        }
         if (configuration !== undefined) {
           updateBody.configuration = configuration;
         } else if (form.processor || form.ram || form.storage) {
@@ -737,7 +990,10 @@ export function AssetAddForm({
       <div className="space-y-4">
         <FormSection id="add-asset-basic" title="Basic" icon={Package}>
           <Field label="Asset Name *" error={fieldErrors.asset_type_id ?? fieldErrors.asset_name}>
-            <Select value={form.asset_type_id} onValueChange={onAssetType}>
+            <Select
+              value={form.asset_type_id || undefined}
+              onValueChange={onAssetType}
+            >
               <SelectTrigger
                 id="asset_name"
                 className="cursor-pointer transition-colors duration-200"
@@ -747,7 +1003,7 @@ export function AssetAddForm({
                 <SelectValue placeholder="Select Asset Name" />
               </SelectTrigger>
               <SelectContent>
-                {assetTypes.map((t) => (
+                {typeOptions.map((t) => (
                   <SelectItem key={t.id} value={t.id} className="cursor-pointer">
                     {t.name}
                   </SelectItem>
@@ -768,7 +1024,7 @@ export function AssetAddForm({
               {fieldErrors.asset_category_id}
             </p>
           ) : null}
-          {assetTypes.length === 0 ? (
+          {typeOptions.length === 0 ? (
             <p className="text-xs text-muted-foreground sm:col-span-2">
               No active asset types. An IT admin must create types under Configuration → Asset
               Types.
@@ -910,10 +1166,10 @@ export function AssetAddForm({
           ) : null}
         </FormSection>
 
-        <FormSection id="add-asset-location" title="Location & Registration" icon={MapPin}>
+        <FormSection id="add-asset-location" title="Location" icon={MapPin}>
           <Field label="Location *" error={fieldErrors.location_id}>
             <Select
-              value={form.location_id}
+              value={form.location_id || undefined}
               onValueChange={(v) => {
                 setFieldErrors((err) => ({
                   ...err,
@@ -921,9 +1177,9 @@ export function AssetAddForm({
                   building_id: undefined,
                 }));
                 setForm((f) => ({ ...f, location_id: v, building_id: "" }));
-                void listSiteBuildings(v)
-                  .then(setSiteBuildings)
-                  .catch(() => setSiteBuildings([]));
+                setSiteBuildings([]);
+                setBuildingsForLocationId("");
+                void loadBuildingsForLocation(v, { autoSelectSingle: true });
               }}
             >
               <SelectTrigger
@@ -933,18 +1189,28 @@ export function AssetAddForm({
                 <SelectValue placeholder="Select Location" />
               </SelectTrigger>
               <SelectContent>
-                {siteLocations.map((c) => (
-                  <SelectItem key={c.id} value={c.id} className="cursor-pointer">
-                    {c.name}
-                    {c.is_head_office ? " (Head Office)" : ""}
-                  </SelectItem>
-                ))}
+                {locationOptions.map((c) => {
+                  const dupName =
+                    locationOptions.filter(
+                      (o) => normalizeLocName(o.name) === normalizeLocName(c.name),
+                    ).length > 1;
+                  return (
+                    <SelectItem key={c.id} value={c.id} className="cursor-pointer">
+                      {c.name}
+                      {c.is_head_office ? " (Head Office)" : ""}
+                      {dupName ? ` · ${c.company_id.slice(0, 8)}` : ""}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Address *" error={fieldErrors.building_id}>
+          <Field
+            label={isEdit && initialLocationId && !initialBuildingId ? "Address" : "Address *"}
+            error={fieldErrors.building_id}
+          >
             <Select
-              value={form.building_id}
+              value={form.building_id || undefined}
               onValueChange={(v) => {
                 setFieldErrors((err) => ({ ...err, building_id: undefined }));
                 setForm((f) => ({ ...f, building_id: v }));

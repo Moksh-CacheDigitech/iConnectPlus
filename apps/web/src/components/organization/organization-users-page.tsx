@@ -110,6 +110,9 @@ function isModuleAdminRow(row: FoundationUser): boolean {
   return !isErpAdmin(row.user_type) && (row.admin_module_keys ?? []).length > 0;
 }
 
+/** Parent Assets is assigned via IT / Non-IT submodules — hide from access tables. */
+const HIDDEN_ACCESS_MODULE_KEYS = new Set(["assets"]);
+
 function expandAdminAccessRows(users: FoundationUser[]): AccessTableRow[] {
   const seen = new Set<string>();
   const out: AccessTableRow[] = [];
@@ -123,6 +126,7 @@ function expandAdminAccessRows(users: FoundationUser[]): AccessTableRow[] {
       continue;
     }
     for (const key of keys) {
+      if (HIDDEN_ACCESS_MODULE_KEYS.has(key)) continue;
       const id = `${user.id}:${key}`;
       if (seen.has(id)) continue;
       seen.add(id);
@@ -140,6 +144,7 @@ function expandMemberAccessRows(users: FoundationUser[]): AccessTableRow[] {
       user.assigned_module_keys ?? [],
       user.admin_module_keys ?? [],
     )) {
+      if (HIDDEN_ACCESS_MODULE_KEYS.has(key)) continue;
       const id = `${user.id}:${key}`;
       if (seen.has(id)) continue;
       seen.add(id);
@@ -508,8 +513,8 @@ function AssignAccessCard({
           {saving
             ? "Saving…"
             : !allModules &&
-                concreteKeys.length > 0 &&
-                keysNeedingGrant.length < concreteKeys.length
+              concreteKeys.length > 0 &&
+              keysNeedingGrant.length < concreteKeys.length
               ? "Update access"
               : "Assign"}
         </Button>
