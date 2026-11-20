@@ -581,7 +581,11 @@ class AssetService:
         self._validator.validate_submit_readiness(ctx, row)
         self._engine.submit(row)
         if not asset_workflow_governance_enabled():
-            return self._repo.update(ctx, row_id, status=row.status)
+            # Local/dev (gov off): complete registration on submit — same pattern as
+            # AssignmentService.submit — so Add Asset does not depend on a separate
+            # approve permission call that often leaves assets stuck as submitted.
+            self._repo.update(ctx, row_id, status=row.status)
+            return self._legacy_approve(ctx, row_id, self.get(ctx, row_id))
         instance = self._governance.submit_for_approval(
             ctx,
             entity_name=ENTITY_AST_ASSET,
@@ -679,6 +683,12 @@ class AssetService:
         return self.get(ctx, row_id)
 
     def _legacy_approve(self, ctx: TenantContext, row_id: UUID, row: AstAsset):
+        # Idempotent: submit (gov off) already activates; a follow-up approve is a no-op.
+        if row.status in {
+            AssetStatus.ACTIVE.value,
+            AssetStatus.IN_MAINTENANCE.value,
+        }:
+            return row
         self._engine.approve(row)
         if row.master_asset_id is None:
             master = self._master.create_or_link_master_asset(ctx, row)

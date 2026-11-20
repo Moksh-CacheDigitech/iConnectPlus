@@ -1303,13 +1303,6 @@ export const erpModules: ErpModule[] = [
         listable: false,
       },
       {
-        key: "departments",
-        title: "Departments",
-        description: "Departments (organization master)",
-        apiPath: "/departments",
-        listable: false,
-      },
-      {
         key: "asset-assignments",
         title: "Asset Assignment",
         description: "Custodian assignments and returns",

@@ -86,11 +86,9 @@ const TEMPLATE_HEADERS = [
   "Model",
   "Configuration",
   "Charger",
-  "Asset Type",
-  "Assignee",
+  "Assigned",
   "Employee ID",
   "OperationalStatus",
-  "Maintenance Reason",
   "Location",
   "Issue Date",
 ] as const;
@@ -100,51 +98,43 @@ function buildSampleRows(types: ItAssetType[]) {
   const monitor = types.find((t) => t.name.toLowerCase().includes("monitor"))?.name ?? "Monitor";
   return [
     {
-      "Asset Name": "MacBook Pro 14",
+      "Asset Name": laptop,
       "S/N": "SN-1001",
       Make: "Apple",
       Model: "M4 14",
       Configuration: "Apple M4 / 16 GB / 512 GB",
-      Charger: "CHG12345",
-      "Asset Type": laptop,
-      Assignee: "Asha Nair",
+      Charger: "CHG-1001",
+      Assigned: "Asha Nair",
       "Employee ID": "EMP-001",
       OperationalStatus: "Assigned",
-      "Maintenance Reason": "",
       Location: "Mumbai",
       "Issue Date": "2025-01-15",
-      Charger: "CHG-1001",
     },
     {
-      "Asset Name": "Dell Monitor 27",
+      "Asset Name": monitor,
       "S/N": "SN-1002",
       Make: "Dell",
       Model: "U2720Q",
       Configuration: "",
       Charger: "",
-      "Asset Type": monitor,
-      Assignee: "",
+      Assigned: "",
       "Employee ID": "",
-      OperationalStatus: "Ready to Move",
-      "Maintenance Reason": "",
+      OperationalStatus: "In Stock",
       Location: "New Delhi",
       "Issue Date": "",
-      Charger: "",
     },
     {
-      "Asset Name": "Lenovo ThinkPad T14",
+      "Asset Name": laptop,
       "S/N": "SN-1003",
       Make: "Lenovo",
       Model: "T14",
       Configuration: "i5 10th GEN 16/512GB",
-      "Asset Type": laptop,
-      Assignee: "",
+      Charger: "",
+      Assigned: "",
       "Employee ID": "",
       OperationalStatus: "In Maintenance",
-      "Maintenance Reason": "Screen flicker / hardware check",
       Location: "Mumbai",
       "Issue Date": "",
-      Charger: "",
     },
   ];
 }
@@ -155,7 +145,7 @@ function normalizeHeader(key: string): string {
 
 function normalizeOpsStatus(raw: string): string {
   const v = raw.trim().toLowerCase().replace(/\s+/g, "_");
-  if (!v || v === "ready" || v === "ready_to_move") return "READY_TO_MOVE";
+  if (!v || v === "ready" || v === "ready_to_move" || v === "in_stock") return "READY_TO_MOVE";
   if (v === "assigned") return "ASSIGNED";
   if (
     v === "in_maintenance" ||
@@ -219,12 +209,21 @@ function parseIssueDate(raw: unknown): string | null {
     const dd = String(parsed.d).padStart(2, "0");
     return `${parsed.y}-${mm}-${dd}`;
   }
+  if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
+    const y = raw.getFullYear();
+    const mm = String(raw.getMonth() + 1).padStart(2, "0");
+    const dd = String(raw.getDate()).padStart(2, "0");
+    return `${y}-${mm}-${dd}`;
+  }
   const text = String(raw).trim();
   if (!text) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
   const d = new Date(text);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mm}-${dd}`;
 }
 
 function pickField(mapped: Record<string, unknown>, keys: string[]): string {
@@ -237,7 +236,7 @@ function pickField(mapped: Record<string, unknown>, keys: string[]): string {
 
 function parseExcelRows(json: Record<string, unknown>[]): ParsedImportRow[] {
   const out: ParsedImportRow[] = [];
-  json.forEach((raw, index) => {
+  json.forEach((raw) => {
     const mapped: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(raw)) {
       mapped[normalizeHeader(k)] = v;
@@ -251,19 +250,30 @@ function parseExcelRows(json: Record<string, unknown>[]): ParsedImportRow[] {
     if (!asset_name) return;
 
     const assignee_name =
-      pickField(mapped, ["assignee", "assignee_name", "employee_name", "employee"]) || null;
+      pickField(mapped, [
+        "assigned",
+        "assignee",
+        "assignee_name",
+        "employee_name",
+        "employee",
+      ]) || null;
     const employee_code =
       pickField(mapped, ["employee_id", "employeeid", "emp_id", "assignee_employee_id"]) ||
       null;
 
     const location = pickField(mapped, ["location", "site", "site_location"]) || null;
     const opsRaw = pickField(mapped, ["operationalstatus", "operational_status", "status"]);
-    const operational_status = normalizeOpsStatus(opsRaw || "ready to move");
-    const asset_type = pickField(mapped, ["asset_type", "type", "assettype"]);
+    const operational_status = normalizeOpsStatus(opsRaw || "in stock");
+    // Asset Name is the type (same as Add Asset). Optional legacy Asset Type column still accepted.
+    const asset_type =
+      pickField(mapped, ["asset_type", "type", "assettype"]) || asset_name;
 
-    const configurationRaw = pickField(mapped, ["configuration", "config"]);
+    const configurationRaw =
+      pickField(mapped, ["configuration", "config", "specs", "hardware_configuration"]) || "";
     const configuration =
-      configurationRaw.length > 500 ? configurationRaw.slice(0, 500) : configurationRaw || null;
+      configurationRaw.length > 500
+        ? configurationRaw.slice(0, 500)
+        : configurationRaw || null;
     const maintenance_reason =
       pickField(mapped, [
         "maintenance_reason",
@@ -273,13 +283,13 @@ function parseExcelRows(json: Record<string, unknown>[]): ParsedImportRow[] {
       ]) || null;
 
     out.push({
-      row_number: index + 2,
+      // Contiguous serial for valid rows only (blank Excel rows are skipped).
+      row_number: out.length + 1,
       asset_name,
       serial_number: pickField(mapped, ["s_n", "sn", "serial_number", "serial"]) || null,
       make: pickField(mapped, ["make", "manufacturer", "brand"]) || null,
       model: pickField(mapped, ["model"]) || null,
-      configuration:
-        pickField(mapped, ["configuration", "config", "specs", "hardware_configuration"]) || null,
+      configuration,
       charger_serial:
         pickField(mapped, ["charger", "charger_serial", "charger_sn", "charger_s_n"]) || null,
       asset_type,
@@ -288,8 +298,6 @@ function parseExcelRows(json: Record<string, unknown>[]): ParsedImportRow[] {
       operational_status,
       location,
       issue_date: parseIssueDate(mapped.issue_date ?? mapped.issue),
-      charger_serial:
-        pickField(mapped, ["charger", "charger_serial", "charger_sn"]) || null,
       maintenance_reason,
       errors: [],
     });
@@ -315,16 +323,17 @@ function validateRows(
   return rows.map((row) => {
     const errors: string[] = [];
     if (!row.asset_type.trim()) {
-      errors.push("Asset Type is required");
+      errors.push("Asset Name is required and must match an Asset Type");
     } else {
       const type = typeByName.get(normalizeName(row.asset_type));
-      if (!type) errors.push(`Asset type '${row.asset_type}' not found`);
+      if (!type) {
+        errors.push(
+          `Asset Name '${row.asset_name}' must match a type under Configuration → Asset Types`,
+        );
+      }
     }
     if (row.operational_status === "ASSIGNED" && !row.employee_code) {
       errors.push("Assigned status requires Employee ID");
-    }
-    if (row.operational_status === "IN_MAINTENANCE" && !row.maintenance_reason?.trim()) {
-      errors.push("In Maintenance status requires Maintenance Reason");
     }
     if (row.employee_code && !options.skipEmployeeLookup) {
       const emp = findEmployeeByCode(empByCode, row.employee_code);
@@ -332,7 +341,7 @@ function validateRows(
         errors.push(`Employee ID '${row.employee_code}' not found`);
       } else if (row.assignee_name && !namesMatch(row.assignee_name, emp)) {
         errors.push(
-          `Assignee '${row.assignee_name}' does not match employee ${emp.displayName}`,
+          `Assigned '${row.assignee_name}' does not match employee ${emp.displayName}`,
         );
       }
     }
@@ -356,34 +365,31 @@ export function downloadItAssetImportTemplate(types: ItAssetType[]): void {
   const sampleRows = buildSampleRows(types);
   const importSheet = XLSX.utils.json_to_sheet(sampleRows, { header: [...TEMPLATE_HEADERS] });
   importSheet["!cols"] = [
-    { wch: 24 },
+    { wch: 18 },
     { wch: 14 },
     { wch: 12 },
     { wch: 16 },
     { wch: 28 },
-    { wch: 14 },
-    { wch: 14 },
-    { wch: 20 },
     { wch: 14 },
     { wch: 18 },
-    { wch: 28 },
+    { wch: 14 },
+    { wch: 18 },
     { wch: 16 },
     { wch: 12 },
-    { wch: 14 },
   ];
 
   const activeTypes = types.filter((t) => t.active);
   const typeRows =
     activeTypes.length > 0
-      ? activeTypes.map((t) => ({ asset_type: t.name }))
-      : [{ asset_type: "(create asset types in Configuration first)" }];
+      ? activeTypes.map((t) => ({ "Asset Name (must match type)": t.name }))
+      : [{ "Asset Name (must match type)": "(create asset types in Configuration first)" }];
 
   const typesSheet = XLSX.utils.json_to_sheet(typeRows);
-  typesSheet["!cols"] = [{ wch: 28 }];
+  typesSheet["!cols"] = [{ wch: 36 }];
 
   const statusSheet = XLSX.utils.aoa_to_sheet([
     ["OperationalStatus"],
-    ["Ready to Move"],
+    ["In Stock"],
     ["Assigned"],
     ["In Maintenance"],
   ]);
@@ -391,26 +397,25 @@ export function downloadItAssetImportTemplate(types: ItAssetType[]): void {
 
   const refSheet = XLSX.utils.aoa_to_sheet([
     ["OperationalStatus values (use only these)"],
-    ["Ready to Move"],
+    ["In Stock"],
     ["Assigned"],
     ["In Maintenance"],
     [],
     ["Notes"],
     ["Asset codes (AST-2026-000001) are auto-generated - do not add an Asset Code column."],
+    ["Asset Name must match Configuration → Asset Types (see Available names sheet)."],
     ["Location must match a name from Assets → Locations (case-insensitive)."],
     ["If Location is missing, add it under Assets → Locations first, then re-import."],
-    ["Assignee = employee name; Employee ID = code (e.g. EMP-001). Both required when Assigned."],
-    ["Maintenance Reason is required when OperationalStatus is In Maintenance (no assignee needed)."],
+    ["Assigned = employee name; Employee ID = code (e.g. EMP-001). Both required when OperationalStatus is Assigned."],
     ["In Maintenance defaults: start date = today, expected duration = 7 days."],
-    ["Asset Type must match Configuration → Asset Types (see Available types sheet)."],
     ["Configuration is free text (e.g. Intel Core i5 / Gen 11 / 512 GB) and saved on the asset."],
-    ["Charger = charger serial number (e.g. CHG12345). Creates and links a CHARGER component."],
+    ["Charger = charger code (same as Add Asset → Charger Code, e.g. CHG-1001). Saved as the CHARGER component code."],
   ]);
   refSheet["!cols"] = [{ wch: 90 }];
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, importSheet, "Import");
-  XLSX.utils.book_append_sheet(wb, typesSheet, "Available types");
+  XLSX.utils.book_append_sheet(wb, typesSheet, "Available names");
   XLSX.utils.book_append_sheet(wb, statusSheet, "Status dropdown");
   XLSX.utils.book_append_sheet(wb, refSheet, "Reference");
 
@@ -663,9 +668,9 @@ export function ItAssetImportDialog({
           issue_date: row.issue_date,
           ...(row.operational_status === "IN_MAINTENANCE"
             ? {
-              maintenance_reason: row.maintenance_reason,
-              expected_duration_days: 7,
-            }
+                expected_duration_days: 7,
+                maintenance_reason: row.maintenance_reason || "excel_import",
+              }
             : {}),
         });
       }
@@ -706,7 +711,13 @@ export function ItAssetImportDialog({
       }
       onImported();
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : "Import failed");
+      setError(
+        err instanceof ApiClientError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Import failed",
+      );
     } finally {
       setBusy(false);
     }
@@ -732,10 +743,6 @@ export function ItAssetImportDialog({
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div>
             <h2 className="text-lg font-semibold">Import assets from Excel</h2>
-            <p className="text-sm text-muted-foreground">
-              Asset codes are generated automatically. Location must match a name from Assets →
-              Locations (case-insensitive). If missing, add it there first, then re-import.
-            </p>
           </div>
           <Button
             type="button"
@@ -759,7 +766,7 @@ export function ItAssetImportDialog({
               onClick={() => downloadItAssetImportTemplate(assetTypes)}
             >
               <Download className="mr-2 size-4" />
-              Download template
+              Download Template
             </Button>
             <Button
               type="button"
@@ -802,7 +809,7 @@ export function ItAssetImportDialog({
             <div
               className={cn(
                 "rounded-lg border px-4 py-3 text-sm",
-                summary.failed > 0
+                summary.failed > 0 || summary.imported === 0
                   ? "border-amber-200 bg-amber-50 text-amber-950"
                   : "border-emerald-200 bg-emerald-50 text-emerald-950",
               )}
@@ -815,13 +822,25 @@ export function ItAssetImportDialog({
                 {summary.imported} imported · {summary.failed} failed · {summary.duplicates}{" "}
                 duplicates · {summary.skipped} skipped
               </p>
-              {summary.rows.some((r) => r.outcome === "failed" && r.reason) ? (
+              {summary.rows.some(
+                (r) =>
+                  Boolean(r.reason) &&
+                  (r.outcome === "failed" ||
+                    r.outcome === "duplicate" ||
+                    r.outcome === "skipped"),
+              ) ? (
                 <ul className="mt-2 list-inside list-disc text-xs">
                   {summary.rows
-                    .filter((r) => r.outcome === "failed" && r.reason)
+                    .filter(
+                      (r) =>
+                        Boolean(r.reason) &&
+                        (r.outcome === "failed" ||
+                          r.outcome === "duplicate" ||
+                          r.outcome === "skipped"),
+                    )
                     .map((r) => (
-                      <li key={r.row_number}>
-                        Row {r.row_number}: {r.reason}
+                      <li key={`${r.outcome}-${r.row_number}`}>
+                        Row {r.row_number} ({r.outcome}): {r.reason}
                       </li>
                     ))}
                 </ul>
@@ -834,16 +853,11 @@ export function ItAssetImportDialog({
               <table className="min-w-full text-sm">
                 <thead className="bg-muted/40 text-left">
                   <tr>
-                    <th className="px-2 py-2">#</th>
-                    <th className="px-2 py-2">Asset name</th>
-                    <th className="px-2 py-2">Type</th>
+                    <th className="px-2 py-2">Asset Name</th>
                     <th className="px-2 py-2">Configuration</th>
                     <th className="px-2 py-2">Charger</th>
                     <th className="px-2 py-2">Status</th>
-                    {validated.some((r) => r.operational_status === "IN_MAINTENANCE") ? (
-                      <th className="px-2 py-2">Maintenance reason</th>
-                    ) : null}
-                    <th className="px-2 py-2">Assignee</th>
+                    <th className="px-2 py-2">Assigned</th>
                     <th className="px-2 py-2">Employee ID</th>
                     <th className="px-2 py-2">Location</th>
                     <th className="px-2 py-2">Validation</th>
@@ -852,21 +866,20 @@ export function ItAssetImportDialog({
                 <tbody>
                   {validated.map((row) => (
                     <tr key={row.row_number} className="border-t border-border/60">
-                      <td className="px-2 py-1.5 text-muted-foreground">{row.row_number}</td>
                       <td className="px-2 py-1.5 font-medium">{row.asset_name}</td>
-                      <td className="px-2 py-1.5 text-xs">{row.asset_type || "-"}</td>
                       <td className="max-w-[10rem] truncate px-2 py-1.5 text-xs" title={row.configuration ?? undefined}>
                         {row.configuration ?? "-"}
                       </td>
                       <td className="px-2 py-1.5 font-mono text-xs">{row.charger_serial ?? "-"}</td>
-                      <td className="px-2 py-1.5 text-xs">{row.operational_status}</td>
-                      {validated.some((r) => r.operational_status === "IN_MAINTENANCE") ? (
-                        <td className="max-w-[12rem] truncate px-2 py-1.5 text-xs" title={row.maintenance_reason ?? undefined}>
-                          {row.operational_status === "IN_MAINTENANCE"
-                            ? row.maintenance_reason || "—"
-                            : "—"}
-                        </td>
-                      ) : null}
+                      <td className="px-2 py-1.5 text-xs">
+                        {row.operational_status === "READY_TO_MOVE"
+                          ? "In Stock"
+                          : row.operational_status === "IN_MAINTENANCE"
+                            ? "In Maintenance"
+                            : row.operational_status === "ASSIGNED"
+                              ? "Assigned"
+                              : row.operational_status}
+                      </td>
                       <td className="px-2 py-1.5 text-xs">{row.assignee_name ?? "-"}</td>
                       <td className="px-2 py-1.5 font-mono text-xs">
                         {row.employee_code ?? "-"}

@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Package } from "lucide-react";
 
@@ -21,11 +21,10 @@ type MatchMode = "exact" | "prefix";
 
 /**
  * Docked Asset Management sidebar.
- * Top: IT / Non-IT domain switcher. Active domain expands workspace + nested Users.
+ * Top: IT / Non-IT domain switcher. Active domain expands workspace tabs.
  */
 export function AssetsModuleSidebar() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [isModuleAdmin, setIsModuleAdmin] = useState(false);
   const [domains, setDomains] = useState<string[]>([]);
   const [adminDomains, setAdminDomains] = useState<string[]>([]);
@@ -56,14 +55,10 @@ export function AssetsModuleSidebar() {
     };
   }, []);
 
-  const activeDomain: AssetDomainKey | null = useMemo(() => {
-    if (pathname.startsWith("/assets/users")) {
-      const q = (searchParams.get("domain") || "").toUpperCase();
-      if (q === "IT" || q === "NON_IT") return q;
-      return "IT";
-    }
-    return activeAssetDomainFromPath(pathname);
-  }, [pathname, searchParams]);
+  const activeDomain: AssetDomainKey | null = useMemo(
+    () => activeAssetDomainFromPath(pathname),
+    [pathname],
+  );
 
   const gatedNav = useMemo(() => {
     if (!accessLoaded) {
@@ -98,13 +93,6 @@ export function AssetsModuleSidebar() {
     if (item.href === "/assets" && item.title === "IT Assets") return activeDomain === "IT";
     if (item.href === "/assets/non-it" && item.title === "Non-IT Assets") {
       return activeDomain === "NON_IT";
-    }
-    if (item.href.startsWith("/assets/users")) {
-      return (
-        pathname.startsWith("/assets/users") &&
-        (searchParams.get("domain") || "IT").toUpperCase() ===
-          (item.href.includes("NON_IT") ? "NON_IT" : "IT")
-      );
     }
     return isAssetNavActive(
       pathname,

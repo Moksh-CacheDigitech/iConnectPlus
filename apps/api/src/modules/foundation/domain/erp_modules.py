@@ -139,14 +139,18 @@ def assignment_module_keys_for_permission(permission_code: str) -> list[str]:
     """``sec_user_module`` keys that unlock this permission for non-role users.
 
     Direct module key first; HRMS assignees also unlock nested workspace modules.
+    Assets Configuration → Departments manages ``organization.department:*``.
     """
     key = module_key_for_permission_code(permission_code)
     if key is None:
         return []
+    keys: list[str] = [key]
     if key == "hr" or key in HRMS_NESTED_MODULE_KEYS:
         # Deduplicate while keeping stable order for tests / debugging.
-        return list(dict.fromkeys([key, "hr"]))
-    return [key]
+        keys = list(dict.fromkeys([*keys, "hr"]))
+    if permission_code.startswith("organization.department:"):
+        keys = list(dict.fromkeys([*keys, "assets"]))
+    return keys
 
 
 def has_platform_module_access(user_type: str, role_codes: list[str] | None = None) -> bool:

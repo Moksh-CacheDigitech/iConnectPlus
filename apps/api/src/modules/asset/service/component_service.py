@@ -571,6 +571,22 @@ class AssetComponentService:
             detached.append(self._enrich_row(ctx, updated))
         return detached
 
+    def dispose_active_for_parent(
+        self,
+        ctx: TenantContext,
+        parent_asset_id: UUID,
+        *,
+        reason: str = "parent_assignment_return_dispose",
+    ) -> list[dict]:
+        """Dispose every active component on a parent before the parent is disposed.
+
+        Covers lightweight accessories (chargers, etc.) and linked child assets.
+        Call after assignment component reconcile so ISSUED lines no longer block.
+        """
+        del reason  # call-site context only; dispose() owns the audit trail
+        active = self._repo.list_by_asset(ctx, parent_asset_id, include_inactive=False)
+        return [self.dispose(ctx, row.id) for row in active]
+
     def _enrich_row(self, ctx: TenantContext, row: AstAssetComponent | None) -> dict:
         if row is None:
             raise NotFoundException("Component not found")

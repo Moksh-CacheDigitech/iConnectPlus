@@ -245,9 +245,6 @@ export function AssetTypesWorkspace() {
             <CardTitle className="text-sm font-semibold tracking-tight">
               {editingId ? "Edit asset type" : "Add asset type"}
             </CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Types drive Add Asset and inventory filters. Hardware fields appear when enabled.
-            </p>
           </CardHeader>
           <CardContent className="space-y-4 p-5 md:p-6">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -282,40 +279,28 @@ export function AssetTypesWorkspace() {
               </div>
             </div>
 
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/70 bg-muted/10 px-3.5 py-3 transition-colors duration-200 hover:border-[#0369A1]/40">
+            <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-border/70 bg-muted/10 px-3.5 py-3 transition-colors duration-200 hover:border-[#0369A1]/40">
               <input
                 type="checkbox"
-                className="mt-1 size-4 cursor-pointer rounded border-input"
+                className="size-4 cursor-pointer rounded border-input"
                 checked={requiresHardware}
                 onChange={(e) => setRequiresHardware(e.target.checked)}
                 disabled={saving}
               />
-              <span>
-                <span className="block text-sm font-semibold text-foreground">
-                  Requires hardware configuration
-                </span>
-                <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
-                  Show processor, generation, RAM, and storage on Add Asset for this type.
-                </span>
+              <span className="text-sm font-semibold text-foreground">
+                Requires hardware configuration
               </span>
             </label>
 
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/70 bg-muted/10 px-3.5 py-3 transition-colors duration-200 hover:border-[#0369A1]/40">
+            <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-border/70 bg-muted/10 px-3.5 py-3 transition-colors duration-200 hover:border-[#0369A1]/40">
               <input
                 type="checkbox"
-                className="mt-1 size-4 cursor-pointer rounded border-input"
+                className="size-4 cursor-pointer rounded border-input"
                 checked={eligibleAsComponent}
                 onChange={(e) => setEligibleAsComponent(e.target.checked)}
                 disabled={saving}
               />
-              <span>
-                <span className="block text-sm font-semibold text-foreground">
-                  Eligible as component
-                </span>
-                <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
-                  Allow assets of this type to be attached as components of another asset.
-                </span>
-              </span>
+              <span className="text-sm font-semibold text-foreground">Eligible as component</span>
             </label>
 
             <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border/50 pt-4">

@@ -33,6 +33,23 @@ class SiteLocationService:
         self._scope = AssetScopeValidator(db)
         self._audit = PlatformAuditFacade(db)
 
+    def _company_for_catalog(
+        self, ctx: TenantContext, company_id: UUID | None
+    ) -> UUID:
+        """Concrete company for location/building catalog lists.
+
+        Platform/module-wide list resolution may return None; the add-asset
+        dropdown still needs one company — prefer session, then org scope.
+        """
+        cid = self._scope.resolve_list_company_id(ctx, company_id)
+        if cid is not None:
+            return cid
+        if ctx.company_id is not None:
+            return ctx.company_id
+        if ctx.scoped_company_ids:
+            return ctx.scoped_company_ids[0]
+        return self._scope.resolve_company_id(ctx, company_id)
+
     def list_locations(
         self,
         ctx: TenantContext,
@@ -41,7 +58,7 @@ class SiteLocationService:
         search: str | None = None,
     ) -> list[dict]:
         ensure_site_read(ctx, self._db)
-        cid = self._scope.resolve_list_company_id(ctx, company_id)
+        cid = self._company_for_catalog(ctx, company_id)
         return [self._loc_dict(r) for r in self._locs.list_rows(ctx, cid, search=search)]
 
     def create_location(self, ctx: TenantContext, **fields) -> dict:
@@ -142,7 +159,7 @@ class SiteLocationService:
         search: str | None = None,
     ) -> list[dict]:
         ensure_site_read(ctx, self._db)
-        cid = self._scope.resolve_list_company_id(ctx, company_id)
+        cid = self._company_for_catalog(ctx, company_id)
         return [
             self._bldg_dict(r)
             for r in self._bldgs.list_rows(

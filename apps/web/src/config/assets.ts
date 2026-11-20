@@ -2,14 +2,11 @@
  * Asset Management — domain-picker sidebar + per-domain workspace nav.
  *
  * Top level: IT Assets | Non-IT Assets.
- * Active domain expands its workspace tabs; Users nests at the end when
- * the viewer is a domain admin (or module admin).
+ * Active domain expands its workspace tabs.
  */
 
 import type { LucideIcon } from "lucide-react";
 import {
-  ArrowLeftRight,
-  BarChart3,
   Boxes,
   ClipboardCheck,
   FileText,
@@ -25,7 +22,6 @@ import {
   Tags,
   Trash2,
   UserCheck,
-  Users,
   Wrench,
 } from "lucide-react";
 
@@ -41,7 +37,7 @@ export type AssetManagementNavItem = {
   icon: LucideIcon;
   /** Match exact path or prefix for nested routes */
   match?: "exact" | "prefix";
-  /** Nested Users tab — shown only for domain/module admins */
+  /** Shown only for domain/module admins (e.g. Non-IT Types/Locations) */
   requiresDomainAdmin?: boolean;
 };
 
@@ -90,9 +86,6 @@ export function activeAssetDomainFromPath(pathname: string): AssetDomainKey | nu
   if (!pathname.startsWith("/assets")) return null;
   if (pathname === "/assets/non-it" || pathname.startsWith("/assets/non-it/")) {
     return "NON_IT";
-  }
-  if (pathname.startsWith("/assets/users")) {
-    return null; // resolved via ?domain= in sidebar
   }
   return "IT";
 }
@@ -167,7 +160,6 @@ export const itAssetWorkspaceNav: AssetManagementNavGroup[] = [
     items: [
       { title: "Asset Types", href: "/assets/asset-types", icon: Tags },
       { title: "Locations", href: "/assets/locations", icon: MapPin },
-      { title: "Departments", href: "/assets/departments", icon: UserCheck },
     ],
   },
   {
@@ -176,7 +168,6 @@ export const itAssetWorkspaceNav: AssetManagementNavGroup[] = [
     items: [
       { title: "Asset Assignment", href: "/assets/asset-assignments", icon: UserCheck },
       { title: "DC Challan", href: "/assets/asset-dc-challans", icon: ScrollText },
-      { title: "Transfers", href: "/assets/asset-transfers", icon: ArrowLeftRight },
       { title: "Maintenance", href: "/assets/asset-maintenances", icon: Wrench },
     ],
   },
@@ -191,19 +182,11 @@ export const itAssetWorkspaceNav: AssetManagementNavGroup[] = [
     items: [
       { title: "Components", href: "/assets/asset-components", icon: Boxes },
       { title: "Documents", href: "/assets/asset-documents", icon: FileText },
-      { title: "Reports", href: "/assets/reports", icon: BarChart3 },
-      {
-        title: "Users",
-        href: "/assets/users?domain=IT",
-        icon: Users,
-        match: "prefix",
-        requiresDomainAdmin: true,
-      },
     ],
   },
 ];
 
-/** Non-IT workspace (dashboard + inventory + types + locations + nested Users). */
+/** Non-IT workspace (dashboard + inventory + types + locations). */
 export const nonItAssetWorkspaceNav: AssetManagementNavGroup[] = [
   {
     title: "Non-IT Assets",
@@ -235,13 +218,6 @@ export const nonItAssetWorkspaceNav: AssetManagementNavGroup[] = [
         match: "prefix",
         requiresDomainAdmin: true,
       },
-      {
-        title: "Users",
-        href: "/assets/users?domain=NON_IT",
-        icon: Users,
-        match: "prefix",
-        requiresDomainAdmin: true,
-      },
     ],
   },
 ];
@@ -262,7 +238,7 @@ export type AssetNavAccess = {
   activeDomain: AssetDomainKey | null;
 };
 
-/** Build sidebar: domain switcher + active domain workspace (Users if admin). */
+/** Build sidebar: domain switcher + active domain workspace. */
 export function buildAssetSidebarNav(access: AssetNavAccess): AssetManagementNavGroup[] {
   const domainSet = new Set(access.domains.map((d) => d.toUpperCase()));
   const adminSet = new Set(access.adminDomains.map((d) => d.toUpperCase()));
@@ -290,11 +266,11 @@ export function buildAssetSidebarNav(access: AssetNavAccess): AssetManagementNav
 
   const workspace =
     active === "NON_IT" ? nonItAssetWorkspaceNav : itAssetWorkspaceNav;
-  const showUsers = canAdmin(active);
+  const showAdminItems = canAdmin(active);
 
   for (const group of workspace) {
     const items = group.items.filter((item) => {
-      if (item.requiresDomainAdmin) return showUsers;
+      if (item.requiresDomainAdmin) return showAdminItems;
       return true;
     });
     if (items.length === 0) continue;
@@ -334,9 +310,9 @@ export const assetsWorkspaceGroups: AssetsWorkspaceGroup[] = [
   {
     key: "configuration",
     title: "Asset Configuration",
-    description: "Types, locations, and departments",
+    description: "Types and locations",
     icon: Tags,
-    resourceKeys: ["asset-types", "locations", "departments"],
+    resourceKeys: ["asset-types", "locations"],
   },
   {
     key: "operations",
@@ -436,12 +412,6 @@ export const assetsQuickLinks = [
     href: "/assets/assets",
     description: "Search and manage register",
     icon: Package,
-  },
-  {
-    title: "Transfers",
-    href: "/assets/asset-transfers",
-    description: "Move custody or branch",
-    icon: ArrowLeftRight,
   },
   {
     title: "Maintenance",
