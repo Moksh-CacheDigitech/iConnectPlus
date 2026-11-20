@@ -9,7 +9,6 @@ import {
   Handshake,
   LayoutDashboard,
   ListTodo,
-  Settings,
   Target,
   UserCog,
   UserPlus,
@@ -23,7 +22,7 @@ import {
   setCrmSidebarFocus,
   type CrmSidebarFocus,
 } from "@/lib/crm-sidebar-focus";
-import { canManageModuleUsers, isErpAdmin } from "@/lib/module-access";
+import { canManageModuleUsers } from "@/lib/module-access";
 import { useAuthUser } from "@/hooks/use-auth-user";
 import { useCrmSettingsEffective } from "@/hooks/use-crm-settings";
 
@@ -117,7 +116,6 @@ export function CrmSidebar() {
   const { settings } = useCrmSettingsEffective();
 
   const isCrmAdmin = canManageModuleUsers("crm", adminModuleKeys, user?.userType);
-  const erpAdmin = isErpAdmin(user?.userType);
 
   const navItems = useMemo(() => {
     const paneVisibility = new Map(
@@ -133,14 +131,8 @@ export function CrmSidebar() {
         items.push({ title: "Users", href: "/crm/users", icon: UserCog });
       }
     }
-    if (erpAdmin) {
-      const settingsVisible = !paneVisibility.size || paneVisibility.get("/crm/settings") !== false;
-      if (settingsVisible) {
-        items.push({ title: "Settings", href: "/crm/settings", icon: Settings });
-      }
-    }
     return items;
-  }, [erpAdmin, isCrmAdmin, settings]);
+  }, [isCrmAdmin, settings]);
 
   return (
     <ModuleSidebar
