@@ -6,6 +6,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
   Building2,
+  GitBranch,
   Handshake,
   LayoutDashboard,
   ListTodo,
@@ -54,6 +55,7 @@ export const CRM_NAV: readonly CrmNavItem[] = [
   { title: "Company", href: "/crm/companies", icon: Building2 },
   { title: "Leads", href: "/crm/leads", icon: UserPlus },
   { title: "Opportunities", href: "/crm/opportunities", icon: Target },
+  { title: "Timeline", href: "/crm/timeline", icon: GitBranch },
 ];
 
 export function isCrmAdminOnlyHref(href: string): boolean {

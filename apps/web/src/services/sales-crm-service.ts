@@ -906,6 +906,55 @@ export async function getOpportunityTimeline(id: string): Promise<OpportunityTim
   return unwrap(await apiClient<OpportunityTimeline>(`${CRM_OPPORTUNITIES_API}/${id}/timeline`));
 }
 
+// ── Unified deal timeline (lead → OVF → SCM → PO → delivery → project) ──
+
+const CRM_DEAL_TIMELINE_API = "/crm/deal-timeline";
+
+export type DealTimelinePhase =
+  | "crm"
+  | "ovf"
+  | "scm"
+  | "delivery"
+  | "project"
+  | "completed"
+  | "lost";
+
+export type DealTimelineListItem = {
+  opportunity_id: string;
+  opportunity_code: string | null;
+  opportunity_name: string | null;
+  customer_name: string | null;
+  account_name: string | null;
+  stage: string | null;
+  status: string | null;
+  phase: DealTimelinePhase;
+  timeline_status: string;
+  deal_won: boolean;
+  updated_at: string | null;
+};
+
+export type DealTimeline = {
+  opportunity_id: string;
+  opportunity_code: string | null;
+  opportunity_name: string | null;
+  customer_name: string | null;
+  timeline_status: string;
+  events: OpportunityTimelineEvent[];
+};
+
+export async function listDealTimelines(params?: {
+  company_id?: string;
+}): Promise<DealTimelineListItem[]> {
+  const res = await apiClient<DealTimelineListItem[]>(CRM_DEAL_TIMELINE_API, { query: params });
+  return asArray(res.data);
+}
+
+export async function getDealTimeline(opportunityId: string): Promise<DealTimeline> {
+  return unwrap(
+    await apiClient<DealTimeline>(`${CRM_DEAL_TIMELINE_API}/${opportunityId}`),
+  );
+}
+
 
 export async function applyOpportunityAction(
   id: string,

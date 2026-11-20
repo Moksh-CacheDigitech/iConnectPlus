@@ -2236,6 +2236,30 @@ class OpportunityTimelineResponse(BaseModel):
     events: list[OpportunityTimelineEventResponse]
 
 
+class DealTimelineListItem(BaseModel):
+    opportunity_id: UUID
+    opportunity_code: str | None = None
+    opportunity_name: str | None = None
+    customer_name: str | None = None
+    account_name: str | None = None
+    stage: str | None = None
+    status: str | None = None
+    # Coarse lifecycle phase: crm | ovf | scm | delivery | project | completed | lost
+    phase: str
+    timeline_status: str
+    deal_won: bool = False
+    updated_at: datetime | None = None
+
+
+class DealTimelineResponse(BaseModel):
+    opportunity_id: UUID
+    opportunity_code: str | None = None
+    opportunity_name: str | None = None
+    customer_name: str | None = None
+    timeline_status: str
+    events: list[OpportunityTimelineEventResponse]
+
+
 class BlueprintActionRequest(BaseModel):
     """Generic action payload - fields are action-specific and all optional.
 
